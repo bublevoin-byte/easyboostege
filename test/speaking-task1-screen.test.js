@@ -11,9 +11,9 @@ window.__speakingScreen={spOpen,spMicCheck,spPrep,spRec,spFinish,spPlay,spComple
 
 test('speaking evaluation sends only a server reference and preserves needs_retry as unscored', () => {
   const evaluation = rawSource.slice(rawSource.indexOf('async function spEval'), rawSource.indexOf('function spShowEval'));
-  assert.match(evaluation, /sessionId:SP\.session\.id/u);
+  assert.match(evaluation, /sessionId:evaluationSessionId/u);
   assert.doesNotMatch(evaluation, /contentRef/u);
-  assert.match(evaluation, /SP\.pronunciationUploadCache/u);
+  assert.match(evaluation, /evaluationView\.pronunciationUploadCache/u);
   assert.match(evaluation, /cachedUpload\.key/u,
     'an interrupted official upload must retry with the same idempotency key');
   assert.doesNotMatch(evaluation, /assignment:spAssignment/u);
@@ -21,8 +21,10 @@ test('speaking evaluation sends only a server reference and preserves needs_retr
     evaluation.indexOf("d.status==='needs_retry'") < evaluation.indexOf('clampScore'),
     'retry must be handled before a nullable score can be clamped to zero',
   );
-  assert.match(evaluation, /d\.status==='needs_retry'.*SP\.pronunciationUploadCache=null.*btn\.style\.display='none'/su,
+  assert.match(evaluation, /d\.status==='needs_retry'.*evaluationView\.pronunciationUploadCache=null.*spFinishEvaluationView\(btn\)/su,
     'a retry verdict requires a new recording instead of replaying the same evaluation');
+  assert.match(rawSource, /function spFinishEvaluationView\(btn\).*btn\.hidden=true/su,
+    'the spent assessment action is removed semantically without presentation style mutation');
   assert.doesNotMatch(evaluation, /Оценить ещё раз/u);
 });
 

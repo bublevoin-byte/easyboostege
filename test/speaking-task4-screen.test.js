@@ -106,7 +106,8 @@ test('task 4 screen preloads the responsive accessible photo pair before its 150
   assert.deepEqual(events, ['assignment', 'asset-ready']);
   assert.match(area.innerHTML, /<img[^>]+loading="lazy"[^>]+decoding="async"/u);
   assert.match(area.innerHTML, /alt="Two photographs comparing ways to learn new skills\."/u);
-  assert.match(area.innerHTML, /width:100%/u);
+  assert.match(area.innerHTML, /class="speaking-photo-pair"/u);
+  assert.doesNotMatch(area.innerHTML, /<img[^>]+style=/u);
   await screen.spMicCheck({ disabled: false });
   screen.spPrep();
   assert.equal(screen.getState().left, 150);
@@ -118,7 +119,8 @@ test('task 4 screen preloads the responsive accessible photo pair before its 150
   await screen.spCompleteTask4('steady', { disabled: false });
   assert.equal(screen.getState().task4Completed, true);
   assert.equal(context.S.speakingTask4SessionId, undefined);
-  assert.equal(/AI|sample|transcript/iu.test(area.innerHTML), false);
+  const visibleCopy = area.innerHTML.replace(/<[^>]*>/gu, ' ');
+  assert.equal(/\bAI\b|\bsample\b|\btranscript\b/iu.test(visibleCopy), false);
   assert.deepEqual(JSON.parse(JSON.stringify(requests)), [
     { path: '/api/v1/speaking/task-4/sessions', body: {} },
     { path: `/api/v1/speaking/task-4/sessions/${task4Session().id}/complete`, body: {

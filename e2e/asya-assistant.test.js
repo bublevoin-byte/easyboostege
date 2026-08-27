@@ -22,9 +22,16 @@ let temporaryDirectory;
 try {
   temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'asya-assistant-'));
   const dataFile = path.join(temporaryDirectory, 'data.json');
+  const now = Date.now();
   await fs.writeFile(dataFile, JSON.stringify({
-    users: { [username]: { created: Date.now(), sub_until: Date.now() + 86_400_000 } },
+    users: { [username]: { created: now, sub_until: now + 86_400_000 } },
     progress: { [username]: {} },
+    speaking_accent_profiles: {
+      [username]: {
+        username, locale: 'en-GB', revision: 1, source: 'manual',
+        effective_at: new Date(now).toISOString(), calibration_used: false,
+      },
+    },
   }), 'utf8');
   const port = await availablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -136,6 +143,8 @@ try {
     window.tab('scr9');
   });
   await page.locator('#scr9.on').waitFor({ state: 'visible' });
+  await page.locator('#speaking_pronunciation_status').waitFor({ state: 'visible', timeout: 8_000 });
+  await launcher.waitFor({ state: 'visible', timeout: 8_000 });
   await launcher.press('Enter');
   await assistant.waitFor({ state: 'visible' });
   if (!await assistant.locator('#asya-disclosure').isChecked()) await assistant.locator('#asya-disclosure').check();

@@ -207,11 +207,13 @@ function installAsyaAssistant({
   root.id = 'asya-assistant';
   root.className = 'asya-assistant';
   root.hidden = true;
+  root.dataset.state = 'off';
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-modal', 'true');
   root.setAttribute('aria-labelledby', 'asya-title');
-  root.innerHTML = `<button class="asya-assistant__backdrop" type="button" aria-label="Закрыть Асю"></button>
-    <section class="asya-assistant__panel aisy-surface">
+  root.setAttribute('aria-busy', 'false');
+  root.innerHTML = `<button class="asya-assistant__backdrop" type="button" tabindex="-1" aria-label="Закрыть Асю"></button>
+    <section class="asya-assistant__panel aisy-surface" aria-busy="false">
       <header class="asya-assistant__header">
         <span class="asya-assistant__mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M4 26c5-13 10-13 15 0s10 13 15 0 8-13 10 0"/><path d="M4 18c5-8 10-8 15 0s10 8 15 0 8-8 10 0"/></svg></span>
         <div><p class="asya-assistant__eyebrow">Aisy.space</p><h2 id="asya-title">Ася</h2></div>
@@ -293,11 +295,17 @@ function installAsyaAssistant({
 
   function render() {
     context = contextNow();
-    stateNode.dataset.state = conversation.state;
+    const visualState = bridgePending ? 'connecting' : conversation.state;
+    root.dataset.state = visualState;
+    root.setAttribute('aria-busy', String(bridgePending));
+    root.querySelector('.asya-assistant__panel')?.setAttribute('aria-busy', String(bridgePending));
+    stateNode.dataset.state = visualState;
+    stateNode.setAttribute('aria-busy', String(bridgePending));
     stateNode.textContent = stateLabel();
     contextNode.textContent = contextLabel();
     disclosure.checked = conversation.disclosureAccepted;
     microphone.disabled = bridgePending || !conversation.disclosureAccepted;
+    microphone.setAttribute('aria-busy', String(bridgePending));
     microphone.setAttribute('aria-pressed', String(conversation.microphoneEnabled));
     microphone.textContent = conversation.microphoneEnabled ? 'Выключить микрофон' : 'Открыть голосовой разбор';
     armTimer();
@@ -390,8 +398,10 @@ function installAsyaAssistant({
   function trapFocus(event) {
     if (event.key === 'Escape') { event.preventDefault(); close('finish'); return; }
     if (event.key !== 'Tab') return;
-    const controls = [...root.querySelectorAll('button,input')]
+    const panel = root.querySelector('.asya-assistant__panel');
+    const controls = [...(panel?.querySelectorAll('button,input,select,a[href],textarea') || [])]
       .filter((control) => !control.disabled && control.offsetParent !== null);
+    if (!controls.length) return;
     const first = controls[0];
     const last = controls.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }

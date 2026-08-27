@@ -197,11 +197,11 @@ try {
     await page.getByRole('button', { name: 'Готово — к записи' }).press('Enter');
     await page.getByRole('button', { name: 'Стоп — закончить запись' }).press('Enter');
     await page.getByText('Монолог записан').waitFor({ state: 'visible', timeout: 5_000 });
-    await page.getByRole('button', { name: '▶ Послушать монолог' }).press('Enter');
+    await page.getByRole('button', { name: 'Послушать монолог' }).press('Enter');
     await page.getByRole('button', { name: 'Нормально' }).press('Enter');
     await page.getByText('Тренировка задания 4 завершена').waitFor({ state: 'visible', timeout: 5_000 });
     const assessmentContrast = await page.getByRole('button', {
-      name: '✨ Оценить по критериям ЕГЭ',
+      name: 'Оценить по критериям ЕГЭ',
     }).evaluate((button) => {
       const channels = (value) => (value.match(/\d+(?:\.\d+)?/gu) || []).slice(0, 3).map(Number);
       const luminance = (rgb) => {
@@ -213,12 +213,17 @@ try {
       };
       const style = getComputedStyle(button);
       const foreground = luminance(channels(style.color));
-      return [...style.backgroundImage.matchAll(/rgb\(([^)]+)\)/gu)].map((match) => {
-        const background = luminance(channels(match[1]));
+      const gradientColors = [...style.backgroundImage.matchAll(/rgb\(([^)]+)\)/gu)]
+        .map((match) => match[1]);
+      const backgroundColors = gradientColors.length > 0
+        ? gradientColors
+        : [style.backgroundColor];
+      return backgroundColors.map((value) => {
+        const background = luminance(channels(value));
         return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
       });
     });
-    assert.equal(assessmentContrast.length, 2);
+    assert.equal(assessmentContrast.length, 1);
     assert.ok(
       assessmentContrast.every((ratio) => ratio >= 4.5),
       `individual assessment contrast ratios: ${assessmentContrast.join(', ')}`,

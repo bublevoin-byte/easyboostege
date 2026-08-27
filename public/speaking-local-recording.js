@@ -59,14 +59,22 @@ export function createSpeakingLocalRecorder(options = {}) {
   let playback = null;
   let stopTimer = null;
   let stopPromise = null;
+  let startPromise = null;
+  let lifecycleGeneration = 0;
+  let disposed = false;
 
   const microphoneState = () => Object.freeze({ status: micCheck, level: micLevel });
 
   async function checkMicrophone() {
+    if (disposed) throw recordingError('RECORDER_DISPOSED', 'Recorder is disposed');
     if (!mediaDevices?.getUserMedia) throw recordingError('MICROPHONE_UNAVAILABLE', 'Microphone is unavailable');
+    const generation = lifecycleGeneration;
     let checkStream;
     try {
       checkStream = await mediaDevices.getUserMedia({ audio: true });
+      if (disposed || generation !== lifecycleGeneration) {
+        throw recordingError('RECORDING_CANCELLED', 'Microphone check was cancelled');
+      }
       const live = checkStream.getAudioTracks?.().some((track) => track.readyState === 'live');
       if (!live) throw recordingError('MICROPHONE_NO_TRACK', 'No live microphone track');
       const measured = await sampleMicrophone(checkStream);
@@ -82,31 +90,53 @@ export function createSpeakingLocalRecorder(options = {}) {
     }
   }
 
-  async function start(maxSeconds) {
-    if (micCheck === 'skipped') throw recordingError('MIC_CHECK_REQUIRED', 'Check the microphone first');
-    if (!MediaRecorder || !mediaDevices?.getUserMedia) throw recordingError('RECORDER_UNAVAILABLE', 'Recording is unavailable');
-    if (recorder?.state && recorder.state !== 'inactive') throw recordingError('RECORDING_ACTIVE', 'Recording is already active');
-    maximumSeconds = Number(maxSeconds);
-    if (!Number.isFinite(maximumSeconds) || maximumSeconds <= 0) {
-      throw recordingError('RECORDING_LIMIT_INVALID', 'Recording limit is invalid');
+  function start(maxSeconds) {
+    if (startPromise) return startPromise;
+    if (disposed) return Promise.reject(recordingError('RECORDER_DISPOSED', 'Recorder is disposed'));
+    if (micCheck === 'skipped') return Promise.reject(recordingError('MIC_CHECK_REQUIRED', 'Check the microphone first'));
+    if (!MediaRecorder || !mediaDevices?.getUserMedia) return Promise.reject(recordingError('RECORDER_UNAVAILABLE', 'Recording is unavailable'));
+    if (recorder?.state && recorder.state !== 'inactive') return Promise.reject(recordingError('RECORDING_ACTIVE', 'Recording is already active'));
+    const limitSeconds = Number(maxSeconds);
+    if (!Number.isFinite(limitSeconds) || limitSeconds <= 0) {
+      return Promise.reject(recordingError('RECORDING_LIMIT_INVALID', 'Recording limit is invalid'));
     }
-    stopPromise = null;
-    stream = await mediaDevices.getUserMedia({ audio: true });
-    try {
-      const mimeType = preferredMimeType(MediaRecorder);
-      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      chunks = [];
-      recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
-      recorder.start();
-    } catch (error) {
-      stopStream(stream);
-      stream = null;
-      recorder = null;
-      chunks = [];
-      throw error;
-    }
-    startedAt = Number(now());
-    stopTimer = setTimeout(() => { void stop(); }, maximumSeconds * 1_000);
+    const generation = ++lifecycleGeneration;
+    const attempt = (async () => {
+      let acquiredStream = null;
+      try {
+        acquiredStream = await mediaDevices.getUserMedia({ audio: true });
+        if (disposed || generation !== lifecycleGeneration) {
+          stopStream(acquiredStream);
+          acquiredStream = null;
+          throw recordingError('RECORDING_CANCELLED', 'Recording start was cancelled');
+        }
+        maximumSeconds = limitSeconds;
+        stopPromise = null;
+        const mimeType = preferredMimeType(MediaRecorder);
+        const nextRecorder = mimeType
+          ? new MediaRecorder(acquiredStream, { mimeType })
+          : new MediaRecorder(acquiredStream);
+        stream = acquiredStream;
+        recorder = nextRecorder;
+        chunks = [];
+        recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+        recorder.start();
+        startedAt = Number(now());
+        stopTimer = setTimeout(() => { void stop(); }, maximumSeconds * 1_000);
+      } catch (error) {
+        stopStream(acquiredStream);
+        if (stream === acquiredStream) stream = null;
+        if (recorder?.state === 'inactive') recorder = null;
+        chunks = [];
+        throw error;
+      }
+    })();
+    startPromise = attempt;
+    attempt.then(
+      () => { if (startPromise === attempt) startPromise = null; },
+      () => { if (startPromise === attempt) startPromise = null; },
+    );
+    return attempt;
   }
 
   function stop() {
@@ -164,6 +194,8 @@ export function createSpeakingLocalRecorder(options = {}) {
   }
 
   function dispose() {
+    disposed = true;
+    lifecycleGeneration += 1;
     if (stopTimer != null) clearTimeout(stopTimer);
     playback?.pause?.();
     if (recorder?.state && recorder.state !== 'inactive') {
@@ -173,6 +205,7 @@ export function createSpeakingLocalRecorder(options = {}) {
     }
     stopStream(stream);
     stream = null;
+    recorder = null;
     chunks = [];
     stopPromise = null;
   }

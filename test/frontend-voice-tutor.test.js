@@ -5,6 +5,7 @@ import test from 'node:test';
 import { canStartVoiceTutor, eventForVoiceTutorState, voiceTutorButton } from '../public/voice-tutor-contract.js';
 
 const source = await fs.readFile(new URL('../public/voice-tutor.js', import.meta.url), 'utf8');
+const styles = await fs.readFile(new URL('../public/asya-assistant.css', import.meta.url), 'utf8');
 const loaderSource = await fs.readFile(new URL('../public/voice-tutor-loader.js', import.meta.url), 'utf8');
 const contractSource = await fs.readFile(new URL('../public/voice-tutor-contract.js', import.meta.url), 'utf8');
 const readingSource = await fs.readFile(new URL('../public/screens/reading.js', import.meta.url), 'utf8');
@@ -167,18 +168,48 @@ test('shared voice tutor sheet exposes microphone, transient captions, quota, ti
   assert.match(source, /sessionOperation/u);
   assert.match(source, /operationActive\(operation\)/u);
   assert.match(source, /pendingSessionKeys/u);
+  assert.match(source, /pendingKeyClaimedByAnotherOperation/u,
+    'a stale create response cannot finish a session claimed by a newer reopen');
+  assert.match(source, /releasePendingSessionKey\(fingerprint, createKey, operation\)/u,
+    'only the operation that owns a pending key may release it');
   assert.match(source, /postIdempotentWithNetworkRetry/u);
   assert.match(source, /error\?\.code !== 'NETWORK_ERROR'/u);
   assert.match(source, /finishCancelledSession\(result\)/u);
   assert.match(source, /updateProfileAccess\(await api\(\)\.post/u);
   assert.match(source, /stream\?\.getTracks\?\.\(\)\.forEach/u);
-  assert.match(source, /currentSession\.mode === 'voice'[\s\S]{0,120}form\.style\.display = 'none'/u);
+  assert.match(source, /form\.hidden = currentSession\.mode === 'voice' \|\| terminal/u);
+});
+
+test('voice tutor uses the Paper A stylesheet and exposes honest recovery states', () => {
+  assert.doesNotMatch(source, /createElement\('style'\)|style\.textContent|\.style\.display/u);
+  assert.match(source, /sheet\.dataset\.state = normalized/u);
+  assert.match(source, /setAttribute\('aria-busy', String\(busy\)\)/u);
+  for (const state of ['connecting', 'recovering', 'voice', 'text-fallback', 'quota', 'error']) {
+    assert.match(source, new RegExp(`['"]${state}['"]`, 'u'));
+    assert.match(styles, new RegExp(`data-state=["']${state}["']`, 'u'));
+  }
+  assert.match(source, /id="voiceTutorUseText"/u);
+  assert.match(source, /voiceTutorUseText'\)\.addEventListener\('click', \(\) => switchToFallback\('microphone_unavailable'\)\)/u);
+  assert.match(source, /const sessionId = currentSession\.session\.id;\s+const nonce = currentSession\.nonce;/u);
+  assert.match(source, /currentSession\?\.nonce === nonce/u);
+  const retrySource = source.slice(
+    source.indexOf('async function retryVoiceTutor'),
+    source.indexOf('async function switchToFallback'),
+  );
+  assert.match(retrySource, /openVoiceTutorError\(recovery\.details, recovery\)/u);
+  assert.doesNotMatch(retrySource, /randomUUID|idempotencyKeyFor/u);
+  assert.match(source, /recoveryEnvelope[\s\S]{0,180}recoveryEnvelope\.key/u);
+  assert.match(source, /Number\(value\?\.status\) === 429/u);
+  assert.match(styles, /--asya-semantic-accent:\s*var\(--aisy-color-selection\)/u);
+  assert.match(styles, /@media \(orientation: landscape\) and \(max-height: 420px\)/u);
+  assert.doesNotMatch(styles, /#[0-9a-f]{3,8}\b|rgba?\(/iu);
 });
 
 test('a discovery-required session requests and renders provisional trusted sources in the same sheet', () => {
   assert.match(source, /if \(result\.discovery_required\) await discoverMissingRule\(result, operation\)/u);
   assert.match(source, /discoverMissingRule[\s\S]*\/api\/v1\/voice-tutor\/rule-discoveries/u);
-  assert.match(source, /session_id:\s*result\.session\.id/u);
+  assert.match(source, /session_id:\s*context\.sessionId/u);
+  assert.match(source, /discoverMissingRule[\s\S]*claimInteraction\(context\)[\s\S]*interactionContextActive\(context\)/u);
   assert.match(source, /voiceTutorSources/u);
   assert.match(source, /result\?\.provisional/u);
   assert.match(source, /sourceLink\.textContent/u);

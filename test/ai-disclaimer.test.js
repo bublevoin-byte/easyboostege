@@ -114,11 +114,12 @@ test('the written review screen shows the server evaluation scope without replac
 
 test('the speaking review shows the same disclaimer from the shared constant', () => {
   assert.match(app, /ui\.escapeHtml\(ui\.AI_DISCLAIMER\)/u);
-  assert.match(app, /class="ai-disclaimer"/u);
+  assert.match(app, /class="[^"]*\bai-disclaimer\b[^"]*"/u,
+    'the shared disclaimer class may coexist with a screen-specific presentation class');
   assert.match(app, /speakingModule\.isExperimentalTask\(SP\.t\)/u, 'only free-response speaking tasks 3–4 carry the experimental warning');
   assert.match(
     normalize(app),
-    /d\.got\+' из '\+d\.max[\s\S]{0,1200}class="ai-disclaimer"/u,
+    /d\.got\+' из '\+d\.max[\s\S]{0,1200}class="[^"]*\bai-disclaimer\b[^"]*"/u,
     'the warning must be rendered immediately with the speaking score',
   );
   // Nobody may paste a second, drifting copy of the sentence into the application code.

@@ -268,20 +268,31 @@ try {
         const ttsRequest = page.waitForRequest((request) => request.url().includes('/api/v1/tts?'));
         await page.getByRole('button', { name: 'Начать запись', exact: true }).press('Enter');
         await ttsRequest;
+        const skip = page.getByRole('button', { name: 'Пропустить ответ' });
+        assert.equal(await skip.isDisabled(), true);
+        await page.waitForTimeout(100);
+        assert.deepEqual(task3RequestOrder, ['tts']);
+        assert.equal(await page.evaluate(() => window.__fullSpeakingRecorderStarts || 0), recorderStarts);
+        assert.equal(await page.evaluate(() => window.__fullSpeakingAudioPlays || 0), audioPlays);
         const stageRequest = page.waitForRequest((request) => request.url().includes('/api/v1/speaking/full-sessions/') && request.url().endsWith('/stage'));
-        const skip = page.getByRole('button', { name: 'Пропустить ответ' }).press('Enter');
-        await stageRequest;
         holdNextTts = false;
         releaseHeldTts?.();
         releaseHeldTts = null;
+        await stageRequest;
         await page.waitForTimeout(100);
         assert.equal(await page.evaluate(() => window.__fullSpeakingRecorderStarts || 0), recorderStarts);
-        assert.equal(await page.evaluate(() => window.__fullSpeakingAudioPlays || 0), audioPlays);
         holdNextStage = false;
         releaseHeldStage?.();
         releaseHeldStage = null;
-        await skip;
-        await page.getByText(/Вопрос прозвучит после запуска/u).waitFor({ state: 'visible' });
+        const stop = page.getByRole('button', { name: 'Стоп — закончить запись' });
+        await stop.waitFor({ state: 'visible', timeout: 5_000 });
+        assert.equal(await page.evaluate(() => window.__fullSpeakingRecorderStarts || 0), recorderStarts + 1);
+        assert.equal(await page.evaluate(() => window.__fullSpeakingAudioPlays || 0), audioPlays + 1);
+        await stop.press('Enter');
+        await skip.waitFor({ state: 'visible', timeout: 5_000 });
+        assert.equal(await skip.isDisabled(), false);
+        await skip.press('Enter');
+        await page.getByText(/Вопрос прозвучит после запуска/u).waitFor({ state: 'visible', timeout: 5_000 });
         continue;
       }
       if (response === 6) task3RequestOrder.length = 0;
@@ -335,19 +346,20 @@ try {
         const secondLum = luminance(second);
         return (Math.max(firstLum, secondLum) + 0.05) / (Math.min(firstLum, secondLum) + 0.05);
       };
-      const primaryContrast = [...document.querySelectorAll('#s9_area button')]
-        .filter((button) => getComputedStyle(button).backgroundImage.includes('linear-gradient'))
+      const primaryContrast = [...document.querySelectorAll('#scr9 button.speaking-action--primary:not([hidden])')]
         .flatMap((button) => {
           const style = getComputedStyle(button);
           const text = rgbChannels(style.color);
           const stops = [...style.backgroundImage.matchAll(/rgb\(([^)]+)\)/gu)]
             .map((match) => rgbChannels(match[1]));
-          return stops.map((stop) => contrast(text, stop));
+          const backgrounds = stops.length ? stops : [rgbChannels(style.backgroundColor)];
+          return backgrounds.filter((background) => background.length === 3)
+            .map((background) => contrast(text, background));
         });
       return {
         documentWidth: document.documentElement.scrollWidth,
         viewportWidth: innerWidth,
-        undersized: [...document.querySelectorAll('#s9_area button')].filter((button) => {
+        undersized: [...document.querySelectorAll('#scr9 button')].filter((button) => {
           const bounds = button.getBoundingClientRect();
           return bounds.width < 44 || bounds.height < 44;
         }).length,

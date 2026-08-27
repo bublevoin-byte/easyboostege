@@ -207,3 +207,66 @@ test('shared local recorder releases the microphone and blob URL when finalizati
   assert.equal(streams[1].track.stopped, true);
   assert.deepEqual(revoked, ['blob:failed-finalization']);
 });
+
+test('shared local recorder stops a microphone stream that resolves after disposal', async () => {
+  const checkStream = fakeStream();
+  const lateStream = fakeStream();
+  let resolveStart;
+  let requestCount = 0;
+  const recorders = [];
+  class TrackedMediaRecorder extends FakeMediaRecorder {
+    constructor(...args) { super(...args); recorders.push(this); }
+  }
+  const recorder = createSpeakingLocalRecorder({
+    mediaDevices: { getUserMedia() {
+      requestCount += 1;
+      if (requestCount === 1) return Promise.resolve(checkStream);
+      return new Promise((resolve) => { resolveStart = resolve; });
+    } },
+    MediaRecorder: TrackedMediaRecorder,
+    URL: { createObjectURL: () => 'blob:late', revokeObjectURL() {} },
+    Blob,
+    sampleMicrophone: async () => 0.2,
+    setTimeout: () => 1,
+    clearTimeout() {},
+  });
+
+  await recorder.checkMicrophone();
+  const starting = recorder.start(20);
+  recorder.dispose();
+  resolveStart(lateStream);
+
+  await assert.rejects(starting, (error) => error?.code === 'RECORDING_CANCELLED');
+  assert.equal(lateStream.track.stopped, true);
+  assert.equal(recorders.length, 0);
+});
+
+test('shared local recorder serializes concurrent start requests', async () => {
+  const checkStream = fakeStream();
+  const recordingStream = fakeStream();
+  let resolveStart;
+  let requestCount = 0;
+  const recorder = createSpeakingLocalRecorder({
+    mediaDevices: { getUserMedia() {
+      requestCount += 1;
+      if (requestCount === 1) return Promise.resolve(checkStream);
+      return new Promise((resolve) => { resolveStart = resolve; });
+    } },
+    MediaRecorder: FakeMediaRecorder,
+    URL: { createObjectURL: () => 'blob:serialized', revokeObjectURL() {} },
+    Blob,
+    sampleMicrophone: async () => 0.2,
+    setTimeout: () => 1,
+    clearTimeout() {},
+  });
+
+  await recorder.checkMicrophone();
+  const first = recorder.start(20);
+  const second = recorder.start(20);
+  assert.equal(first, second);
+  assert.equal(requestCount, 2);
+  resolveStart(recordingStream);
+  await first;
+  recorder.dispose();
+  assert.equal(recordingStream.track.stopped, true);
+});

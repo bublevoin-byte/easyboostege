@@ -100,6 +100,8 @@ test('assistant surface is contextual, token-driven, offline-safe and makes no p
   assert.match(source, /id="asya-microphone" class="aisy-button asya-assistant__microphone"/u);
   assert.match(source, /type="submit" class="aisy-button aisy-button--secondary"/u);
   assert.match(source, /id="asya-finish" class="aisy-button aisy-button--secondary asya-assistant__finish"/u);
+  assert.match(source, /const visualState = bridgePending \? 'connecting' : conversation\.state/u);
+  assert.match(source, /stateNode\.setAttribute\('aria-busy', String\(bridgePending\)\)/u);
   assert.match(source, /close\('finish', \{ restoreFocus: false \}\)/u);
   assert.match(source, /только в открытом приложении/iu);
   assert.match(source, /передаётся внешнему AI-провайдеру/iu);
@@ -110,6 +112,9 @@ test('assistant surface is contextual, token-driven, offline-safe and makes no p
   assert.match(styles, /padding-inline:\s*calc\(var\(--aisy-space-4\) \+ env\(safe-area-inset-left\)\)\s+calc\(var\(--aisy-space-4\) \+ env\(safe-area-inset-right\)\)/u);
   assert.doesNotMatch(styles, /padding:\s*(?:9|10|11|14|20)px|margin:\s*0 0 2px/u);
   assert.doesNotMatch(styles, /#[0-9a-f]{3,8}\b/iu);
+  assert.match(styles, /--asya-semantic-accent:\s*var\(--aisy-color-selection\)/u);
+  assert.match(styles, /asya-assistant__state\[data-state="connecting"\]/u);
+  assert.match(styles, /#frame\[data-speaking-dock-active="true"\] > \.asya-launcher\s*\{\s*display:\s*none/u);
   assert.match(main, /installAsyaLauncher/u);
   assert.doesNotMatch(main, /installAsyaAssistant/u);
   assert.match(launcher, /import\('\.\/asya-assistant\.js'\)/u);

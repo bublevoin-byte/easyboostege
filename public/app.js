@@ -1118,7 +1118,7 @@ function spSync(){if(!S)return;var sum=speakingModule.summary(S.spkScores,spSt()
   }else{
     setTxt('sub_speak',tot?('тренировок: '+tot):'устная часть · запись');
     setTxt('s9_sumline',tot?('Тренировок: '+tot+' · 4 задания'):'Четыре задания — как на экзамене');}
-  var bar=document.getElementById('s9_bar');if(bar)bar.style.width=Math.max(2,Math.min(100,S.prog.speak||0))+'%';
+  var bar=document.getElementById('s9_bar');if(bar){var progress=Math.max(0,Math.min(100,S.prog.speak||0));bar.style.width=Math.max(2,progress)+'%';var progressbar=bar.closest&&bar.closest('[role="progressbar"]');if(progressbar)progressbar.setAttribute('aria-valuenow',String(progress))}
   try{setTxt('m_speak',S.prog.speak);ringOff('ring_speak',113.1,S.prog.speak)}catch(e){}}
 registerStartHook(function(){return window.EasyBoostSpeaking?spSync():null});
 

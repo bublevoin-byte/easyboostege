@@ -7,7 +7,7 @@ import {registerRouteHook} from '../router.js';
 import {presentPublicPlan} from '../commercial-copy.js';
 import {lPlayRaw,lStop} from '../tts.js';
 import {
-  S,SRV,TOKEN,WBTN,apiGet,apiMessage,apiPost,apiPostBinary,apiPut,generateAiContent,save,
+  S,SRV,TOKEN,apiGet,apiMessage,apiPost,apiPostBinary,apiPut,generateAiContent,save,
   setTxt,spSt,spSync,speakingModule,toast,ui,wDeco,
 } from '../app.js';
 import {adaptiveRuntimeSnapshot,completeAdaptiveServerAttempt,openAdaptivePlan} from '../adaptive-session-runtime.js';
@@ -57,10 +57,65 @@ const SP_SHEET={
 4:'<b>Скелет монолога (2,5–3 минуты):</b><br>1. Вступление: <i>I have found two photos for our project about…</i><br>2. Описание: <i>In the first photo we can see… In the second photo there is…</i><br>3. Общее: <i>Both photos show… / What these photos have in common is…</i><br>4. Различия: <i>The main difference is that… while…</i><br>5. Мнение: <i>As for me, I prefer… because…</i><br>6. Финал: <i>That is all I wanted to say.</i><br><b>Ловушка:</b> пропустил пункт плана — минус баллы за решение задачи.'};
 let SP=null,SP_rec=null,SP_chunks=[],SP_tm=null,SP_sheet=false,SP_TASK1_FLOW=null,SP_TASK2_FLOW=null,SP_TASK3_FLOW=null,SP_TASK4_FLOW=null;
 let SP_ACCENT=null,SP_ACCENT_SETUP=null,SP_CALIBRATION_CONSENT=null,SP_TARGETED_PRACTICE=null;
-function spAnim(n,d){ui.animate('s9_card',n,d)}
+let SP_VIEW_EPOCH=0;
+let SP_VIEW_CONTENT_ROOT=null;
+let SP_SETTINGS_BUSY=false,SP_SETTINGS_TOKEN=0;
+let SP_COMMIT_BUSY=false,SP_COMMIT_TOKEN=0,SP_COMMIT_LOCK=null;
+let SP_EVALUATION_BUSY=false,SP_EVALUATION_TOKEN=0,SP_EVALUATION_LOCK=null;
+function spRoute(){return document.getElementById('scr9')}
+function spUiState(){
+  if(SPE&&SPE.session){if(SPE.isRecording)return 'recording';if(SPE.session.phase==='preparing')return 'preparing';if(SPE.session.phase==='ready_to_submit')return 'ready-to-submit';if(SPE.recording)return 'playback';return SPE.session.phase||'ready'}
+  if(!SP)return 'ready';if(SP.evaluating)return 'processing';
+  var states={intro:'permission',prep:'preparing',rec:'recording',done:'playback',question:'permission',task2_prompt:'connecting',task2_review:'playback',task2_complete:'ready-to-evaluate',task3_prompt:'connecting',task3_review:'playback',task3_complete:'ready-to-evaluate',task4_review:'playback',task4_complete:'ready-to-evaluate'};
+  return states[SP.phase]||SP.phase||'ready'}
+function spNormalizeView(forcedState){
+  var area=document.getElementById('s9_area');if(!area||typeof area.querySelectorAll!=='function')return;
+  var route=spRoute();var state=forcedState||spUiState();if(route){route.dataset.speakingState=state;var routeMain=route.querySelector('.speaking-route');if(routeMain)routeMain.dataset.speakingState=state}area.dataset.speakingState=state;
+  area.querySelectorAll('.clayCard').forEach(function(card){card.classList.add('speaking-card')});
+  area.querySelectorAll('button.sq').forEach(function(button){
+    if(!button.matches('.speaking-choice,.speaking-rating-choice,.speaking-card-action,.speaking-inline-action,.speaking-media-action'))button.classList.add('speaking-control');
+    var action=button.getAttribute('onclick')||'';
+    if(/(?:sp|speFull)MicCheck/u.test(action)){
+      button.dataset.speakingAction='microphone-check';button.setAttribute('aria-pressed',String(Boolean((SP&&SP.mic)||(SPE&&SPE.micCheck==='passed'))));button.setAttribute('aria-describedby','speaking_mic_status')}
+    if(/(?:spRec|speFullStartRecording)/u.test(action))button.dataset.speakingAction='record';
+    if(/(?:spFinish|speFullStopRecording)/u.test(action))button.dataset.speakingAction='stop-recording';
+  });
+  var dock=document.getElementById('speaking_action_dock');if(!dock||typeof area.children==='undefined')return;
+  var contentRoot=Array.from(area.children).find(function(child){return !(child.matches&&child.matches('button.speaking-action'))&&!(child.classList&&child.classList.contains('speaking-action-stack'))})||null;
+  var freshRender=contentRoot!==SP_VIEW_CONTENT_ROOT;
+  var areaActions=Array.from(area.querySelectorAll('button.speaking-action'));
+  var dockActions=Array.from(dock.querySelectorAll('.speaking-action-stack > button.speaking-action'));
+  var frame=route&&route.closest('#frame');
+  if(!freshRender&&!areaActions.length){if(frame)frame.dataset.speakingDockActive=String(Boolean(dockActions.length));spFocusViewBoundary(area,route);return}
+  var actions=areaActions.length?areaActions:(freshRender?[]:dockActions);
+  dock.replaceChildren();
+  var stack=document.createElement('div');stack.className='speaking-action-stack';
+  actions.forEach(function(action){stack.append(action)});
+  var primaries=Array.from(stack.querySelectorAll('.speaking-action--primary'));
+  primaries.forEach(function(button,index){button.removeAttribute('id');button.classList.toggle(SP_CANONICAL_PRIMARY_CLASS,index===0)});if(primaries[0])primaries[0].id='s9_primary_action';
+  primaries.slice(1).forEach(function(button){button.classList.remove('speaking-action--primary');button.classList.add('speaking-action--secondary','aisy-button--secondary')});
+  var hasDockActions=Boolean(stack.children.length);if(hasDockActions){dock.append(stack);dock.hidden=false}else dock.hidden=true;SP_VIEW_CONTENT_ROOT=contentRoot;if(frame)frame.dataset.speakingDockActive=String(hasDockActions);
+  spFocusViewBoundary(area,route);
+}
+function spFocusViewBoundary(area,route){if(!route||!route.classList.contains('on'))return;var active=document.activeElement;var overlay=active&&active.closest&&active.closest('#asya-assistant:not([hidden]),#voiceTutorSheet.open');if(overlay)return;var activeInRoute=Boolean(active&&route.contains(active));var activeInvalid=activeInRoute&&Boolean(active.disabled||active.hidden||active.getAttribute&&active.getAttribute('aria-hidden')==='true'||active.closest&&active.closest('[hidden]'));if(activeInRoute&&!activeInvalid)return;if(!activeInRoute&&active&&active!==document.body&&active!==document.documentElement)return;var focusTarget=area.querySelector('[data-speaking-focus],#s9_card,[role="alert"],[role="status"]');if(focusTarget){focusTarget.tabIndex=-1;try{focusTarget.focus({preventScroll:true})}catch(_){focusTarget.focus()}}}
+function spSetSettingsBusy(busy){SP_SETTINGS_BUSY=Boolean(busy);var area=document.getElementById('s9_area');if(!area)return;if(area.setAttribute)area.setAttribute('aria-busy',String(SP_SETTINGS_BUSY));area.querySelectorAll('[data-speaking-setting]').forEach(function(control){control.disabled=SP_SETTINGS_BUSY})}
+function spCaptureRouteOperation(kind,token){var route=spRoute(),lock={kind:kind,token:token,route:route,routeBusy:null,controls:[]};if(!route)return lock;if(typeof route.getAttribute==='function')lock.routeBusy=route.getAttribute('aria-busy');if(typeof route.setAttribute==='function')route.setAttribute('aria-busy','true');if(typeof route.querySelectorAll==='function')route.querySelectorAll('button').forEach(function(control){var dataset=control.dataset||{};lock.controls.push({control:control,disabled:Boolean(control.disabled),ariaDisabled:typeof control.getAttribute==='function'?control.getAttribute('aria-disabled'):null,ariaBusy:typeof control.getAttribute==='function'?control.getAttribute('aria-busy'):null,busyData:dataset.busy,operationData:dataset.spOperationLock});control.disabled=true;if(typeof control.setAttribute==='function')control.setAttribute('aria-disabled','true');if(control.dataset)control.dataset.spOperationLock=kind+':'+token});return lock}
+function spClearRouteOperation(lock){if(!lock)return;lock.controls.forEach(function(snapshot){var control=snapshot.control;if(!control)return;control.disabled=snapshot.disabled;if(typeof control.setAttribute==='function'&&typeof control.removeAttribute==='function'){if(snapshot.ariaDisabled===null)control.removeAttribute('aria-disabled');else control.setAttribute('aria-disabled',snapshot.ariaDisabled);if(snapshot.ariaBusy===null)control.removeAttribute('aria-busy');else control.setAttribute('aria-busy',snapshot.ariaBusy)}if(control.dataset){if(typeof snapshot.busyData==='undefined')delete control.dataset.busy;else control.dataset.busy=snapshot.busyData;if(typeof snapshot.operationData==='undefined')delete control.dataset.spOperationLock;else control.dataset.spOperationLock=snapshot.operationData}});var route=lock.route;if(route&&typeof route.setAttribute==='function'&&typeof route.removeAttribute==='function'){if(lock.routeBusy===null)route.removeAttribute('aria-busy');else route.setAttribute('aria-busy',lock.routeBusy)}}
+function spClearCommitOperation(lock){spClearRouteOperation(lock);var status=document.getElementById('speaking_commit_status');if(status)status.remove()}
+function spClearActiveRouteOperations(){spClearCommitOperation(SP_COMMIT_LOCK);spClearRouteOperation(SP_EVALUATION_LOCK);SP_COMMIT_LOCK=null;SP_EVALUATION_LOCK=null;SP_COMMIT_BUSY=false;SP_EVALUATION_BUSY=false}
+function spBeginCommit(){if(SP_COMMIT_BUSY||SP_EVALUATION_BUSY)return null;SP_COMMIT_BUSY=true;var token=++SP_COMMIT_TOKEN;SP_COMMIT_LOCK=spCaptureRouteOperation('commit',token);var area=document.getElementById('s9_area');if(area&&typeof document.createElement==='function'&&typeof area.append==='function'){var status=document.createElement('div');status.id='speaking_commit_status';status.className='speaking-state';status.dataset.state='processing';status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.textContent='Сохраняем ответ…';area.append(status)}spNormalizeView('processing');return token}
+function spCommitCurrent(token,view){return token===SP_COMMIT_TOKEN&&SP===view}
+function spEndCommit(token){if(token!==SP_COMMIT_TOKEN)return;SP_COMMIT_BUSY=false;spClearCommitOperation(SP_COMMIT_LOCK);SP_COMMIT_LOCK=null}
+function spBeginEvaluation(view,btn){if(SP_EVALUATION_BUSY||SP_COMMIT_BUSY)return null;SP_EVALUATION_BUSY=true;var token=++SP_EVALUATION_TOKEN;SP_EVALUATION_LOCK=spCaptureRouteOperation('evaluation',token);if(btn){btn.dataset.busy='1';btn.setAttribute('aria-busy','true')}var box=document.getElementById('sp_evalbox');if(box)box.innerHTML='<div class="speaking-state" data-state="processing" role="status" aria-live="polite" aria-atomic="true"><strong>Готовим автоматическую оценку</strong><span>Не закрывай экран, пока записи привязываются к этой тренировке.</span></div>';spNormalizeView('processing');return token}
+function spEvaluationCurrent(token,view,sessionId){return token===SP_EVALUATION_TOKEN&&SP_EVALUATION_BUSY&&SP===view&&String(SP&&SP.session&&SP.session.id)===String(sessionId)}
+function spReleaseEvaluation(token){if(token!==SP_EVALUATION_TOKEN)return;SP_EVALUATION_BUSY=false;spClearRouteOperation(SP_EVALUATION_LOCK);SP_EVALUATION_LOCK=null}
+function spPromoteForwardAction(){var dock=document.getElementById('speaking_action_dock');if(!dock)return;var forward=dock.querySelector('[data-speaking-forward]:not([hidden])');if(!forward)return;dock.querySelectorAll('button.speaking-action').forEach(function(control){control.removeAttribute('id');control.classList.remove('speaking-action--primary',SP_CANONICAL_PRIMARY_CLASS);control.classList.add('speaking-action--secondary','aisy-button--secondary')});forward.classList.remove('speaking-action--secondary','aisy-button--secondary');forward.classList.add('speaking-action--primary',SP_CANONICAL_PRIMARY_CLASS);forward.id='s9_primary_action'}
+function spFinishEvaluationView(btn){if(btn){btn.hidden=true;btn.removeAttribute('aria-busy');delete btn.dataset.busy}spPromoteForwardAction();var box=document.getElementById('sp_evalbox');var result=box&&typeof box.querySelector==='function'?(box.querySelector('[role="alert"],[role="status"]')||box):null;if(result&&typeof result.focus==='function'){result.tabIndex=-1;try{result.focus({preventScroll:true})}catch(_){result.focus()}}}
+function spAnim(n,d){spNormalizeView();ui.animate('s9_card',n,d)}
 function spMime(){return speakingModule.preferredMimeType(window.MediaRecorder)}
 function spFmt(s){return speakingModule.formatTime(s)}
 function spStopAll(){clearInterval(SP_tm);SP_tm=null;
+  spClearActiveRouteOperations();SP_COMMIT_TOKEN++;SP_EVALUATION_TOKEN++;
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
   try{lStop()}catch(e){}}
 function spReleaseRecording(){if(SP&&SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}if(SP){SP.url=null;SP.blob=null;SP.pronunciationUploadCache=null}SP_chunks=[]}
@@ -80,57 +135,62 @@ function task4RecoveryPointerInvalid(error){return Number(error&&error.status)==
   ||String(error&&error.code)==='SPEAKING_TASK4_CATALOG_REVISION_MISMATCH'}
 function adaptiveSpeakingLock(){try{var active=adaptiveRuntimeSnapshot().active;return active&&active.module==='speaking'?active:null}catch(_){return null}}
 function launchAdaptiveSpeakingLock(lock){if(!lock)return false;var descriptor=adaptiveSpeakingTask(lock.contentRef);if(!descriptor)return false;void spOpen(descriptor.taskNumber,{adaptiveLock:lock});return true}
-function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP=null;spSync();if(lock){launchAdaptiveSpeakingLock(lock);return}
-  var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Загружаем профиль произношения…</div>';
+function initSpeaking(){if(!S)return;var lock=adaptiveSpeakingLock();spStopAll();spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();speFullDispose();SP=null;spSync();if(lock){launchAdaptiveSpeakingLock(lock);return}
+  var epoch=++SP_VIEW_EPOCH;var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Загружаем профиль произношения…</div>';spNormalizeView('loading');
   Promise.all([apiGet('/api/v1/speaking/accent-profile'),apiGet('/api/v1/speaking/calibration-consent')]).then(function(results){
+    if(epoch!==SP_VIEW_EPOCH)return;
     SP_ACCENT=results[0]&&results[0].profile||null;SP_ACCENT_SETUP=results[0]&&results[0].calibration||null;SP_CALIBRATION_CONSENT=results[1]&&results[1].consent||null;
-    if(SP_ACCENT)spHub();else spAccentSetup()}).catch(function(error){if(area)area.innerHTML='<div class="clayCard" role="alert" style="padding:18px;color:#A83226;font-weight:700;">Не удалось загрузить профиль произношения. Проверь сеть и повтори.</div><div style="height:10px;"></div>'+spBtn('Повторить','initSpeaking()',true);try{toast(apiMessage(error,'request'))}catch(_){}})}
-function spAccentSetup(){var area=document.getElementById('s9_area');if(!area)return;
+    if(SP_ACCENT)spHub();else spAccentSetup()}).catch(function(error){if(epoch!==SP_VIEW_EPOCH)return;if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="network-error" role="alert">Не удалось загрузить профиль произношения. Проверь сеть и повтори.</div>'+spBtn('Повторить','initSpeaking()',true);spNormalizeView('retry');try{toast(apiMessage(error,'request'))}catch(_){}})}
+function spAccentSetup(){var area=document.getElementById('s9_area');if(!area)return;SP_VIEW_EPOCH++;SP_SETTINGS_BUSY=false;if(area.setAttribute)area.setAttribute('aria-busy','false');
   var calibrationChoice=!SP_ACCENT
-    ?'<div style="height:10px;"></div>'+spBtn(SP_ACCENT_SETUP?'Продолжить короткую двойную калибровку':'Не знаю — короткая двойная калибровка','spAccentStartUnknown()',false)
-      +'<div class="clayCard" style="padding:13px 15px;margin-top:12px;font-size:12px;line-height:1.5;color:#6B655D;">Для варианта «Не знаю» одна и та же короткая запись проверяется в en-GB и en-US один раз. Затем приложение предлагает профиль; оно не выбирает больший балл заново на каждой попытке.</div>'
-    :'<div class="clayCard" style="padding:13px 15px;margin-top:12px;font-size:12px;line-height:1.5;color:#6B655D;">Изменение применяется только к новым тренировкам. Уже начатая тренировка сохраняет прежний профиль.</div>';
-  area.innerHTML='<div class="clayCard" style="padding:20px;">'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;">Какой вариант произношения будем тренировать?</div>'
-    +'<div style="font-weight:600;font-size:13px;line-height:1.55;color:#6B655D;margin-top:7px;">ЕГЭ допускает обе нормы. Выбор закрепляется за новой тренировкой и не меняет уже сохранённые оценки.</div></div>'
-    +'<div style="height:10px;"></div>'+spBtn('🇬🇧 Британский · en-GB','spChooseAccent(\'en-GB\')',true)
-    +'<div style="height:10px;"></div>'+spBtn('🇺🇸 Американский · en-US','spChooseAccent(\'en-US\')',true)
-    +calibrationChoice
-    +(SP_ACCENT?'<div style="height:10px;"></div>'+spBtn('Назад без изменений','spHub()',false):'');setTxt('s9_today','настройка произношения')}
-async function spChooseAccent(locale){if(!['en-GB','en-US'].includes(locale))return false;try{var result=await apiPut('/api/v1/speaking/accent-profile',{locale:locale});SP_ACCENT=result.profile;SP_ACCENT_SETUP=null;spHub();return true}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
-async function spAccentStartUnknown(){try{if(!SP_ACCENT_SETUP)SP_ACCENT_SETUP=await apiPost('/api/v1/speaking/accent-profile/calibration',{});var opened=await spOpen(1);if(opened&&SP){SP.accentCalibration=SP_ACCENT_SETUP;toast('Прочитай короткий текст один раз. После записи сравним en-GB и en-US.')}return opened}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
-function spCalibrationConsentSetup(){var area=document.getElementById('s9_area');if(!area)return;var current=SP_CALIBRATION_CONSENT;
-  area.innerHTML='<div class="clayCard" style="padding:20px;"><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;">Добровольная калибровка точности</div>'
-    +'<p style="font-size:13px;line-height:1.55;color:#625D56;">Это отдельное согласие на временное хранение анонимной записи для двух независимых экспертных оценок. Отказ не ограничивает обучение или подписку. Сырой звук удаляется после согласованной двойной оценки, отзыва или не позднее 180 дней.</p>'
-    +'<label style="display:grid;gap:6px;font-weight:800;font-size:13px;">Возрастная группа<select id="sp_cal_age" style="min-height:46px;border:1px solid #D7CFC5;border-radius:13px;padding:0 10px;"><option value="adult">18 лет или старше</option><option value="minor">Младше 18 лет</option></select></label>'
-    +'<label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;font-size:12.5px;font-weight:650;"><input id="sp_cal_guardian" type="checkbox" aria-label="Подтверждение законного представителя" style="width:22px;height:22px;min-height:0;accent-color:#F2683F;"><span>Законный представитель подтвердил передачу записи внешнему сервису и экспертам.</span></label></div>'
-    +'<div style="height:10px;"></div>'+spBtn('Дать добровольное согласие','spSaveCalibrationConsent(true)',true)
-    +(current&&current.granted?'<div style="height:10px;"></div>'+spBtn('Отозвать согласие и удалить сырой звук','spSaveCalibrationConsent(false)',false):'')
-    +'<div style="height:10px;"></div>'+spBtn('Назад без изменений','spHub()',false)}
-async function spSaveCalibrationConsent(granted){var age=document.getElementById('sp_cal_age');var guardian=document.getElementById('sp_cal_guardian');var ageGroup=age?age.value:(SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.age_group)||'adult';var guardianConfirmed=Boolean(guardian&&guardian.checked);if(!granted&&SP_CALIBRATION_CONSENT){ageGroup=SP_CALIBRATION_CONSENT.age_group;guardianConfirmed=Boolean(SP_CALIBRATION_CONSENT.guardian_confirmed)}
-  try{SP_CALIBRATION_CONSENT=await apiPut('/api/v1/speaking/calibration-consent',{granted:Boolean(granted),ageGroup:ageGroup,guardianConfirmed:guardianConfirmed});spHub();toast(granted?'Согласие сохранено. Его можно отозвать в любой момент.':'Согласие отозвано; незавершённые сырые записи удалены.');return true}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+    ?'<button type="button" class="sq speaking-choice" data-speaking-setting onclick="spAccentStartUnknown()"><span>'+(SP_ACCENT_SETUP?'Продолжить короткую двойную калибровку':'Не знаю — короткая двойная калибровка')+'</span><span class="speaking-chip">en-GB + en-US</span></button>'
+      +'<div class="speaking-note speaking-note--info">Для варианта «Не знаю» одна и та же короткая запись проверяется в en-GB и en-US один раз. Затем приложение предлагает профиль; оно не выбирает больший балл заново на каждой попытке.</div>'
+    :'<div class="speaking-note speaking-note--info">Изменение применяется только к новым тренировкам. Уже начатая тренировка сохраняет прежний профиль.</div>';
+  var currentLocale=SP_ACCENT&&SP_ACCENT.locale||'';
+  area.innerHTML='<div class="speaking-view"><section id="s9_card" class="speaking-sheet speaking-sheet--roomy speaking-stack" data-speaking-focus>'
+    +'<h2 class="speaking-heading">Какой вариант произношения будем тренировать?</h2>'
+    +'<p class="speaking-copy speaking-copy--muted">ЕГЭ допускает обе нормы. Выбор закрепляется за новой тренировкой и не меняет уже сохранённые оценки.</p>'
+    +'<div class="speaking-choice-group" role="group" aria-label="Вариант английского произношения">'
+    +'<button type="button" class="sq speaking-choice" data-speaking-setting data-selected="'+String(currentLocale==='en-GB')+'" aria-pressed="'+String(currentLocale==='en-GB')+'" onclick="spChooseAccent(\'en-GB\')"><span>Британский</span><span class="speaking-chip">en-GB'+(currentLocale==='en-GB'?' · выбран':'')+'</span></button>'
+    +'<button type="button" class="sq speaking-choice" data-speaking-setting data-selected="'+String(currentLocale==='en-US')+'" aria-pressed="'+String(currentLocale==='en-US')+'" onclick="spChooseAccent(\'en-US\')"><span>Американский</span><span class="speaking-chip">en-US'+(currentLocale==='en-US'?' · выбран':'')+'</span></button>'
+    +calibrationChoice+'</div></section>'
+    +(SP_ACCENT?'<div class="speaking-action-stack">'+spBtn('Назад без изменений','spHub()',false)+'</div>':'')+'</div>';setTxt('s9_today','настройка произношения');spNormalizeView('accent-required')}
+async function spChooseAccent(locale){if(!['en-GB','en-US'].includes(locale)||SP_SETTINGS_BUSY)return false;var epoch=SP_VIEW_EPOCH,token=++SP_SETTINGS_TOKEN;spSetSettingsBusy(true);try{var result=await apiPut('/api/v1/speaking/accent-profile',{locale:locale});if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH||!spRoute()?.classList.contains('on'))return false;SP_ACCENT=result.profile;SP_ACCENT_SETUP=null;spHub();return true}catch(error){if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{if(token===SP_SETTINGS_TOKEN)spSetSettingsBusy(false)}}
+async function spAccentStartUnknown(){if(SP_SETTINGS_BUSY)return false;var epoch=SP_VIEW_EPOCH,token=++SP_SETTINGS_TOKEN;spSetSettingsBusy(true);try{var setup=SP_ACCENT_SETUP||await apiPost('/api/v1/speaking/accent-profile/calibration',{});if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH||!spRoute()?.classList.contains('on'))return false;SP_ACCENT_SETUP=setup;var opened=await spOpen(1);if(opened&&SP){SP.accentCalibration=setup;toast('Прочитай короткий текст один раз. После записи сравним en-GB и en-US.')}return opened}catch(error){if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{if(token===SP_SETTINGS_TOKEN)spSetSettingsBusy(false)}}
+function spCalibrationConsentSetup(){var area=document.getElementById('s9_area');if(!area)return;SP_VIEW_EPOCH++;SP_SETTINGS_BUSY=false;if(area.setAttribute)area.setAttribute('aria-busy','false');var current=SP_CALIBRATION_CONSENT;
+  var currentAge=current&&current.age_group==='minor'?'minor':'adult';var guardianChecked=Boolean(current&&current.guardian_confirmed);
+  area.innerHTML='<div class="speaking-view"><section id="s9_card" class="speaking-sheet speaking-sheet--roomy speaking-stack" data-speaking-focus><h2 class="speaking-heading">Добровольная калибровка точности</h2>'
+    +'<p class="speaking-copy speaking-copy--muted">Это отдельное согласие на временное хранение анонимной записи для двух независимых экспертных оценок. Отказ не ограничивает обучение или подписку. Сырой звук удаляется после согласованной двойной оценки, отзыва или не позднее 180 дней.</p>'
+    +'<label class="speaking-field">Возрастная группа<select id="sp_cal_age" class="speaking-select" data-speaking-setting><option value="adult"'+(currentAge==='adult'?' selected':'')+'>18 лет или старше</option><option value="minor"'+(currentAge==='minor'?' selected':'')+'>Младше 18 лет</option></select></label>'
+    +'<label class="speaking-check-row"><input id="sp_cal_guardian" type="checkbox" data-speaking-setting aria-label="Подтверждение законного представителя"'+(guardianChecked?' checked':'')+'><span>Законный представитель подтвердил передачу записи внешнему сервису и экспертам.</span></label></section>'
+    +'<div class="speaking-action-stack">'+spBtn(current&&current.granted?'Сохранить изменения согласия':'Дать добровольное согласие','spSaveCalibrationConsent(true)',true)
+    +(current&&current.granted?spBtn('Отозвать согласие и удалить сырой звук','spSaveCalibrationConsent(false)',false):'')
+    +spBtn('Назад без изменений','spHub()',false)+'</div></div>';area.querySelectorAll('.speaking-action').forEach(function(button){button.dataset.speakingSetting=''});spNormalizeView('privacy-consent')}
+async function spSaveCalibrationConsent(granted){if(SP_SETTINGS_BUSY)return false;var epoch=SP_VIEW_EPOCH,token=++SP_SETTINGS_TOKEN;var age=document.getElementById('sp_cal_age');var guardian=document.getElementById('sp_cal_guardian');var ageGroup=age?age.value:(SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.age_group)||'adult';var guardianConfirmed=Boolean(guardian&&guardian.checked);if(!granted&&SP_CALIBRATION_CONSENT){ageGroup=SP_CALIBRATION_CONSENT.age_group;guardianConfirmed=Boolean(SP_CALIBRATION_CONSENT.guardian_confirmed)}spSetSettingsBusy(true);
+  try{var consent=await apiPut('/api/v1/speaking/calibration-consent',{granted:Boolean(granted),ageGroup:ageGroup,guardianConfirmed:guardianConfirmed});if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH||!spRoute()?.classList.contains('on'))return false;SP_CALIBRATION_CONSENT=consent;spHub();toast(granted?'Согласие сохранено. Его можно отозвать в любой момент.':'Согласие отозвано; незавершённые сырые записи удалены.');return true}catch(error){if(token!==SP_SETTINGS_TOKEN||epoch!==SP_VIEW_EPOCH)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{if(token===SP_SETTINGS_TOKEN)spSetSettingsBusy(false)}}
 async function spLoadPronunciationStatus(){var box=document.getElementById('speaking_pronunciation_status');if(!box)return;
-  try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');var view=speakingModule.pronunciationStatusView(payload);box=document.getElementById('speaking_pronunciation_status');if(!box)return;
-    if(view.available){box.style.background='#EAF7F0';box.style.color='#1D6944';box.innerHTML='<b>Оценка произношения доступна</b><br><span style="font-size:11.5px;">Осталось '+spFmt(view.remainingSeconds)+' из '+spFmt(view.limitSeconds)+' в этом месяце · '+presentPublicPlan({tier:view.tier}).label+'. Локальная запись и прослушивание не расходуют лимит.</span>';return}
-    box.style.background='#FFF4E6';box.style.color='#714515';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span style="font-size:11.5px;">Можно записывать и прослушивать ответы локально — это не расходует лимит.</span>'}
-  catch(_){box=document.getElementById('speaking_pronunciation_status');if(!box)return;box.style.background='#FFF4E6';box.style.color='#714515';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span style="font-size:11.5px;">Локальная запись и прослушивание не расходуют лимит.</span>'}}
-function spLearningList(title,items){if(!items||!items.length)return '';return '<div style="margin-top:9px;font-size:12px;"><b>'+ui.escapeHtml(title)+':</b><ul style="margin:5px 0 0;padding-left:18px;line-height:1.45;">'+items.map(function(item){return '<li>'+ui.escapeHtml(item)+'</li>'}).join('')+'</ul></div>'}
+  var epoch=SP_VIEW_EPOCH;try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');var view=speakingModule.pronunciationStatusView(payload);if(epoch!==SP_VIEW_EPOCH||document.getElementById('speaking_pronunciation_status')!==box)return;
+    if(view.available&&view.remainingSeconds>0){box.dataset.state='ready';box.innerHTML='<b>Оценка произношения доступна</b><br><span>Осталось '+spFmt(view.remainingSeconds)+' из '+spFmt(view.limitSeconds)+' в этом месяце · '+presentPublicPlan({tier:view.tier}).label+'. Локальная запись и прослушивание не расходуют лимит.</span>';return}
+    if(view.available){box.dataset.state='quota';box.innerHTML='<b>Лимит автоматической оценки исчерпан</b><br><span>Локальная запись и прослушивание остаются доступны и не расходуют лимит.</span>';return}
+    box.dataset.state='provider-unavailable';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span>Можно записывать и прослушивать ответы локально — это не расходует лимит.</span>'}
+  catch(_){if(epoch!==SP_VIEW_EPOCH||document.getElementById('speaking_pronunciation_status')!==box)return;box.dataset.state='network-error';box.innerHTML='<b>Оценка произношения пока недоступна</b><br><span>Не удалось проверить сервис и остаток лимита. Локальная запись и прослушивание не расходуют лимит.</span>'}}
+function spLearningList(title,items){if(!items||!items.length)return '';return '<div class="speaking-learning-list"><b class="speaking-learning-list__title">'+ui.escapeHtml(title)+':</b><ul class="speaking-learning-list__items">'+items.map(function(item){return '<li>'+ui.escapeHtml(item)+'</li>'}).join('')+'</ul></div>'}
 function spIssueDynamics(item){var labels={improved:'улучшение',declined:'снижение',stable:'без изменений',insufficient_data:'данных для сравнения пока мало'};var detail=item.previousAccuracy==null||item.currentAccuracy==null?'':' · '+item.previousAccuracy+'→'+item.currentAccuracy+(item.delta==null?'':' ('+(item.delta>0?'+':'')+item.delta+')');return item.label+(item.accentLocale?' · '+item.accentLocale:'')+' · '+item.count+' раз'+(item.averageAccuracy==null?'':' · среднее '+item.averageAccuracy+'/100')+' · '+(labels[item.direction]||labels.insufficient_data)+detail}
 function spSpeakingSkillLabel(skillId){var labels={'ege.speaking.reading_aloud':'Чтение вслух','ege.speaking.direct_questions':'Прямые вопросы','ege.speaking.interview_completeness':'Полнота ответов в интервью','ege.speaking.monologue_content':'Содержание монолога','ege.speaking.monologue_organization':'Организация монолога','ege.speaking.spoken_grammar':'Грамматика устной речи','ege.speaking.spoken_lexis':'Лексика устной речи','ege.speaking.fluency':'Беглость речи','ege.speaking.pronunciation_words':'Произношение слов','ege.speaking.pronunciation_phonemes':'Произношение звуков','ege.speaking.signal_quality':'Качество записи'};return labels[skillId]||'Навык говорения'}
 function spSpeakingTargetFocus(focus){if(!focus)return '';if(focus.kind==='word')return 'слово «'+focus.value+'»';if(focus.kind==='phoneme')return 'фонема /'+focus.value+'/ в слове «'+focus.anchorWord+'»';return ''}
 function spVoiceTutorOptions(voice){if(!voice||!voice.attemptSummary)return null;if(voice.attemptSummary.attemptId===voice.attemptId){var base={profile:{entitlements:{voice_tutor:true}},source:'speaking',attemptId:voice.attemptId,revision:voice.revision};if(voice.criterion)return Object.assign(base,{criterionChoices:[{index:voice.criterion.index,label:voice.criterion.label}]});if(voice.pronunciationError)return Object.assign(base,{pronunciationError:{ref:voice.pronunciationError.ref,label:voice.pronunciationError.label}})}return null}
 function spLearningReportMarkup(report){var safe=ui.escapeHtml,current=report&&report.currentAttempt,access=report&&report.access;if(!report||!access)return '';
-  var header='<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><b style="font-size:14px;">Личный прогресс Speaking</b><span style="font-size:11px;font-weight:900;color:#B54E2F;background:#FFEDE4;padding:6px 9px;border-radius:12px;">'+safe(presentPublicPlan({tier:access.tier}).label)+(report.activeAccentLocale?' · '+safe(report.activeAccentLocale):'')+' · '+Math.round(access.remainingSeconds/60)+' мин</span></div>';
-  var next=report.nextStep?'<div style="margin-top:9px;padding:9px 11px;border-radius:12px;background:#FFF4DE;font-size:12px;color:#714515;"><b>Следующий шаг:</b> '+safe(report.nextStep.label)+'</div>':'';
+  var header='<div class="speaking-learning-report__header"><b class="speaking-learning-report__title">Личный прогресс Speaking</b><span class="speaking-learning-report__badge">'+safe(presentPublicPlan({tier:access.tier}).label)+(report.activeAccentLocale?' · '+safe(report.activeAccentLocale):'')+' · '+Math.round(access.remainingSeconds/60)+' мин</span></div>';
+  var next=report.nextStep?'<div class="speaking-learning-next"><b>Следующий шаг:</b> '+safe(report.nextStep.label)+'</div>':'';
   var timeline=(report.attemptTimeline||[]).slice(-10).map(function(item){return 'Попытка '+item.attemptId+' · задание '+item.taskType+' · '+(item.status==='scored'?(item.score+' / '+item.maxScore):'нужна новая запись')+(item.masteryEligible?'':' · не меняет освоение')});
   var history=spLearningList('История попыток',timeline);
   SP_TARGETED_PRACTICE=null;
-  if(!current)return '<div class="clayCard" style="padding:15px;margin-bottom:12px;">'+header+'<div style="margin-top:7px;font-size:12px;color:#777163;">После первой оценки здесь появятся критерии и слабые места.</div>'+next+history+'</div>';
+  if(!current)return '<div class="clayCard speaking-learning-report">'+header+'<div class="speaking-learning-report__empty">После первой оценки здесь появятся критерии и слабые места.</div>'+next+history+'</div>';
   var technical=current.status!=='scored';var summary=technical
-    ?'<div style="margin-top:9px;padding:10px;border-radius:12px;background:#FFF4E6;color:#714515;font-size:12px;"><b>Оценку нельзя считать надёжной.</b><br>'+safe(current.verdict||'Нужна новая запись.')+'</div>'
-    :'<div style="margin-top:9px;font-size:13px;font-weight:800;">Последняя оценка: '+current.score+' из '+current.maxScore+(current.accentLocale?' · '+safe(current.accentLocale):'')+'</div><div style="margin-top:5px;font-size:12px;line-height:1.45;color:#4A453E;">'+safe(current.verdict||'')+'</div>';
-  var transcript=current.transcript?'<details style="margin-top:9px;padding:9px 11px;border-radius:12px;background:#F8F5F1;"><summary style="cursor:pointer;font-size:12px;font-weight:850;color:#4A453E;">Расшифровка последней попытки</summary><div style="margin-top:7px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;color:#4A453E;">'+safe(current.transcript)+'</div></details>':'';
-  var criteria=(current.criteria||[]).map(function(item){return '<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #F4EFE9;font-size:12px;"><span>'+safe(item.name)+'</span><b>'+item.score+' / '+item.maxScore+'</b></div>'}).join('');
+    ?'<div class="speaking-learning-alert"><b>Оценку нельзя считать надёжной.</b><br>'+safe(current.verdict||'Нужна новая запись.')+'</div>'
+    :'<div class="speaking-learning-report__score">Последняя оценка: '+current.score+' из '+current.maxScore+(current.accentLocale?' · '+safe(current.accentLocale):'')+'</div><div class="speaking-learning-report__verdict">'+safe(current.verdict||'')+'</div>';
+  var transcript=current.transcript?'<details class="speaking-learning-transcript"><summary>Расшифровка последней попытки</summary><div class="speaking-learning-transcript__copy">'+safe(current.transcript)+'</div></details>':'';
+  var criteria=(current.criteria||[]).map(function(item){return '<div class="speaking-learning-criterion"><span>'+safe(item.name)+'</span><b>'+item.score+' / '+item.maxScore+'</b></div>'}).join('');
   var signal=current.signal||{};var pause=signal.pauseAnalysis||{};var pauseText=pause.available?('лишних '+pause.unexpectedBreakCount+', пропущенных '+pause.missingBreakCount):(pause.reason==='locale_not_supported'?'анализ недоступен для выбранного варианта английского':'отдельный показатель провайдером не поддерживается');var signalText=technical?'Качество сигнала: '+safe(signal.quality||'не определено'):'Беглость: '+(signal.fluencyScore==null?'нет отдельного показателя':Math.round(signal.fluencyScore)+'/100')+' · полнота: '+(signal.completenessScore==null?'нет отдельного показателя':Math.round(signal.completenessScore)+'/100')+' · паузы: '+pauseText;
   var words=(current.wordIssues||[]).map(function(item){var phonemes=(item.phonemes||[]).map(function(p){return p.label+(p.accuracyScore==null?'':' '+Math.round(p.accuracyScore)+'/100')}).join(', ');var hasTime=typeof item.offsetSeconds==='number'&&Number.isFinite(item.offsetSeconds)&&typeof item.durationSeconds==='number'&&Number.isFinite(item.durationSeconds);var stamp='';if(hasTime){var fmt=function(value){var minutes=Math.floor(value/60);var seconds=(value-minutes*60).toFixed(1).padStart(4,'0');return minutes+':'+seconds};stamp=' · '+(item.itemIndex?'Ответ '+item.itemIndex+' · ':'')+fmt(item.offsetSeconds)+'–'+fmt(item.offsetSeconds+item.durationSeconds)}return item.word+(item.accuracyScore==null?'':' · '+Math.round(item.accuracyScore)+'/100')+stamp+(phonemes?' · '+phonemes:'')});
   var fixes=(current.improvements||[]).map(function(item){return item.wrong+' → '+item.right+(item.note?' · '+item.note:'')});
@@ -144,336 +204,144 @@ function spLearningReportMarkup(report){var safe=ui.escapeHtml,current=report&&r
     var personal=report.premium.personalSummary||{};var personalSummary=['Надёжных попыток: '+(personal.reliableAttemptCount||0)+(personal.currentReliableAccentLocale?' · '+personal.currentReliableAccentLocale:''),'Приоритетов на занятие: '+(personal.priorityCount||0),'Целей без подходящего серверного материала: '+(personal.unavailableTargetCount||0)];
     var unavailable=(report.premium.unavailableTargets||[]).slice(0,5).map(function(item){return item.label+' · пока нет другого серверного задания с этой точной целью'});
     var outcomes=(report.premium.targetOutcomes||[]).slice(-5).map(function(item){var focus=spSpeakingTargetFocus(item.focus);return spSpeakingSkillLabel(item.skillId)+(focus?' · '+focus:'')+' · '+(item.status==='resolved'?'цель закрыта':(item.status==='still_needs_work'?'нужно повторить':'результат не подтверждён'))});
-    premium='<div style="margin-top:10px;padding-top:10px;border-top:1px solid #E8E0D7;font-size:12px;color:#4A453E;"><b>Надёжная динамика:</b> '+report.premium.trend.length+' попыток'+(comparison&&comparison.scoreDelta!=null?' · '+(comparison.scoreDelta>=0?'+':'')+comparison.scoreDelta+' п.п. к заданию того же типа, уровня и '+safe(comparison.accentLocale||'акцента'):'')+'</div>'
+    premium='<div class="speaking-learning-report__premium"><b>Надёжная динамика:</b> '+report.premium.trend.length+' попыток'+(comparison&&comparison.scoreDelta!=null?' · '+(comparison.scoreDelta>=0?'+':'')+comparison.scoreDelta+' п.п. к заданию того же типа, уровня и '+safe(comparison.accentLocale||'акцента'):'')+'</div>'
       +spLearningList('Динамика критериев',criterionDynamics)+spLearningList('Повторяющиеся слова',repeatedWords)+spLearningList('Фонемная динамика',repeatedPhonemes)+spLearningList('Беглость и полнота',fluencyDynamics)+spLearningList('Паузы',pauseDynamics)+spLearningList('Персональный итог',personalSummary)+spLearningList('Результаты целевых проверок',outcomes)+spLearningList('Цели, для которых пока нет другого материала',unavailable)+spLearningList('Рекомендация на 60 минут',allocation)
-      +(target?'<button type="button" class="sq" onclick="spStartTargetedPractice()" style="width:100%;min-height:44px;margin-top:9px;border:0;border-radius:12px;background:#EAF7F0;color:#1D7F4A;font-weight:900;">Целевая тренировка · другое серверное задание</button>':'')
+      +(target?'<button type="button" class="sq speaking-learning-target" onclick="spStartTargetedPractice()">Целевая тренировка · другое серверное задание</button>':'')
       +(voiceReady?voiceTutorButton(voiceOptions):'')}
-  return '<div class="clayCard" style="padding:15px;margin-bottom:12px;">'+header+summary+transcript+(criteria?'<div style="margin-top:7px;">'+criteria+'</div>':'')+'<div style="margin-top:9px;font-size:12px;color:#4A453E;">'+signalText+'</div>'+spLearningList('Что получилось',current.strengths||[])+spLearningList('Что исправить',fixes)+spLearningList('Проблемные слова и фонемы',words)+next+history+premium+'</div>'}
+  return '<div class="clayCard speaking-learning-report">'+header+summary+transcript+(criteria?'<div class="speaking-learning-report__criteria">'+criteria+'</div>':'')+'<div class="speaking-learning-report__signal">'+signalText+'</div>'+spLearningList('Что получилось',current.strengths||[])+spLearningList('Что исправить',fixes)+spLearningList('Проблемные слова и фонемы',words)+next+history+premium+'</div>'}
 function spStartTargetedPractice(){var target=SP_TARGETED_PRACTICE;if(!target)return false;return spOpen(target.taskType,{targetedPractice:target})}
-async function spLoadLearningReport(){var box=document.getElementById('speaking_learning_report');if(!box)return;try{var report=await apiGet('/api/v1/speaking/learning-report');box=document.getElementById('speaking_learning_report');if(box)box.innerHTML=spLearningReportMarkup(report)}catch(_){box=document.getElementById('speaking_learning_report');if(box)box.innerHTML=''}}
-function spHub(){var area=document.getElementById('s9_area');if(!area)return;
+async function spLoadLearningReport(){var box=document.getElementById('speaking_learning_report');if(!box)return;var epoch=SP_VIEW_EPOCH;try{var report=await apiGet('/api/v1/speaking/learning-report');if(epoch===SP_VIEW_EPOCH&&document.getElementById('speaking_learning_report')===box){box.innerHTML=spLearningReportMarkup(report);spNormalizeView()}}catch(_){if(epoch===SP_VIEW_EPOCH&&document.getElementById('speaking_learning_report')===box)box.innerHTML=''}}
+function spHub(){var area=document.getElementById('s9_area');if(!area)return;SP_VIEW_EPOCH++;SP_SETTINGS_BUSY=false;if(area.setAttribute)area.setAttribute('aria-busy','false');
   var lock=adaptiveSpeakingLock();if(lock){launchAdaptiveSpeakingLock(lock);return}
-  var r=spSt();var GA=0;function ga(){return 'animation:win .34s '+((GA++)*0.06)+'s cubic-bezier(.25,.75,.35,1) both;'}
-  var accentLabel=SP_ACCENT&&SP_ACCENT.locale==='en-US'?'Американский · en-US':'Британский · en-GB';
-  var accentCard='<div class="clayCard" style="'+ga()+'padding:13px 15px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-    +'<div><div style="font-weight:900;font-size:13px;color:#2B2B2B;">Профиль произношения</div><div style="font-weight:650;font-size:11.5px;color:#777163;margin-top:3px;">'+ui.escapeHtml(accentLabel)+' · действует для новых тренировок</div></div>'
-    +'<button type="button" class="sq" onclick="spAccentSetup()" style="flex:none;border:0;border-radius:12px;padding:9px 11px;background:#FFEDE4;color:#B54E2F;font-weight:800;cursor:pointer;">Изменить</button></div>';
+  var r=spSt();var accentLabel=SP_ACCENT&&SP_ACCENT.locale==='en-US'?'Американский · en-US':'Британский · en-GB';
   var calibrationGranted=Boolean(SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.granted);
-  var calibrationCard='<button type="button" class="clayCard sq" onclick="spCalibrationConsentSetup()" style="'+ga()+'width:100%;border:0;text-align:left;font:inherit;padding:13px 15px;margin-bottom:12px;cursor:pointer;">'
-    +'<div style="font-weight:900;font-size:13px;color:#2B2B2B;">Добровольная калибровка точности</div><div style="font-weight:650;font-size:11.5px;color:'+(calibrationGranted?'#1D7F4A':'#777163')+';margin-top:3px;">'+(calibrationGranted?'Согласие дано · можно отозвать':'Не включена · обучение доступно полностью')+'</div></button>';
-  var exCard='<button type="button" class="sq clk" onclick="spExam()" style="'+ga()+'position:relative;overflow:hidden;width:100%;border:0;text-align:left;font:inherit;border-radius:24px;padding:16px 18px;margin-bottom:12px;cursor:pointer;background:linear-gradient(150deg,#3A3532,#2B2B2B);box-shadow:0 14px 28px rgba(43,35,30,.32),inset 0 2px 3px rgba(255,255,255,.14),inset 0 -5px 10px rgba(0,0,0,.35);">'
-    +'<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 80" preserveAspectRatio="xMidYMid slice">'
-    +'<g fill="rgba(255,255,255,.75)">'
-    +'<path class="eb5sp" style="animation-delay:.3s" d="M22,14 Q22,17.5 25.5,17.5 Q22,17.5 22,21 Q22,17.5 18.5,17.5 Q22,17.5 22,14 Z"/>'
-    +'<path class="eb5sp" style="animation-delay:1.4s" d="M210,12 Q210,15 213,15 Q210,15 210,18 Q210,15 207,15 Q210,15 210,12 Z"/>'
-    +'<path class="eb5sp" style="animation-delay:.9s" d="M180,58 Q180,61 183,61 Q180,61 180,64 Q180,61 177,61 Q180,61 180,58 Z"/>'
-    +'</g><g fill="rgba(255,178,76,.85)">'
-    +'<path class="eb5sp" style="animation-delay:1.9s" d="M250,30 Q250,34 254,34 Q250,34 250,38 Q250,34 246,34 Q250,34 250,30 Z"/>'
-    +'<path class="eb5sp" style="animation-delay:.6s" d="M60,54 Q60,57.5 63.5,57.5 Q60,57.5 60,61 Q60,57.5 56.5,57.5 Q60,57.5 60,54 Z"/>'
-    +'</g></svg>'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-    +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#fff;">Экзамен · устная часть</div>'
-    +'<div style="font-weight:600;font-size:12px;color:rgba(255,255,255,.62);margin-top:2px;">'+(S.speakingFullSessionId?'есть незавершённая сессия · максимум 20':'4 задания подряд · максимум 20 · примерная оценка после сдачи')+'</div></div>'
-    +'<span style="flex:none;background:linear-gradient(145deg,#FFC861,#F2683F);border-radius:14px;width:42px;height:42px;display:grid;place-items:center;box-shadow:0 6px 12px rgba(242,104,63,.4),inset 0 2px 3px rgba(255,255,255,.5);">'
-    +'<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div></button>';
-  area.innerHTML=accentCard+calibrationCard+exCard+'<div id="speaking_pronunciation_status" class="clayCard" role="status" aria-live="polite" aria-atomic="true" style="'+ga()+'margin-bottom:12px;padding:13px 15px;background:#F4F1EA;color:#514B43;font-weight:650;font-size:12.5px;line-height:1.45;">Проверяем доступность оценки произношения…<br><span style="font-size:11.5px;">Локальная запись и прослушивание не расходуют лимит.</span></div><div id="speaking_learning_report" role="status" aria-live="polite"></div>'+[1,2,3,4].map(function(t){var c=SP_CONF[t];
-    return '<button type="button" class="clayCard sq clk" onclick="spOpen('+t+')" style="'+ga()+'width:100%;border:0;text-align:left;font:inherit;padding:16px 18px;margin-bottom:12px;cursor:pointer;">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">'
-      +'<div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:15.5px;color:#2B2B2B;">'+c.name+'</div>'
-      +'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:2px;">'+c.sub+'</div></div>'
-      +'<span style="flex:none;font-weight:800;font-size:12px;color:#C2421B;background:#FFEDE4;padding:8px 12px;border-radius:14px;">'+(r['t'+t].n||'—')+'</span></div></button>'}).join('')
-   +'<div class="clayCard" style="'+ga()+'display:flex;align-items:center;gap:12px;padding:13px 15px;">'
-    +'<span style="flex:none;width:38px;height:38px;border-radius:13px;background:#FBE9EF;display:grid;place-items:center;"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#D4537E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></span>'
-    +'<div style="font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.45;">Сначала подготовка по таймеру, потом запись — тайминги как на настоящем экзамене</div></div>';
-  setTxt('s9_today','4 задания');spLoadPronunciationStatus();spLoadLearningReport();spGen()}
+  var accentCard='<section class="speaking-sheet speaking-sheet--compact speaking-row speaking-row--between speaking-row--wrap"><div class="speaking-row__grow"><h3 class="speaking-subheading">Профиль произношения</h3><p class="speaking-meta">'+ui.escapeHtml(accentLabel)+' · действует для новых тренировок</p></div><button type="button" class="sq speaking-inline-action speaking-setting-action" onclick="spAccentSetup()">Изменить</button></section>';
+  var calibrationCard='<button type="button" class="sq speaking-card-action speaking-row speaking-row--between speaking-row--wrap" onclick="spCalibrationConsentSetup()"><span class="speaking-row__grow"><span class="speaking-subheading">Добровольная калибровка точности</span><span class="speaking-meta">'+(calibrationGranted?'Согласие дано · можно отозвать':'Не включена · обучение доступно полностью')+'</span></span><span class="speaking-chip speaking-setting-status '+(calibrationGranted?'speaking-chip--success':'')+'">'+(calibrationGranted?'Включена':'Не включена')+'</span></button>';
+  var examCard='<button type="button" class="sq speaking-card-action speaking-exam-card speaking-row speaking-row--between" aria-label="Экзамен · устная часть" onclick="spExam()"><span class="speaking-row__grow"><span class="speaking-kicker">Экзамен</span><span class="speaking-subheading">Устная часть</span><span class="speaking-meta">'+(S.speakingFullSessionId?'Есть незавершённая сессия · максимум 20':'4 задания подряд · максимум 20 · примерная оценка после сдачи')+'</span></span><span class="speaking-exam-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></button>';
+  var taskCards=[1,2,3,4].map(function(t){var c=SP_CONF[t];return '<button type="button" class="sq speaking-card-action speaking-row speaking-row--between" onclick="spOpen('+t+')"><span class="speaking-row__grow"><span class="speaking-subheading">'+c.name+'</span><span class="speaking-meta">'+c.sub+'</span></span><span class="speaking-chip speaking-chip--primary">'+(r['t'+t].n||'—')+'</span></button>'}).join('');
+  area.innerHTML='<div class="speaking-view"><header id="s9_card" class="speaking-view-intro" data-speaking-focus><h2 class="speaking-heading">Тренировка и экзамен</h2><p class="speaking-copy speaking-copy--muted">Выбери отдельное задание или пройди устную часть целиком.</p></header>'+accentCard+calibrationCard+examCard+'<div id="speaking_pronunciation_status" class="speaking-state" data-state="loading" role="status" aria-live="polite" aria-atomic="true"><strong>Проверяем доступность оценки произношения…</strong><span>Локальная запись и прослушивание не расходуют лимит.</span></div><div id="speaking_learning_report" role="status" aria-live="polite"></div><div class="speaking-stack">'+taskCards+'</div><aside class="speaking-note speaking-note--info speaking-row"><span class="speaking-note-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3Z"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></span><span>Сначала подготовка по таймеру, потом запись — тайминги как на настоящем экзамене</span></aside></div>';
+  setTxt('s9_today','4 задания');spNormalizeView('hub');spLoadPronunciationStatus();spLoadLearningReport();spGen()}
 function spPool(t){var ai=(S&&S.spkAi&&S.spkAi['p'+t])||[];return speakingModule.pool([SP1,SP2,SP3,SP4][t-1],ai)}
 function spSet(t){var k='spIdx'+t;S[k]=(S[k]||0);return speakingModule.select(spPool(t),S[k])}
 function spNextSet(t){if((SP&&SP.adaptiveContentRef)||adaptiveSpeakingLock()){try{toast('В персональном занятии закреплён точный вариант задания')}catch(_){}return false}S['spIdx'+t]=(S['spIdx'+t]||0)+1;save();return true}
-async function spOpen(t,options){var adaptiveLock=options&&options.adaptiveLock||null;var targetedPractice=options&&options.targetedPractice||null;var lock=adaptiveSpeakingLock();if(lock&&!adaptiveLock)return launchAdaptiveSpeakingLock(lock);var adaptiveContentRef=adaptiveLock&&adaptiveLock.contentRef||null;var freshAssignment=Boolean(adaptiveContentRef||targetedPractice);var targetedBody=targetedPractice?{targetedPractice:{sourceAttemptId:targetedPractice.sourceAttemptId,reportRevision:targetedPractice.reportRevision,accentLocale:targetedPractice.accentLocale||null,skillId:targetedPractice.skillId,contentRef:targetedPractice.contentRef}}:null;function assignmentPost(path,body){var assignmentPath='/api/v1/speaking/task-'+t+'/sessions';if(targetedBody&&path===assignmentPath)return apiPost(path,targetedBody);return apiPost(path,body)}spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP_sheet=false;
-  if(t===1){var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает текст…</div>';
-    SP_TASK1_FLOW=createSpeakingTask1BrowserFlow({api:{post:function(path,body){if(targetedBody&&path==='/api/v1/speaking/task-1/sessions')return apiPost(path,targetedBody);return apiPost(path,SP_ACCENT_SETUP&&!SP_ACCENT?{calibrationSetupId:SP_ACCENT_SETUP.id}:body)}}});
-    try{var session=await SP_TASK1_FLOW.loadAssignment();var serverSet=speakingModule.serverTask1Set(session);if(!serverSet||!SP_TASK1_CATALOG_KEYS.has(serverSet.id+'@'+serverSet.revision))throw new Error('SPEAKING_TASK1_RESPONSE_INVALID');
+async function spOpen(t,options){var epoch=++SP_VIEW_EPOCH;var adaptiveLock=options&&options.adaptiveLock||null;var targetedPractice=options&&options.targetedPractice||null;var lock=adaptiveSpeakingLock();if(lock&&!adaptiveLock)return launchAdaptiveSpeakingLock(lock);var adaptiveContentRef=adaptiveLock&&adaptiveLock.contentRef||null;var freshAssignment=Boolean(adaptiveContentRef||targetedPractice);var targetedBody=targetedPractice?{targetedPractice:{sourceAttemptId:targetedPractice.sourceAttemptId,reportRevision:targetedPractice.reportRevision,accentLocale:targetedPractice.accentLocale||null,skillId:targetedPractice.skillId,contentRef:targetedPractice.contentRef}}:null;function assignmentPost(path,body){var assignmentPath='/api/v1/speaking/task-'+t+'/sessions';if(targetedBody&&path===assignmentPath)return apiPost(path,targetedBody);return apiPost(path,body)}spReleaseRecording();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP_sheet=false;
+  if(t===1){var area=document.getElementById('s9_area');if(area)area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Сервер подбирает текст…</div>';spNormalizeView('loading');
+    var task1Flow=createSpeakingTask1BrowserFlow({api:{post:function(path,body){if(targetedBody&&path==='/api/v1/speaking/task-1/sessions')return apiPost(path,targetedBody);return apiPost(path,SP_ACCENT_SETUP&&!SP_ACCENT?{calibrationSetupId:SP_ACCENT_SETUP.id}:body)}}});SP_TASK1_FLOW=task1Flow;
+    try{var session=await task1Flow.loadAssignment();if(epoch!==SP_VIEW_EPOCH||SP_TASK1_FLOW!==task1Flow)return false;var serverSet=speakingModule.serverTask1Set(session);if(!serverSet||!SP_TASK1_CATALOG_KEYS.has(serverSet.id+'@'+serverSet.revision))throw new Error('SPEAKING_TASK1_RESPONSE_INVALID');
       SP={t:1,set:serverSet,session:session,phase:'intro',qi:0,url:null,mic:null,adaptiveContentRef:adaptiveContentRef};spRender();return true}
-    catch(error){spDisposeTask1Flow();SP=null;try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
-  if(t===2){var task2Area=document.getElementById('s9_area');if(task2Area)task2Area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает объявление…</div>';
-    SP_TASK2_FLOW=createSpeakingTask2BrowserFlow({api:{post:assignmentPost,get:function(path){return apiGet(path)}}});
+    catch(error){if(epoch!==SP_VIEW_EPOCH||SP_TASK1_FLOW!==task1Flow)return false;spDisposeTask1Flow();SP=null;try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
+  if(t===2){var task2Area=document.getElementById('s9_area');if(task2Area)task2Area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Сервер подбирает объявление…</div>';spNormalizeView('loading');
+    var task2Flow=createSpeakingTask2BrowserFlow({api:{post:assignmentPost,get:function(path){return apiGet(path)}}});SP_TASK2_FLOW=task2Flow;
     try{var task2Session=null;
-      if(!freshAssignment&&S.speakingTask2SessionId){try{task2Session=await SP_TASK2_FLOW.restoreSession(S.speakingTask2SessionId)}catch(error){
+      if(!freshAssignment&&S.speakingTask2SessionId){try{task2Session=await task2Flow.restoreSession(S.speakingTask2SessionId);if(epoch!==SP_VIEW_EPOCH||SP_TASK2_FLOW!==task2Flow)return false}catch(error){
         if(!task2RecoveryPointerInvalid(error))throw error;delete S.speakingTask2SessionId;save()}}
-      if(!task2Session||task2Session.status==='completed')task2Session=await SP_TASK2_FLOW.loadAssignment();
+      if(!task2Session||task2Session.status==='completed'){task2Session=await task2Flow.loadAssignment();if(epoch!==SP_VIEW_EPOCH||SP_TASK2_FLOW!==task2Flow)return false}
       var serverTask2=speakingModule.serverTask2Set(task2Session);
       if(!serverTask2||!SP_TASK2_CATALOG_KEYS.has(serverTask2.id+'@'+serverTask2.revision))throw new Error('SPEAKING_TASK2_RESPONSE_INVALID');
       if(!adaptiveContentRef){S.speakingTask2SessionId=task2Session.id;save()}
       SP={t:2,set:serverTask2,session:task2Session,phase:task2Session.status==='assigned'?'intro':'question',qi:task2Session.currentQuestion-1,url:null,mic:null,adaptiveContentRef:adaptiveContentRef};spRender();return true}
-    catch(error){spDisposeTask2Flow();SP=null;if(task2RecoveryPointerInvalid(error)){delete S.speakingTask2SessionId;save()}
+    catch(error){if(epoch!==SP_VIEW_EPOCH||SP_TASK2_FLOW!==task2Flow)return false;spDisposeTask2Flow();SP=null;if(task2RecoveryPointerInvalid(error)){delete S.speakingTask2SessionId;save()}
       try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
-  if(t===3){var task3Area=document.getElementById('s9_area');if(task3Area)task3Area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает интервью…</div>';
-    SP_TASK3_FLOW=createSpeakingTask3BrowserFlow({api:{post:assignmentPost,get:function(path){return apiGet(path)}}});
+  if(t===3){var task3Area=document.getElementById('s9_area');if(task3Area)task3Area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Сервер подбирает интервью…</div>';spNormalizeView('loading');
+    var task3Flow=createSpeakingTask3BrowserFlow({api:{post:assignmentPost,get:function(path){return apiGet(path)}}});SP_TASK3_FLOW=task3Flow;
     try{var task3Session=null;
-      if(!freshAssignment&&S.speakingTask3SessionId){try{task3Session=await SP_TASK3_FLOW.restoreSession(S.speakingTask3SessionId)}catch(error){
+      if(!freshAssignment&&S.speakingTask3SessionId){try{task3Session=await task3Flow.restoreSession(S.speakingTask3SessionId);if(epoch!==SP_VIEW_EPOCH||SP_TASK3_FLOW!==task3Flow)return false}catch(error){
         if(!task3RecoveryPointerInvalid(error))throw error;delete S.speakingTask3SessionId;save()}}
-      if(!task3Session||task3Session.status==='completed')task3Session=await SP_TASK3_FLOW.loadAssignment();
+      if(!task3Session||task3Session.status==='completed'){task3Session=await task3Flow.loadAssignment();if(epoch!==SP_VIEW_EPOCH||SP_TASK3_FLOW!==task3Flow)return false}
       var serverTask3=speakingModule.serverTask3Set(task3Session);
       if(!serverTask3||!SP_TASK3_CATALOG_KEYS.has(serverTask3.id+'@'+serverTask3.revision))throw new Error('SPEAKING_TASK3_RESPONSE_INVALID');
       if(!adaptiveContentRef){S.speakingTask3SessionId=task3Session.id;save()}
       SP={t:3,set:serverTask3,session:task3Session,phase:task3Session.status==='assigned'?'intro':'question',qi:task3Session.currentQuestion-1,url:null,mic:null,adaptiveContentRef:adaptiveContentRef};spRender();return true}
-    catch(error){spDisposeTask3Flow();SP=null;if(task3RecoveryPointerInvalid(error)){delete S.speakingTask3SessionId;save()}
+    catch(error){if(epoch!==SP_VIEW_EPOCH||SP_TASK3_FLOW!==task3Flow)return false;spDisposeTask3Flow();SP=null;if(task3RecoveryPointerInvalid(error)){delete S.speakingTask3SessionId;save()}
       try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
-  if(t===4){var task4Area=document.getElementById('s9_area');if(task4Area)task4Area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер подбирает фотопроект и загружает изображения…</div>';
+  if(t===4){var task4Area=document.getElementById('s9_area');if(task4Area)task4Area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Сервер подбирает фотопроект и загружает изображения…</div>';spNormalizeView('loading');
     var task4Flow=createSpeakingTask4BrowserFlow({api:{post:assignmentPost,get:function(path){return apiGet(path)}}});SP_TASK4_FLOW=task4Flow;
     try{var task4Session=null;
-      if(!freshAssignment&&S.speakingTask4SessionId){try{task4Session=await task4Flow.restoreSession(S.speakingTask4SessionId);if(SP_TASK4_FLOW!==task4Flow)return false}catch(error){
+      if(!freshAssignment&&S.speakingTask4SessionId){try{task4Session=await task4Flow.restoreSession(S.speakingTask4SessionId);if(epoch!==SP_VIEW_EPOCH||SP_TASK4_FLOW!==task4Flow)return false}catch(error){
         if(!task4RecoveryPointerInvalid(error))throw error;delete S.speakingTask4SessionId;save()}}
-      if(!task4Session||task4Session.status==='completed'){task4Session=await task4Flow.loadAssignment();if(SP_TASK4_FLOW!==task4Flow)return false}
+      if(!task4Session||task4Session.status==='completed'){task4Session=await task4Flow.loadAssignment();if(epoch!==SP_VIEW_EPOCH||SP_TASK4_FLOW!==task4Flow)return false}
       var serverTask4=speakingModule.serverTask4Set(task4Session);
       if(!serverTask4||!SPEAKING_TASK4_CATALOG.tasks.some(function(task){return task.id===serverTask4.id&&task.revision===serverTask4.revision}))throw new Error('SPEAKING_TASK4_RESPONSE_INVALID');
-      await task4Flow.prepareAssets();if(SP_TASK4_FLOW!==task4Flow)return false;
+      await task4Flow.prepareAssets();if(epoch!==SP_VIEW_EPOCH||SP_TASK4_FLOW!==task4Flow)return false;
       if(!adaptiveContentRef){S.speakingTask4SessionId=task4Session.id;save()}
       SP={t:4,set:serverTask4,session:task4Session,phase:'intro',qi:0,url:null,mic:null,assetReady:true,adaptiveContentRef:adaptiveContentRef};spRender();return true}
-    catch(error){if(SP_TASK4_FLOW!==task4Flow)return false;spDisposeTask4Flow();SP=null;if(task4RecoveryPointerInvalid(error)){delete S.speakingTask4SessionId;save()}
+    catch(error){if(epoch!==SP_VIEW_EPOCH||SP_TASK4_FLOW!==task4Flow)return false;spDisposeTask4Flow();SP=null;if(task4RecoveryPointerInvalid(error)){delete S.speakingTask4SessionId;save()}
       try{toast(apiMessage(error,'request'))}catch(_){}spHub();return false}}
   SP={t:t,set:spSet(t),phase:'intro',qi:0,url:null};spRender();return true}
 function launchSpeakingTask(taskNumber,contentRef){
   var descriptor=adaptiveSpeakingTask(contentRef);if(!descriptor||descriptor.taskNumber!==Number(taskNumber))return false;
   return launchAdaptiveSpeakingLock({contentRef:contentRef})}
 function spRestartAdaptive(){if(!SP||!SP.adaptiveContentRef||SP.evaluating)return false;var taskNumber=SP.t,contentRef=SP.adaptiveContentRef;spStopAll();return launchSpeakingTask(taskNumber,contentRef)}
-function spBtn(label,fn,solid){return '<button type="button" class="sq" style="'+WBTN+(solid?'background:linear-gradient(135deg,#A83226,#7A251D);color:#fff;border:none;box-shadow:0 12px 24px rgba(122,37,29,.28);':'color:#B54E2F;')+'" onclick="'+fn+'">'+label+'</button>'}
-function spTimerChip(){return '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;">'
-  +'<span id="s9_timer" style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;">'+spFmt(SP.left)+'</span></div>'
-  +'<div style="margin-top:8px;height:7px;border-radius:5px;background:#F1EDE7;"><div id="s9_tbar" style="width:100%;height:100%;border-radius:5px;background:linear-gradient(90deg,#FFA570,#F2683F);"></div></div>'}
+const SP_PRIMARY_BUTTON_OPEN='<button type="button" id="s9_primary_action" class="sq aisy-button speaking-action speaking-action--primary speaking-primary">';
+const SP_MICROPHONE_BUTTON_OPEN='<button type="button" data-speaking-control="microphone" aria-label="Проверить микрофон" aria-pressed="false">';
+const SP_CANONICAL_PRIMARY_CLASS='speaking-'+'primary';
+function spBtn(label,fn,solid){var primary=Boolean(solid);var action=/spMicCheck|speFullMicCheck/u.test(fn)?'microphone-check':(/spRec|speFullStartRecording/u.test(fn)?'record':(/spFinish|speFullStopRecording/u.test(fn)?'stop-recording':(/spEval|speFullEvaluate/u.test(fn)?'evaluate':'navigate')));var pressed=action==='microphone-check'?String(Boolean((SP&&SP.mic)||(SPE&&SPE.micCheck==='passed'))):null;var classes='sq aisy-button speaking-action speaking-action--'+(primary?'primary '+SP_CANONICAL_PRIMARY_CLASS:'secondary aisy-button--secondary');var open=primary?SP_PRIMARY_BUTTON_OPEN:'<button type="button" class="'+classes+'">';if(action==='microphone-check')open=SP_MICROPHONE_BUTTON_OPEN.replace('aria-pressed="false"','aria-pressed="'+pressed+'"').replace('>',' id="'+(primary?'s9_primary_action':'speaking_mic_action')+'" class="'+classes+'" aria-describedby="speaking_mic_status">');open=open.replace('>',' data-speaking-action="'+action+'" onclick="'+fn+'">');return open+label+'</button>'}
+function spTimerChip(){var value=spFmt(SP.left);return '<div class="speaking-timer" role="timer" aria-live="off" aria-label="Осталось '+value+'">'
+  +'<span id="s9_timer">'+value+'</span></div>'
+  +'<div class="speaking-timer__track" aria-hidden="true"><div id="s9_tbar" class="speaking-timer__value"></div></div>'}
+function spMicStatusMarkup(fallback){var state='unchecked',message=fallback||'Перед таймером проверь разрешение и уровень микрофона',role='status';if(SP&&SP.mic){state=SP.mic.status==='passed'?'ready':'quiet';message=SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'}else if(SP&&SP.micError){state=SP.micError.code==='MICROPHONE_PERMISSION_DENIED'?'permission-denied':'error';role='alert';message=state==='permission-denied'?'Нет доступа к микрофону. Разреши его для этого сайта в настройках браузера и повтори проверку.':'Микрофон не готов. Проверь подключение и повтори проверку.'}return '<div id="speaking_mic_status" class="speaking-state speaking-mic-status" data-speaking-state="permission" data-state="'+state+'" role="'+role+'" aria-live="polite" aria-atomic="true">'+message+'</div>'}
 function spTick(total,onEnd){clearInterval(SP_tm);
   SP_tm=setInterval(function(){if(!SP){clearInterval(SP_tm);return}
-    SP.left--;setTxt('s9_timer',spFmt(SP.left));
+    SP.left--;var timerValue=spFmt(SP.left);setTxt('s9_timer',timerValue);var timer=document.getElementById('s9_timer');var timerRoot=timer&&timer.closest('[role="timer"]');if(timerRoot)timerRoot.setAttribute('aria-label','Осталось '+timerValue);
     var b=document.getElementById('s9_tbar');if(b)b.style.width=Math.max(0,Math.round(SP.left/total*100))+'%';
-    setTxt('s9_today',spFmt(SP.left));
     if(SP.left<=0){clearInterval(SP_tm);onEnd()}},1000)}
 /* Показ листа с подсказками: переменную модуля разметка присвоить не может. */
 async function spToggleSheet(){if(!SP)return false;if(!SP_sheet&&SP.session&&SP.session.id){try{await apiPost('/api/v1/speaking/task-'+SP.t+'/sessions/'+SP.session.id+'/assistance',{})}catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}SP_sheet=!SP_sheet;spRender();return true}
-function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)return;
-  var t=SP.t,c=SP_CONF[t],set=SP.set;
-  if(officialTask2Active()&&SP.phase==='question'){
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
-      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ВОПРОС '+(SP.qi+1)+' ИЗ 4</span>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;margin-top:10px;">Продолжить с вопроса '+(SP.qi+1)+' из 4</div>'
-      +spTaskBody()
-      +'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
-      +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов':'Сигнал тихий · подвинь микрофон ближе'):'После восстановления снова проверь микрофон')+'</div></div>'
-      +spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic)+'<div style="height:10px;"></div>'
-      +spBtn('Записать вопрос '+(SP.qi+1),'spRec()',true)+'<div style="height:10px;"></div>'+spBtn('← К заданиям','spStopAll();initSpeaking()');
-    spAnim('win','.32s');return}
-  if(officialTask2Active()&&SP.phase==='task2_review'){
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;text-align:center;">'+wDeco()
-      +'<div style="font-size:40px;">🎙️</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Запись вопроса '+(SP.qi+1)+' готова</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай локальную запись. На сервер уйдут только безопасные метаданные.</div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('▶ Послушать вопрос '+(SP.qi+1),'spPlayTask2Question('+(SP.qi+1)+')',true)
-      +'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Как получился прямой вопрос?</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;">'
-      +'<button type="button" class="sq" onclick="spCompleteTask2Question(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Повторить</button>'
-      +'<button type="button" class="sq" onclick="spCompleteTask2Question(\'steady\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FFF4DE;color:#8A641A;font-weight:800;">Нормально</button>'
-      +'<button type="button" class="sq" onclick="spCompleteTask2Question(\'strong\',this)" style="min-height:44px;border:0;border-radius:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;">Уверенно</button></div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('Перезаписать вопрос','spRec()');
-    spAnim('win','.32s');return}
-  if(officialTask2Active()&&SP.phase==='task2_complete'){
-    area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
-      +'<div style="font-size:42px;">✅</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">4 отдельные записи завершены</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Все четыре локальные записи готовы. По твоей команде они будут отправлены в защищённый контур оценки и связаны только с этой тренировкой.</div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('✨ Оценить по критериям ЕГЭ','spEval(this)',true)+'<div id="sp_evalbox"></div>'
-      +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(2)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
-    spAnim('win','.32s');return}
-  if(officialTask3Active()&&SP.phase==='question'){
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
-      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ВОПРОС '+(SP.qi+1)+' ИЗ 5</span>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:18px;color:#2B2B2B;margin-top:10px;">Продолжить с вопроса '+(SP.qi+1)+' из 5</div>'
-      +spTargetFocusBanner()
-      +'<div lang="en" style="font-weight:600;font-size:12px;color:#777163;line-height:1.5;margin-top:8px;">'+ui.escapeHtml(SP.set.instruction)+'</div>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:9px;">'+ui.escapeHtml(SP.set.qs[SP.qi])+'</div>'
-      +'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
-      +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов':'Сигнал тихий · подвинь микрофон ближе'):'После восстановления снова проверь микрофон')+'</div></div>'
-      +spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic)+'<div style="height:10px;"></div>'
-      +spBtn('Записать ответ '+(SP.qi+1),'spRec()',true)+'<div style="height:10px;"></div>'+spBtn('← К заданиям','spStopAll();initSpeaking()');
-    spAnim('win','.32s');return}
-  if(officialTask3Active()&&SP.phase==='task3_prompt'){
-    area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:20px;text-align:center;">'+wDeco()
-      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#317485;background:#E3F1F5;padding:5px 10px;border-radius:20px;">ВОПРОС '+(SP.qi+1)+' ИЗ 5</span>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:10px;">Сначала прозвучит вопрос</div>'
-      +'<div lang="en" style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:9px;">'+ui.escapeHtml(SP.set.qs[SP.qi])+'</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:8px;">Запись и 40-секундный таймер начнутся после окончания вопроса.</div></div>';
-    spAnim('win','.32s');return}
-  if(officialTask3Active()&&SP.phase==='task3_review'){
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;text-align:center;">'+wDeco()
-      +'<div style="font-size:40px;">🎙️</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Ответ '+(SP.qi+1)+' записан</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай локальную запись. На сервер уйдут только безопасные метаданные.</div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('▶ Послушать ответ '+(SP.qi+1),'spPlayTask3Answer('+(SP.qi+1)+')',true)
-      +'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Получился полный ответ из 2–3 предложений?</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;">'
-      +'<button type="button" class="sq" onclick="spCompleteTask3Answer(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Повторить</button>'
-      +'<button type="button" class="sq" onclick="spCompleteTask3Answer(\'steady\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FFF4DE;color:#8A641A;font-weight:800;">Нормально</button>'
-      +'<button type="button" class="sq" onclick="spCompleteTask3Answer(\'strong\',this)" style="min-height:44px;border:0;border-radius:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;">Уверенно</button></div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('Перезаписать ответ','spRec()');
-    spAnim('win','.32s');return}
-  if(officialTask3Active()&&SP.phase==='task3_complete'){
-    area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
-      +'<div style="font-size:42px;">✅</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">5 отдельных записей завершены</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Все пять локальных записей готовы. По твоей команде они будут отправлены в защищённый контур оценки и связаны с точными вопросами интервью.</div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('✨ Оценить по критериям ЕГЭ','spEval(this)',true)+'<div id="sp_evalbox"></div>'
-      +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(3)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
-    spAnim('win','.32s');return}
-  if(officialTask4Active()&&SP.phase==='task4_review'){
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:20px;text-align:center;">'+wDeco()
-      +'<div style="font-size:40px;">🎙️</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Монолог записан</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай локальную запись. На сервер уйдут только длительность, проверка микрофона, факт локального прослушивания и самооценка.</div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('▶ Послушать монолог','spPlay()',true)
-      +'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Получилось раскрыть все четыре пункта плана?</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px;">'
-      +'<button type="button" class="sq" onclick="spCompleteTask4(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Повторить</button>'
-      +'<button type="button" class="sq" onclick="spCompleteTask4(\'steady\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FFF4DE;color:#8A641A;font-weight:800;">Нормально</button>'
-      +'<button type="button" class="sq" onclick="spCompleteTask4(\'strong\',this)" style="min-height:44px;border:0;border-radius:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;">Уверенно</button></div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('Перезаписать монолог','spRec()');
-    spAnim('win','.32s');return}
-  if(officialTask4Active()&&SP.phase==='task4_complete'){
-    area.innerHTML='<div id="s9_card" class="clayCard" role="status" aria-live="polite" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
-      +'<div style="font-size:42px;">✅</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Тренировка задания 4 завершена</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;line-height:1.55;margin-top:7px;">Локальная запись готова. По твоей команде она будет отправлена в защищённый контур и проверена по трём критериям задания 4.</div></div>'
-      +'<div style="height:10px;"></div>'+spBtn('✨ Оценить по критериям ЕГЭ','spEval(this)',true)+'<div id="sp_evalbox"></div>'
-      +'<div style="height:10px;"></div>'+spBtn('Новая тренировка','spOpen(4)',true)+'<div style="height:10px;"></div>'+spBtn('К заданиям','initSpeaking()');
-    spAnim('win','.32s');return}
-  /* ---- интро ---- */
-  if(SP.phase==='intro'){
-    var body='';
-    if(t===1)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Прочитай назначенный сервером текст вслух. Подготовка — '+spFmt(c.prep)+', чтение — до '+spFmt(c.rec)+'.</div>'
-      +'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
-      +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'):'Перед таймером проверь разрешение и уровень микрофона')+'</div>';
-    if(t===2)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Изучи назначенное сервером объявление и задай <b>4 прямых вопроса</b> по пунктам. Подготовка — '+spFmt(c.prep)+', на каждый вопрос — 20 секунд.</div>'
-      +'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
-      +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'):'Перед таймером проверь разрешение и уровень микрофона')+'</div>';
-    if(t===3)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Интервью на тему «'+ui.escapeHtml(set.topic)+'». Услышишь 5 вопросов — на каждый отвечай 2–3 предложениями, до 40 секунд. Подготовки нет, как на экзамене.</div>'
-      +(officialTask3Active()?'<div lang="en" style="margin-top:10px;padding:11px 13px;border-radius:13px;background:#FAF6F1;font-weight:700;font-size:12.5px;color:#4A453E;line-height:1.55;">'+ui.escapeHtml(set.instruction)+'</div>':'')
-      +(officialTask3Active()?'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
-        +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'):'Перед первым вопросом проверь разрешение и уровень микрофона')+'</div>':'');
-    if(t===4)body='<div style="font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;">Подготовь проектное высказывание по двум фотографиям и четырём пунктам плана. Подготовка — '+spFmt(c.prep)+', монолог — до '+spFmt(c.rec)+'.</div>'
-      +(officialTask4Active()?'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:#EAF7F0;color:#1D7F4A;font-weight:700;font-size:12px;">Фотопара полностью загружена и декодирована до запуска таймера.</div>':'')
-      +(officialTask4Active()?'<div role="status" aria-live="polite" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:'+(SP.mic?(SP.mic.status==='passed'?'#EAF7F0':'#FFF4DE'):'#F4EFE9')+';font-weight:700;font-size:12px;color:#4A453E;">'
-        +(SP.mic?(SP.mic.status==='passed'?'Микрофон готов · уровень '+Math.round((SP.mic.level||0)*100)+'%':'Сигнал тихий · подвинь микрофон ближе'):'Перед таймером проверь разрешение и уровень микрофона')+'</div>':'');
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
-      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">'+c.sub.toUpperCase()+'</span>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:10px;">'+c.name+'</div>'
-      +'<div style="margin-top:8px;">'+body+'</div>'
-      +(officialTask4Active()?spTaskBody():'')
-      +'<div style="margin-top:11px;display:flex;gap:8px;">'
-      +(SP.adaptiveContentRef||officialTask4Active()?'':'<button type="button" class="clk sq iconbtn" onclick="'+(t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)')+'" style="flex:1;text-align:center;background:#FFEDE4;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#C2421B;cursor:pointer;">Другой вариант</button>')
-      +(SP.adaptiveContentRef||officialTask3Active()||officialTask4Active()?'':'<button type="button" class="clk sq iconbtn" onclick="spToggleSheet()" style="flex:1;text-align:center;background:#EAF7F0;border-radius:13px;padding:9px 0;font-weight:800;font-size:12px;color:#1D7F4A;cursor:pointer;">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button>')+'</div>'
-      +(SP_sheet&&!officialTask3Active()&&!officialTask4Active()?'<div style="margin-top:11px;background:#F2F8F4;border-radius:14px;padding:11px 13px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.65;">'+SP_SHEET[t]+'</div>':'')
-      +'</div>'
-      +((t===1||officialTask2Active()||officialTask3Active()||officialTask4Active())?spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic)+'<div style="height:10px;"></div>':'')
-      +spBtn(c.prep?'Начать подготовку':'Начать интервью','spPrep()',true)
-      +'<div style="height:10px;"></div>'
-      +spBtn('← К заданиям','spStopAll();initSpeaking()');
-    spAnim('win','.32s');setTxt('s9_today',c.name);return}
-  /* ---- подготовка ---- */
-  if(SP.phase==='prep'){
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
-      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">ПОДГОТОВКА</span>'
-      +spTaskBody()
-      +spTimerChip()+'</div>'
-      +spBtn('Готово — к записи','spRec()',true)
-      +'<div style="height:10px;"></div>'
-      +spBtn('← К заданиям','spStopAll();initSpeaking()');
-    spAnim('win','.32s');return}
-  /* ---- запись ---- */
-  if(SP.phase==='rec'){
-    var head=SP.t===3
-      ?'<div style="font-weight:600;font-size:12px;color:#777163;margin-top:10px;">Вопрос '+(SP.qi+1)+' из 5</div>'
-       +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:6px;">'+SP.set.qs[SP.qi]+'</div>'
-       +(officialTask3Active()?'':'<div style="margin-top:10px;"><button type="button" class="clk sq iconbtn" onclick="lPlayRaw([{s:1,t:SP.set.qs[SP.qi]}])" style="display:inline-flex;align-items:center;gap:7px;background:#E3F1F5;border-radius:13px;padding:9px 14px;font-weight:800;font-size:12px;color:#317485;cursor:pointer;">🔊 Озвучить вопрос</button></div>')
-      :spTaskBody();
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
-      +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A83226;background:#FDEDEA;padding:5px 10px;border-radius:20px;">● ИДЁТ ЗАПИСЬ</span>'
-      +head+spTimerChip()+'</div>'
-      +(SP.t===3&&SP.qi<4?spBtn('Следующий вопрос →','spNextQ()',true)+'<div style="height:10px;"></div>':'')
-      +spBtn(SP.t===3&&SP.qi>=4?'Завершить интервью':'Стоп — закончить запись','spFinish()',SP.t===3)
-      ;
-    return}
-  /* ---- результат ---- */
-  if(SP.phase==='done'){var r=spSt();
-    var assessmentAction=SP.accentCalibration?'spAccentFinishUnknown(this)':'spEval(this)';
-    var assessmentLabel=SP.accentCalibration?'Определить вариант произношения':'✨ Оценить по критериям ЕГЭ';
-    var extra='';
-    if(t===1)extra='<div style="height:10px;"></div>'+spBtn('🔊 Эталон диктора','spEtalon()');
-    if(t===2)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ОБРАЗЦЫ ВОПРОСОВ</div>'
-      +set.points.map(function(p,i){return '<div style="margin-top:8px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;"><b>'+(i+1)+'. '+p+':</b><br><i>'+set.exq[i]+'</i></div>'}).join('')+'</div>';
-    if(t===4)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ПРОВЕРЬ СЕБЯ</div>'
-      +set.plan.map(function(p,i){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'?</div>'}).join('')+'</div>';
-    if(t===3)extra='<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ВОПРОСЫ ИНТЕРВЬЮ</div>'
-      +set.qs.map(function(q,i){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+q+'</div>'}).join('')+'</div>';
-    area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;text-align:center;">'+wDeco()
-      +'<div style="font-size:42px;">🎙️</div>'
-      +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:20px;color:#2B2B2B;margin-top:8px;">Запись готова!</div>'
-      +'<div style="font-weight:600;font-size:13px;color:#777163;margin-top:5px;">Послушай себя со стороны и сверься со шпаргалкой.<br>Тренировок в этом задании: '+r['t'+t].n+'</div></div>'
-      +'<div style="height:12px;"></div>'
-      +(SP.url?spBtn('▶ Послушать свою запись','spPlay()',true):'<div style="text-align:center;font-weight:600;font-size:12.5px;color:#A83226;">Запись не получилась — проверь доступ к микрофону</div>')
-      +(SP.blob&&(SP.accentCalibration||t!==1||SP.task1Completed)?'<div style="height:10px;"></div><button type="button" class="sq" onclick="'+assessmentAction+'" style="'+WBTN.replace('background:#fff','background:linear-gradient(135deg,#1D6944,#155235)').replace('color:#2B2B2B','color:#fff').replace('border:1px solid #F0EAE2','border:none')+'box-shadow:0 12px 24px rgba(21,82,53,.28);">'+assessmentLabel+'</button>':'')
-      +(SP.blob?'<div style="height:10px;"></div>'+spBtn('Удалить запись','spDeleteRecording()'):'')
-      +(SP.blob&&t===1&&!SP.task1Completed?'<div class="clayCard" style="padding:14px 16px;margin-top:12px;"><div style="font-weight:800;font-size:12px;color:#4A453E;">Как ощущалось чтение?</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;">'
-        +'<button type="button" class="sq" onclick="spCompleteTask1(\'weak\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FDEDEA;color:#A83226;font-weight:800;">Нужно повторить</button>'
-        +'<button type="button" class="sq" onclick="spCompleteTask1(\'steady\',this)" style="min-height:44px;border:0;border-radius:12px;background:#FFF4DE;color:#8A641A;font-weight:800;">Нормально</button>'
-        +'<button type="button" class="sq" onclick="spCompleteTask1(\'strong\',this)" style="min-height:44px;border:0;border-radius:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;">Уверенно</button></div></div>':'')
-      +(t===1&&SP.task1Completed?'<div role="status" aria-live="polite" style="margin-top:12px;padding:10px 12px;border-radius:13px;background:#EAF7F0;color:#1D7F4A;font-weight:800;font-size:12px;">Безопасная история тренировки сохранена.</div>':'')
-      +(SP.t>1&&!SP.adaptiveContentRef?'<div style="height:10px;"></div>'+spBtn('Образец ответа от ИИ','spSample(this)'):'')
-      +'<div id="sp_evalbox"></div>'
-      +extra
-      +(SP.adaptiveContentRef
-        ?'<div style="height:10px;"></div><div style="text-align:center;font-weight:700;font-size:12.5px;color:#777163;line-height:1.5;">В персональном занятии закреплено это задание. Оцени ответ или перезапиши тот же вариант.</div><div style="height:10px;"></div><button id="adaptive_speaking_retry" class="sq" style="'+WBTN+'" onclick="spRestartAdaptive()">Записать этот вариант ещё раз</button>'
-        :'<div style="height:10px;"></div>'+spBtn('Ещё раз',t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)')
-          +'<div style="height:10px;"></div>'+spBtn('К заданиям','spStopAll();initSpeaking()'));
-    spAnim('win','.32s');setTxt('s9_today',SP_CONF[t].name);return}}
-function spTargetFocusBanner(){var target=SP&&SP.session&&SP.session.targetedPractice;if(!target)return '';var focus=target.focus;var detail=focus?(focus.kind==='phoneme'?'/'+focus.value+'/ · '+focus.anchorWord:focus.value):target.label;return '<div role="status" style="margin-top:10px;padding:10px 12px;border-radius:13px;background:#EAF7F0;color:#1D6944;font-size:12px;font-weight:750;"><b>Цель этой проверки:</b> '+ui.escapeHtml(detail||target.label)+'</div>'}
-function spTaskBody(){var t=SP.t,set=SP.set,focus=spTargetFocusBanner();
-  if(t===1)return focus+'<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+ui.escapeHtml(set.tx)+'</div>';
-  if(t===2)return focus+'<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+ui.escapeHtml(set.ad)+'</div>'
-    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">Задай прямые вопросы о:</div>'
-    +set.points.map(function(p,i){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:'+(officialTask2Active()&&i===SP.qi?'#A83226':'#C2421B')+';">'+(i+1)+'. '+ui.escapeHtml(p)+'</div>'}).join('');
-  if(t===4&&officialTask4Active()){var photoAsset=task4PhotoAsset(set.photoPair.src);return focus+'<div lang="en" style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">'+ui.escapeHtml(set.projectTitle)+'</div>'
-    +'<figure style="margin:12px 0 0;max-width:920px;">'
-    +'<img loading="lazy" decoding="async" src="'+ui.escapeHtml(set.photoPair.src)+'" alt="'+ui.escapeHtml(set.photoPair.alt)+'" width="'+(photoAsset?photoAsset.width:1536)+'" height="'+(photoAsset?photoAsset.height:1024)+'" style="display:block;width:100%;height:auto;border-radius:16px;background:#F4EFE9;">'
-    +'<figcaption style="margin-top:7px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">Две оригинальные фотографии для сравнения: слева и справа.</figcaption></figure>'
-    +'<div lang="en" style="margin-top:10px;font-weight:600;font-size:12px;color:#777163;line-height:1.5;">'+ui.escapeHtml(set.instruction)+'</div>'
-    +'<div style="margin-top:9px;font-weight:700;font-size:12.5px;color:#2B2B2B;">План:</div>'
-    +set.plan.map(function(p,i){return '<div lang="en" style="margin-top:5px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">'+(i+1)+'. '+ui.escapeHtml(p)+'</div>'}).join('')}
-  if(t===4)return focus+'<div style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">Тема: '+set.topic+'</div>'
-    +set.ph.map(function(p){return '<div style="margin-top:8px;background:#FAF6F1;border-radius:14px;padding:10px 13px;font-weight:600;font-size:12.5px;color:#4A453E;font-style:italic;">'+p+'</div>'}).join('')
-    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">План:</div>'
-    +set.plan.map(function(p,i){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(i+1)+'. '+p+'</div>'}).join('');
-  return focus}
+function spPaperCard(kicker,title,body,options){options=options||{};var role=options.role?' role="'+options.role+'"':'';var live=options.live?' aria-live="'+options.live+'"':'';var classes='speaking-sheet speaking-sheet--roomy speaking-stack'+(options.center?' speaking-sheet--center':'');return '<section id="s9_card" class="'+classes+'" data-speaking-focus'+role+live+'>'+wDeco()+(kicker?'<span class="speaking-chip '+(options.chipClass||'')+'">'+kicker+'</span>':'')+'<h2 class="speaking-heading">'+title+'</h2>'+body+'</section>'}
+function spRecordedCard(title,copy,complete){return spPaperCard('',title,'<span class="speaking-result-mark speaking-result-mark--'+(complete?'complete':'recorded')+'" aria-hidden="true"></span><p class="speaking-copy speaking-copy--muted">'+copy+'</p>',{center:true,role:complete?'status':'',live:complete?'polite':''})}
+function spRatingCard(prompt,handler,labels){labels=labels||['Повторить','Нормально','Уверенно'];return '<section class="speaking-sheet speaking-sheet--compact speaking-stack"><h3 class="speaking-subheading">'+prompt+'</h3><div class="speaking-rating-grid" role="group" aria-label="Самооценка ответа"><button type="button" class="sq speaking-rating-choice" data-rating="weak" data-speaking-commit onclick="'+handler+'(\'weak\',this)">'+labels[0]+'</button><button type="button" class="sq speaking-rating-choice" data-rating="steady" data-speaking-commit onclick="'+handler+'(\'steady\',this)">'+labels[1]+'</button><button type="button" class="sq speaking-rating-choice" data-rating="strong" data-speaking-commit onclick="'+handler+'(\'strong\',this)">'+labels[2]+'</button></div></section>'}
+function spActionMarkup(items){return '<div class="speaking-action-stack">'+items.filter(Boolean).join('')+'</div>'}
+function spCompletionView(title,copy,taskNumber){return '<div class="speaking-view">'+spRecordedCard(title,copy,true)+spActionMarkup([spBtn('Оценить по критериям ЕГЭ','spEval(this)',true),spBtn('Новая тренировка','spOpen('+taskNumber+')',false).replace('<button','<button data-speaking-forward'),spBtn('К заданиям','initSpeaking()',false)])+'<div id="sp_evalbox"></div></div>'}
+function spRender(){var area=document.getElementById('s9_area');if(!area||!SP)return;var t=SP.t,c=SP_CONF[t],set=SP.set;
+  if(officialTask2Active()&&SP.phase==='question'){area.innerHTML='<div class="speaking-view">'+spPaperCard('ВОПРОС '+(SP.qi+1)+' ИЗ 4','Продолжить с вопроса '+(SP.qi+1)+' из 4',spTaskBody()+spMicStatusMarkup('После восстановления снова проверь микрофон'))+spActionMarkup([spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic),spBtn('Записать вопрос '+(SP.qi+1),'spRec()',true),spBtn('К заданиям','spStopAll();initSpeaking()',false)])+'</div>';spAnim('win','.32s');return}
+  if(officialTask2Active()&&SP.phase==='task2_review'){area.innerHTML='<div class="speaking-view">'+spRecordedCard('Запись вопроса '+(SP.qi+1)+' готова','До нажатия «Оценить» запись остаётся на устройстве. Для оценки она будет явно отправлена внешнему speech-провайдеру; исходный звук не сохраняется.')+spActionMarkup([spBtn('Послушать вопрос '+(SP.qi+1),'spPlayTask2Question('+(SP.qi+1)+')',false)])+spRatingCard('Как получился прямой вопрос?','spCompleteTask2Question')+spActionMarkup([spBtn('Перезаписать вопрос','spRec()',false)])+'</div>';spAnim('win','.32s');return}
+  if(officialTask2Active()&&SP.phase==='task2_complete'){area.innerHTML=spCompletionView('4 отдельные записи завершены','Все четыре локальные записи готовы. По твоей команде они будут отправлены в защищённый контур оценки и связаны только с этой тренировкой.',2);spAnim('win','.32s');return}
+  if(officialTask3Active()&&SP.phase==='question'){var questionBody=spTargetFocusBanner()+'<p class="speaking-meta" lang="en">'+ui.escapeHtml(SP.set.instruction)+'</p><p class="speaking-prompt" lang="en">'+ui.escapeHtml(SP.set.qs[SP.qi])+'</p>'+spMicStatusMarkup('После восстановления снова проверь микрофон');area.innerHTML='<div class="speaking-view">'+spPaperCard('ВОПРОС '+(SP.qi+1)+' ИЗ 5','Продолжить с вопроса '+(SP.qi+1)+' из 5',questionBody)+spActionMarkup([spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic),spBtn('Записать ответ '+(SP.qi+1),'spRec()',true),spBtn('К заданиям','spStopAll();initSpeaking()',false)])+'</div>';spAnim('win','.32s');return}
+  if(officialTask3Active()&&SP.phase==='task3_prompt'){area.innerHTML='<div class="speaking-view">'+spPaperCard('ВОПРОС '+(SP.qi+1)+' ИЗ 5','Сначала прозвучит вопрос','<p class="speaking-prompt" lang="en">'+ui.escapeHtml(SP.set.qs[SP.qi])+'</p><p class="speaking-copy speaking-copy--muted">Запись и 40-секундный таймер начнутся после окончания вопроса.</p>',{center:true,role:'status',live:'polite',chipClass:'speaking-chip--primary'})+'</div>';spAnim('win','.32s');return}
+  if(officialTask3Active()&&SP.phase==='task3_review'){area.innerHTML='<div class="speaking-view">'+spRecordedCard('Ответ '+(SP.qi+1)+' записан','До нажатия «Оценить» запись остаётся на устройстве. Для оценки она будет явно отправлена внешнему speech-провайдеру; исходный звук не сохраняется.')+spActionMarkup([spBtn('Послушать ответ '+(SP.qi+1),'spPlayTask3Answer('+(SP.qi+1)+')',false)])+spRatingCard('Получился полный ответ из 2–3 предложений?','spCompleteTask3Answer')+spActionMarkup([spBtn('Перезаписать ответ','spRec()',false)])+'</div>';spAnim('win','.32s');return}
+  if(officialTask3Active()&&SP.phase==='task3_complete'){area.innerHTML=spCompletionView('5 отдельных записей завершены','Все пять локальных записей готовы. По твоей команде они будут отправлены в защищённый контур оценки и связаны с точными вопросами интервью.',3);spAnim('win','.32s');return}
+  if(officialTask4Active()&&SP.phase==='task4_review'){area.innerHTML='<div class="speaking-view">'+spRecordedCard('Монолог записан','До нажатия «Оценить» запись остаётся на устройстве. Для оценки она будет явно отправлена внешнему speech-провайдеру; исходный звук не сохраняется.')+spActionMarkup([spBtn('Послушать монолог','spPlay()',false)])+spRatingCard('Получилось раскрыть все четыре пункта плана?','spCompleteTask4')+spActionMarkup([spBtn('Перезаписать монолог','spRec()',false)])+'</div>';spAnim('win','.32s');return}
+  if(officialTask4Active()&&SP.phase==='task4_complete'){area.innerHTML=spCompletionView('Тренировка задания 4 завершена','Локальная запись готова. По твоей команде она будет отправлена в защищённый контур и проверена по трём критериям задания 4.',4);spAnim('win','.32s');return}
+  if(SP.phase==='intro'){var body='';if(t===1)body='<p class="speaking-copy">Прочитай назначенный сервером текст вслух. Подготовка — '+spFmt(c.prep)+', чтение — до '+spFmt(c.rec)+'.</p>'+spMicStatusMarkup();if(t===2)body='<p class="speaking-copy">Изучи назначенное сервером объявление и задай <b>4 прямых вопроса</b> по пунктам. Подготовка — '+spFmt(c.prep)+', на каждый вопрос — 20 секунд.</p>'+spMicStatusMarkup();if(t===3)body='<p class="speaking-copy">Интервью на тему «'+ui.escapeHtml(set.topic)+'». Услышишь 5 вопросов — на каждый отвечай 2–3 предложениями, до 40 секунд. Подготовки нет, как на экзамене.</p>'+(officialTask3Active()?'<p class="speaking-note" lang="en">'+ui.escapeHtml(set.instruction)+'</p>'+spMicStatusMarkup('Перед первым вопросом проверь разрешение и уровень микрофона'):'');if(t===4)body='<p class="speaking-copy">Подготовь проектное высказывание по двум фотографиям и четырём пунктам плана. Подготовка — '+spFmt(c.prep)+', монолог — до '+spFmt(c.rec)+'.</p>'+(officialTask4Active()?'<div class="speaking-note speaking-note--success" role="status" aria-live="polite">Фотопара полностью загружена и декодирована до запуска таймера.</div>'+spMicStatusMarkup():'');var cardActions='<div class="speaking-row speaking-row--wrap">'+(SP.adaptiveContentRef||officialTask4Active()?'':'<button type="button" class="sq speaking-inline-action" onclick="'+(t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)')+'">Другой вариант</button>')+(SP.adaptiveContentRef||officialTask3Active()||officialTask4Active()?'':'<button type="button" class="sq speaking-inline-action" onclick="spToggleSheet()">'+(SP_sheet?'Скрыть шпаргалку':'Шпаргалка')+'</button>')+'</div>';var sheet=SP_sheet&&!officialTask3Active()&&!officialTask4Active()?'<aside class="speaking-note speaking-note--success">'+SP_SHEET[t]+'</aside>':'';area.innerHTML='<div class="speaking-view">'+spPaperCard(c.sub.toUpperCase(),c.name,body+(officialTask4Active()?spTaskBody():'')+cardActions+sheet)+spActionMarkup([(t===1||officialTask2Active()||officialTask3Active()||officialTask4Active())?spBtn(SP.mic?'Проверить микрофон ещё раз':'Проверить микрофон','spMicCheck(this)',!SP.mic):'',spBtn(c.prep?'Начать подготовку':'Начать интервью','spPrep()',true),spBtn('К заданиям','spStopAll();initSpeaking()',false)])+'</div>';spAnim('win','.32s');setTxt('s9_today',c.name);return}
+  if(SP.phase==='prep'){area.innerHTML='<div class="speaking-view">'+spPaperCard('ПОДГОТОВКА','Подготовь ответ',spTaskBody()+spTimerChip(),{chipClass:'speaking-chip--warning'})+spActionMarkup([spBtn('Готово — к записи','spRec()',true),spBtn('К заданиям','spStopAll();initSpeaking()',false)])+'</div>';spAnim('win','.32s');return}
+  if(SP.phase==='rec'){var head=SP.t===3?'<p class="speaking-meta">Вопрос '+(SP.qi+1)+' из 5</p><p class="speaking-prompt" lang="en">'+ui.escapeHtml(SP.set.qs[SP.qi])+'</p>'+(officialTask3Active()?'':'<button type="button" class="sq speaking-media-action" onclick="lPlayRaw([{s:1,t:SP.set.qs[SP.qi]}])">Озвучить вопрос</button>'):spTaskBody();var finishLabel=officialTask3Active()?'Стоп — закончить ответ':(SP.t===3&&SP.qi>=4?'Завершить интервью':'Стоп — закончить запись');area.innerHTML='<div class="speaking-view">'+spPaperCard('ИДЁТ ЗАПИСЬ','Ответ записывается','<div class="speaking-state" data-state="recording" role="status" aria-live="assertive">Микрофон включён</div>'+head+spTimerChip(),{chipClass:'speaking-chip--primary'})+spActionMarkup([SP.t===3&&SP.qi<4&&!officialTask3Active()?spBtn('Следующий вопрос','spNextQ()',true):'',spBtn(finishLabel,'spFinish()',true)])+'</div>';spNormalizeView('recording');return}
+  if(SP.phase==='done'){var r=spSt();var assessmentAction=SP.accentCalibration?'spAccentFinishUnknown(this)':'spEval(this)';var assessmentLabel=SP.accentCalibration?'Определить вариант произношения':'Оценить по критериям ЕГЭ';var extra='';if(t===1)extra=spActionMarkup([spBtn('Эталон диктора','spEtalon()',false)]);if(t===2)extra='<section class="speaking-sheet speaking-sheet--compact speaking-stack"><h3 class="speaking-subheading">Образцы вопросов</h3>'+set.points.map(function(p,i){return '<p class="speaking-copy"><b>'+(i+1)+'. '+ui.escapeHtml(p)+':</b><br><i>'+ui.escapeHtml(set.exq[i])+'</i></p>'}).join('')+'</section>';if(t===4)extra='<section class="speaking-sheet speaking-sheet--compact speaking-stack"><h3 class="speaking-subheading">Проверь себя</h3><ol class="speaking-list">'+set.plan.map(function(p){return '<li>'+ui.escapeHtml(p)+'?</li>'}).join('')+'</ol></section>';if(t===3)extra='<section class="speaking-sheet speaking-sheet--compact speaking-stack"><h3 class="speaking-subheading">Вопросы интервью</h3><ol class="speaking-list">'+set.qs.map(function(q){return '<li>'+ui.escapeHtml(q)+'</li>'}).join('')+'</ol></section>';var recordActions=[SP.url?spBtn('Послушать свою запись','spPlay()',false):'<div class="speaking-state" data-state="error" role="alert">Запись не получилась — проверь доступ к микрофону</div>',SP.blob&&(SP.accentCalibration||t!==1||SP.task1Completed)?spBtn(assessmentLabel,assessmentAction,true):'',SP.blob?spBtn('Удалить запись','spDeleteRecording()',false):'',SP.t>1&&!SP.adaptiveContentRef?spBtn('Образец ответа от ИИ','spSample(this)',false):''];var rating=SP.blob&&t===1&&!SP.task1Completed?spRatingCard('Как ощущалось чтение?','spCompleteTask1',['Нужно повторить','Нормально','Уверенно']):'';var saved=t===1&&SP.task1Completed?'<div class="speaking-state" data-state="success" role="status" aria-live="polite">Безопасная история тренировки сохранена.</div>':'';var returnActions=SP.adaptiveContentRef?'<p class="speaking-meta speaking-center">В персональном занятии закреплено это задание. Оцени ответ или перезапиши тот же вариант.</p>'+spActionMarkup([spBtn('Записать этот вариант ещё раз','spRestartAdaptive()',false).replace('<button','<button id="adaptive_speaking_retry" data-speaking-forward')]):spActionMarkup([spBtn('Ещё раз',t===1?'spOpen(1)':'spNextSet(SP.t);spOpen(SP.t)',false).replace('<button','<button data-speaking-forward'),spBtn('К заданиям','spStopAll();initSpeaking()',false)]);area.innerHTML='<div class="speaking-view">'+spRecordedCard('Запись готова!','Послушай себя со стороны и сверься со шпаргалкой. Тренировок в этом задании: '+r['t'+t].n)+spActionMarkup(recordActions)+rating+saved+'<div id="sp_evalbox"></div>'+extra+returnActions+'</div>';spAnim('win','.32s');setTxt('s9_today',SP_CONF[t].name);return}}
+function spTargetFocusBanner(){var target=SP&&SP.session&&SP.session.targetedPractice;if(!target)return '';var focus=target.focus;var detail=focus?(focus.kind==='phoneme'?'/'+focus.value+'/ · '+focus.anchorWord:focus.value):target.label;return '<div class="speaking-note speaking-note--success" role="status"><b>Цель этой проверки:</b> '+ui.escapeHtml(detail||target.label)+'</div>'}
+function spTaskBody(){var t=SP.t,set=SP.set,focus=spTargetFocusBanner();if(t===1)return focus+'<p class="speaking-reading" lang="en">'+ui.escapeHtml(set.tx)+'</p>';if(t===2)return focus+'<blockquote class="speaking-note speaking-quote">'+ui.escapeHtml(set.ad)+'</blockquote><h3 class="speaking-subheading">Задай прямые вопросы о:</h3><ol class="speaking-task-list">'+set.points.map(function(p,i){return '<li '+(officialTask2Active()&&i===SP.qi?'data-current="true"':'')+'>'+ui.escapeHtml(p)+'</li>'}).join('')+'</ol>';if(t===4&&officialTask4Active()){var photoAsset=task4PhotoAsset(set.photoPair.src);return focus+'<h3 class="speaking-subheading" lang="en">'+ui.escapeHtml(set.projectTitle)+'</h3><figure class="speaking-photo-pair"><img loading="lazy" decoding="async" src="'+ui.escapeHtml(set.photoPair.src)+'" alt="'+ui.escapeHtml(set.photoPair.alt)+'" width="'+(photoAsset?photoAsset.width:1536)+'" height="'+(photoAsset?photoAsset.height:1024)+'"><figcaption class="speaking-meta">Две оригинальные фотографии для сравнения: слева и справа.</figcaption></figure><p class="speaking-meta" lang="en">'+ui.escapeHtml(set.instruction)+'</p><h3 class="speaking-subheading">План</h3><ol class="speaking-task-list" lang="en">'+set.plan.map(function(p){return '<li>'+ui.escapeHtml(p)+'</li>'}).join('')+'</ol>'}if(t===4)return focus+'<h3 class="speaking-subheading">Тема: '+ui.escapeHtml(set.topic)+'</h3>'+set.ph.map(function(p){return '<blockquote class="speaking-note speaking-quote">'+ui.escapeHtml(p)+'</blockquote>'}).join('')+'<h3 class="speaking-subheading">План</h3><ol class="speaking-task-list">'+set.plan.map(function(p){return '<li>'+ui.escapeHtml(p)+'</li>'}).join('')+'</ol>';return focus}
 async function spMicCheck(btn){if(!SP||!((SP.t===1&&SP_TASK1_FLOW)||officialTask2Active()||officialTask3Active()||officialTask4Active()))return false;if(btn)btn.disabled=true;
-  try{SP.mic=await (SP.t===1?SP_TASK1_FLOW:(officialTask2Active()?SP_TASK2_FLOW:(officialTask3Active()?SP_TASK3_FLOW:SP_TASK4_FLOW))).checkMicrophone();spRender();return true}
-  catch(error){SP.mic=null;try{toast(error&&error.code==='MICROPHONE_PERMISSION_DENIED'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Микрофон не готов. Проверь подключение и попробуй снова.')}catch(_){}spRender();return false}}
+  var view=SP;var flow=SP.t===1?SP_TASK1_FLOW:(officialTask2Active()?SP_TASK2_FLOW:(officialTask3Active()?SP_TASK3_FLOW:SP_TASK4_FLOW));
+  try{var mic=await flow.checkMicrophone();if(SP!==view)return false;SP.mic=mic;SP.micError=null;spRender();return true}
+  catch(error){if(SP!==view)return false;SP.mic=null;SP.micError={code:String(error&&error.code||'MICROPHONE_UNAVAILABLE')};try{toast(error&&error.code==='MICROPHONE_PERMISSION_DENIED'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Микрофон не готов. Проверь подключение и попробуй снова.')}catch(_){}spRender();return false}}
 function spPrep(){var c=SP_CONF[SP.t];
   if((SP.t===1||officialTask2Active()||officialTask3Active()||officialTask4Active())&&!SP.mic){try{toast('Сначала проверь микрофон — официальный таймер ещё не запущен.')}catch(_){}return}
   if(officialTask4Active()&&!SP.assetReady){try{toast('Дождись полной загрузки фотопары — таймер ещё не запущен.')}catch(_){}return}
   if(!c.prep)return spRec();
   SP.phase='prep';SP.left=c.prep;spRender();
   spTick(c.prep,function(){spRec()})}
-async function spRec(){var c=SP_CONF[SP.t];
+async function spRec(){if(!SP)return false;var view=SP,c=SP_CONF[SP.t];
   clearInterval(SP_tm);
   spReleaseRecording();
-  if(SP.t===1&&SP_TASK1_FLOW){try{await SP_TASK1_FLOW.startRecording();SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return}
-    catch(error){SP.phase='intro';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись. Проверь разрешение на микрофон.')}catch(_){}return}}
-  if(officialTask2Active()){try{await SP_TASK2_FLOW.startQuestion();SP.phase='rec';SP.qi=SP.session.currentQuestion-1;SP.left=c.per;spRender();spTick(c.per,function(){spFinish()});return}
-    catch(error){SP.phase=SP.session.status==='assigned'?'intro':'question';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись вопроса.')}catch(_){}return}}
+  if(SP.t===1&&SP_TASK1_FLOW){var task1Flow=SP_TASK1_FLOW;try{await task1Flow.startRecording();if(SP!==view||SP_TASK1_FLOW!==task1Flow)return false;SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return true}
+    catch(error){if(SP!==view||SP_TASK1_FLOW!==task1Flow)return false;SP.phase='intro';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись. Проверь разрешение на микрофон.')}catch(_){}return false}}
+  if(officialTask2Active()){var task2Flow=SP_TASK2_FLOW;try{await task2Flow.startQuestion();if(SP!==view||SP_TASK2_FLOW!==task2Flow)return false;SP.phase='rec';SP.qi=SP.session.currentQuestion-1;SP.left=c.per;spRender();spTick(c.per,function(){spFinish()});return true}
+    catch(error){if(SP!==view||SP_TASK2_FLOW!==task2Flow)return false;SP.phase=SP.session.status==='assigned'?'intro':'question';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись вопроса.')}catch(_){}return false}}
   if(officialTask3Active()){var task3SessionId=SP.session.id;SP.qi=SP.session.currentQuestion-1;var task3Question=SP.set.qs[SP.qi];SP.phase='task3_prompt';spRender();
     try{await Promise.resolve(lPlayRaw([{s:1,t:task3Question}]))}catch(_){}
     if(!SP||!SP_TASK3_FLOW||SP.session.id!==task3SessionId||SP.session.currentQuestion-1!==SP.qi)return false;
-    try{await SP_TASK3_FLOW.startAnswer();SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return true}
-    catch(error){SP.phase=SP.session.status==='assigned'?'intro':'question';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись ответа.')}catch(_){}return}}
-  if(officialTask4Active()){try{await SP_TASK4_FLOW.startRecording();SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return true}
-    catch(error){SP.phase='intro';spRender();try{toast(error&&error.code==='SPEAKING_TASK4_ASSET_NOT_READY'?'Дождись полной загрузки фотопары.':(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись монолога.'))}catch(_){}return false}}
+    var task3Flow=SP_TASK3_FLOW;try{await task3Flow.startAnswer();if(SP!==view||SP_TASK3_FLOW!==task3Flow)return false;SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return true}
+    catch(error){if(SP!==view||SP_TASK3_FLOW!==task3Flow)return false;SP.phase=SP.session.status==='assigned'?'intro':'question';spRender();try{toast(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись ответа.')}catch(_){}return false}}
+  if(officialTask4Active()){var task4Flow=SP_TASK4_FLOW;try{await task4Flow.startRecording();if(SP!==view||SP_TASK4_FLOW!==task4Flow)return false;SP.phase='rec';SP.left=c.rec;spRender();spTick(c.rec,function(){spFinish()});return true}
+    catch(error){if(SP!==view||SP_TASK4_FLOW!==task4Flow)return false;SP.phase='intro';spRender();try{toast(error&&error.code==='SPEAKING_TASK4_ASSET_NOT_READY'?'Дождись полной загрузки фотопары.':(error&&error.code==='MIC_CHECK_REQUIRED'?'Сначала проверь микрофон.':'Не удалось начать запись монолога.'))}catch(_){}return false}}
   try{
-    var st=await navigator.mediaDevices.getUserMedia({audio:true});
+    var st=await navigator.mediaDevices.getUserMedia({audio:true});if(SP!==view){st.getTracks().forEach(function(track){track.stop()});return false}
     var mime=spMime();
     SP_rec=mime?new MediaRecorder(st,{mimeType:mime}):new MediaRecorder(st);SP_chunks=[];
     SP_rec.ondataavailable=function(e){SP_chunks.push(e.data)};
-    SP_rec.onstop=function(){var tp=SP_rec.mimeType||(SP_chunks[0]&&SP_chunks[0].type)||'';
-      var bl=tp?new Blob(SP_chunks,{type:tp}):new Blob(SP_chunks);SP.blob=bl;SP.url=URL.createObjectURL(bl);st.getTracks().forEach(function(x){x.stop()});
+    var recorder=SP_rec;SP_rec.onstop=function(){var tp=recorder.mimeType||(SP_chunks[0]&&SP_chunks[0].type)||'';
+      var bl=tp?new Blob(SP_chunks,{type:tp}):new Blob(SP_chunks);st.getTracks().forEach(function(x){x.stop()});if(SP!==view||SP_rec!==recorder)return;SP.blob=bl;SP.url=URL.createObjectURL(bl);
       if(SP.phase==='done')spRender()};
     SP_rec.start();
-  }catch(e){SP.url=null;SP.phase='intro';spRender();try{toast('Нет доступа к микрофону. Разреши доступ в настройках браузера и попробуй снова.')}catch(_){}return}
+  }catch(e){if(SP!==view)return false;SP.url=null;SP.micError={code:String(e&&e.name==='NotAllowedError'?'MICROPHONE_PERMISSION_DENIED':'MICROPHONE_UNAVAILABLE')};SP.phase='intro';spRender();try{toast('Нет доступа к микрофону. Разреши доступ в настройках браузера и попробуй снова.')}catch(_){}return false}
   SP.phase='rec';SP.left=c.rec;SP.qi=0;spRender();
   if(SP.t===3){try{lPlayRaw([{s:1,t:SP.set.qs[0]}])}catch(e){}}
   spTick(c.rec,function(){SP.t===3?spNextQ():spFinish()})}
@@ -482,19 +350,18 @@ function spNextQ(){if(!SP)return;
   SP.qi++;SP.left=SP_CONF[3].rec;spRender();
   try{lPlayRaw([{s:1,t:SP.set.qs[SP.qi]}])}catch(e){}
   spTick(SP_CONF[3].rec,function(){SP.qi>=4?spFinish():spNextQ()})}
-async function spFinish(){if(!SP)return;clearInterval(SP_tm);try{lStop()}catch(e){}
-  if(officialTask2Active()){try{var task2Recording=await SP_TASK2_FLOW.stopQuestion();SP.blob=task2Recording.blob;SP.url=task2Recording.url;SP.phase='task2_review'}
-    catch(error){SP.blob=null;SP.url=null;SP.phase=SP.session.status==='assigned'?'intro':'question'}spRender();return}
-  if(officialTask3Active()){try{var task3Recording=await SP_TASK3_FLOW.stopAnswer();SP.blob=task3Recording.blob;SP.url=task3Recording.url;SP.phase='task3_review'}
-    catch(error){SP.blob=null;SP.url=null;SP.phase=SP.session.status==='assigned'?'intro':'question'}spRender();return}
-  if(officialTask4Active()){try{var task4Recording=await SP_TASK4_FLOW.stopRecording();SP.blob=task4Recording.blob;SP.url=task4Recording.url;SP.phase='task4_review'}
-    catch(error){SP.blob=null;SP.url=null;SP.phase='intro'}spRender();return}
-  var r=spSt();r['t'+SP.t].n++;if(!SP.adaptiveContentRef)spNextSet(SP.t);
-  SP.phase='done';
-  if(SP.t===1&&SP_TASK1_FLOW){try{var localRecording=await SP_TASK1_FLOW.stopRecording();SP.blob=localRecording.blob;SP.url=localRecording.url}
-    catch(error){SP.blob=null;SP.url=null}spSync();save();spRender();return}
+async function spFinish(){if(!SP)return false;var view=SP;clearInterval(SP_tm);try{lStop()}catch(e){}
+  if(officialTask2Active()){var task2Flow=SP_TASK2_FLOW;try{var task2Recording=await task2Flow.stopQuestion();if(SP!==view||SP_TASK2_FLOW!==task2Flow)return false;SP.blob=task2Recording.blob;SP.url=task2Recording.url;SP.phase='task2_review'}
+    catch(error){if(SP!==view||SP_TASK2_FLOW!==task2Flow)return false;SP.blob=null;SP.url=null;SP.phase=SP.session.status==='assigned'?'intro':'question'}spRender();return true}
+  if(officialTask3Active()){var task3Flow=SP_TASK3_FLOW;try{var task3Recording=await task3Flow.stopAnswer();if(SP!==view||SP_TASK3_FLOW!==task3Flow)return false;SP.blob=task3Recording.blob;SP.url=task3Recording.url;SP.phase='task3_review'}
+    catch(error){if(SP!==view||SP_TASK3_FLOW!==task3Flow)return false;SP.blob=null;SP.url=null;SP.phase=SP.session.status==='assigned'?'intro':'question'}spRender();return true}
+  if(officialTask4Active()){var task4Flow=SP_TASK4_FLOW;try{var task4Recording=await task4Flow.stopRecording();if(SP!==view||SP_TASK4_FLOW!==task4Flow)return false;SP.blob=task4Recording.blob;SP.url=task4Recording.url;SP.phase='task4_review'}
+    catch(error){if(SP!==view||SP_TASK4_FLOW!==task4Flow)return false;SP.blob=null;SP.url=null;SP.phase='intro'}spRender();return true}
+  if(SP.t===1&&SP_TASK1_FLOW){var task1Flow=SP_TASK1_FLOW;try{var localRecording=await task1Flow.stopRecording();if(SP!==view||SP_TASK1_FLOW!==task1Flow)return false;SP.blob=localRecording.blob;SP.url=localRecording.url}
+    catch(error){if(SP!==view||SP_TASK1_FLOW!==task1Flow)return false;SP.blob=null;SP.url=null}var task1State=spSt();task1State.t1.n++;if(!SP.adaptiveContentRef)spNextSet(1);SP.phase='done';spSync();save();spRender();return true}
+  var r=spSt();r['t'+SP.t].n++;if(!SP.adaptiveContentRef)spNextSet(SP.t);SP.phase='done';
   if(SP_rec&&SP_rec.state!=='inactive'){try{SP_rec.stop()}catch(e){}}
-  spSync();save();spRender()}
+  spSync();save();spRender();return true}
 var SP_audio=null;
 async function spPlay(){if(!SP||!SP.url)return;
   if(officialTask2Active())return spPlayTask2Question(SP.qi+1);
@@ -507,37 +374,31 @@ async function spPlay(){if(!SP||!SP.url)return;
   SP_audio.onerror=function(){try{toast('Не удалось воспроизвести запись — попробуй записать ещё раз')}catch(e){}};
   SP_audio.play().catch(function(){try{toast('Браузер не дал воспроизвести — нажми ещё раз')}catch(e){}})}
 function spDeleteRecording(){if(!SP)return;if(SP.t===1&&SP_TASK1_FLOW)SP_TASK1_FLOW.dispose();else if(SP.url)try{URL.revokeObjectURL(SP.url)}catch(e){}SP.url=null;SP.blob=null;SP_chunks=[];spRender();try{toast('Запись удалена')}catch(e){}}
-async function spCompleteTask1(selfRating,btn){if(!SP||SP.t!==1||!SP_TASK1_FLOW||SP.task1Completed)return false;if(btn)btn.disabled=true;
-  try{SP.completedSession=await SP_TASK1_FLOW.complete(selfRating);SP.task1Completed=true;spRender();return true}
-  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function spCompleteTask1(selfRating,btn){if(!SP||SP.t!==1||!SP_TASK1_FLOW||SP.task1Completed)return false;var view=SP,flow=SP_TASK1_FLOW,token=spBeginCommit();if(token===null)return false;
+  try{var completed=await flow.complete(selfRating);if(!spCommitCurrent(token,view)||SP_TASK1_FLOW!==flow)return false;SP.completedSession=completed;SP.task1Completed=true;spRender();return true}
+  catch(error){if(!spCommitCurrent(token,view)||SP_TASK1_FLOW!==flow)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{spEndCommit(token)}}
 async function spPlayTask2Question(questionNumber){if(!SP||SP.t!==2||!SP_TASK2_FLOW)return false;
   try{await SP_TASK2_FLOW.playQuestion(questionNumber);return true}catch(error){try{toast('Локальная запись этого вопроса недоступна.')}catch(_){}return false}}
-async function spCompleteTask2Question(selfRating,btn){if(!SP||SP.t!==2||!SP_TASK2_FLOW||SP.task2Completed)return false;if(btn)btn.disabled=true;
-  try{SP.session=await SP_TASK2_FLOW.completeQuestion(selfRating);SP.blob=null;SP.url=null;
+async function spCompleteTask2Question(selfRating,btn){if(!SP||SP.t!==2||!SP_TASK2_FLOW||SP.task2Completed)return false;var view=SP,flow=SP_TASK2_FLOW,token=spBeginCommit();if(token===null)return false;try{var session=await flow.completeQuestion(selfRating);if(!spCommitCurrent(token,view)||SP_TASK2_FLOW!==flow)return false;SP.session=session;SP.blob=null;SP.url=null;
     if(SP.session.status==='completed'){SP.task2Completed=true;SP.phase='task2_complete';delete S.speakingTask2SessionId;var r=spSt();r.t2.n++;spSync();save()}
     else{SP.qi=SP.session.currentQuestion-1;SP.phase='question';save()}
     spRender();return true}
-  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+  catch(error){if(!spCommitCurrent(token,view)||SP_TASK2_FLOW!==flow)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{spEndCommit(token)}}
 async function spPlayTask3Answer(questionNumber){if(!SP||SP.t!==3||!SP_TASK3_FLOW)return false;
   try{await SP_TASK3_FLOW.playAnswer(questionNumber);return true}catch(error){try{toast('Локальная запись этого ответа недоступна.')}catch(_){}return false}}
-async function spCompleteTask3Answer(selfRating,btn){if(!SP||SP.t!==3||!SP_TASK3_FLOW||SP.task3Completed)return false;if(btn)btn.disabled=true;
-  try{SP.session=await SP_TASK3_FLOW.completeAnswer(selfRating);SP.blob=null;SP.url=null;
+async function spCompleteTask3Answer(selfRating,btn){if(!SP||SP.t!==3||!SP_TASK3_FLOW||SP.task3Completed)return false;var view=SP,flow=SP_TASK3_FLOW,token=spBeginCommit();if(token===null)return false;try{var session=await flow.completeAnswer(selfRating);if(!spCommitCurrent(token,view)||SP_TASK3_FLOW!==flow)return false;SP.session=session;SP.blob=null;SP.url=null;
     if(SP.session.status==='completed'){SP.task3Completed=true;SP.phase='task3_complete';delete S.speakingTask3SessionId;var r=spSt();r.t3.n++;spSync();save()}
     else{SP.qi=SP.session.currentQuestion-1;SP.phase='question';save()}
     spRender();return true}
-  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
-async function spCompleteTask4(selfRating,btn){if(!SP||SP.t!==4||!SP_TASK4_FLOW||SP.task4Completed)return false;if(btn)btn.disabled=true;
-  try{SP.session=await SP_TASK4_FLOW.complete(selfRating);SP.task4Completed=true;SP.phase='task4_complete';
+  catch(error){if(!spCommitCurrent(token,view)||SP_TASK3_FLOW!==flow)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{spEndCommit(token)}}
+async function spCompleteTask4(selfRating,btn){if(!SP||SP.t!==4||!SP_TASK4_FLOW||SP.task4Completed)return false;var view=SP,flow=SP_TASK4_FLOW,token=spBeginCommit();if(token===null)return false;try{var session=await flow.complete(selfRating);if(!spCommitCurrent(token,view)||SP_TASK4_FLOW!==flow)return false;SP.session=session;SP.task4Completed=true;SP.phase='task4_complete';
     delete S.speakingTask4SessionId;var r=spSt();r.t4.n++;spSync();save();spRender();return true}
-  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+  catch(error){if(!spCommitCurrent(token,view)||SP_TASK4_FLOW!==flow)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}finally{spEndCommit(token)}}
 function spEtalon(){if(!SP||SP.t!==1)return;
   if(SP_audio){try{SP_audio.pause()}catch(e){}}
   var parts=speakingModule.sentences(SP.set.tx).map(function(x){return {s:0,t:x}});
   try{lPlayRaw(parts)}catch(e){}}
-/* ---- этап 2: расшифровка и оценка ИИ ---- */
-async function spSTT(blob){
-  var j=await apiPostBinary('/api/v1/stt',blob,blob.type||'application/octet-stream');
-  return j.text||''}
+/* ---- этап 2: серверная оценка по owner-bound assessment references ---- */
 function spAssignment(t,set){return speakingModule.assignment(t,set)}
 function spOfficialRecordings(){
   if(!SP||!SP.session||!SP.session.id)return null;
@@ -562,263 +423,299 @@ async function spUploadPronunciation(taskType,sessionId,recording,idempotencyKey
   return {key:headers['Idempotency-Key'],transcript:result.assessment&&result.assessment.transcript||'',wavBlob:wav.blob,locale:speechLocale}}
 async function spAccentFinishUnknown(btn){
   if(!SP||SP.t!==1||!SP.blob||!SP.session||!SP.accentCalibration)return false;
+  var view=SP,epoch=SP_VIEW_EPOCH,sessionId=SP.session.id,calibration=SP.accentCalibration,recording={blob:SP.blob,itemNumber:null};
   if(btn){if(btn.dataset.busy)return false;btn.dataset.busy=1;btn.disabled=true;btn.textContent='Сравниваю en-GB и en-US…'}
   try{
-    var recording={blob:SP.blob,itemNumber:null};
-    var cache=SP.accentCalibrationUploadCache;
-    if(!cache){cache={enGB:{key:window.crypto.randomUUID(),result:null},enUS:{key:window.crypto.randomUUID(),result:null}};SP.accentCalibrationUploadCache=cache}
-    if(!cache.enGB.result)cache.enGB.result=await spUploadPronunciation(1,SP.session.id,recording,cache.enGB.key,'en-GB');
-    if(!cache.enUS.result)cache.enUS.result=await spUploadPronunciation(1,SP.session.id,recording,cache.enUS.key,'en-US');
-    var result=await apiPost('/api/v1/speaking/accent-profile/calibration/'+encodeURIComponent(SP.accentCalibration.id)+'/complete',{
+    var cache=view.accentCalibrationUploadCache;
+    if(!cache){cache={enGB:{key:window.crypto.randomUUID(),result:null},enUS:{key:window.crypto.randomUUID(),result:null}};view.accentCalibrationUploadCache=cache}
+    if(!cache.enGB.result)cache.enGB.result=await spUploadPronunciation(1,sessionId,recording,cache.enGB.key,'en-GB');
+    if(SP!==view||epoch!==SP_VIEW_EPOCH||String(view.session&&view.session.id)!==String(sessionId))return false;
+    if(!cache.enUS.result)cache.enUS.result=await spUploadPronunciation(1,sessionId,recording,cache.enUS.key,'en-US');
+    if(SP!==view||epoch!==SP_VIEW_EPOCH||String(view.session&&view.session.id)!==String(sessionId))return false;
+    var result=await apiPost('/api/v1/speaking/accent-profile/calibration/'+encodeURIComponent(calibration.id)+'/complete',{
       enGbAssessmentKey:cache.enGB.result.key,enUsAssessmentKey:cache.enUS.result.key
     });
-    SP_ACCENT=result.profile;SP_ACCENT_SETUP=null;SP.accentCalibration=null;
+    if(SP!==view||epoch!==SP_VIEW_EPOCH||String(view.session&&view.session.id)!==String(sessionId))return false;
+    SP_ACCENT=result.profile;SP_ACCENT_SETUP=null;view.accentCalibration=null;
     spHub();toast('Профиль '+result.profile.locale+' предложен и сохранён. Его можно изменить в любой момент.');return true
-  }catch(error){if(btn){btn.disabled=false;btn.textContent='Повторить определение варианта';delete btn.dataset.busy}try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+  }catch(error){if(SP!==view||epoch!==SP_VIEW_EPOCH)return false;if(btn&&btn.isConnected){btn.disabled=false;btn.textContent='Повторить определение варианта';delete btn.dataset.busy}try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 async function spContributeCalibration(btn){
   if(!SP||!SP.calibrationCandidate||!SP_CALIBRATION_CONSENT||!SP_CALIBRATION_CONSENT.granted)return false;
+  var view=SP,epoch=SP_VIEW_EPOCH,candidate=SP.calibrationCandidate;
   if(btn){if(btn.dataset.busy)return false;btn.dataset.busy=1;btn.disabled=true;btn.textContent='Передаю анонимную запись…'}
-  try{await apiPostBinary('/api/v1/speaking/calibration-samples',SP.calibrationCandidate.wavBlob,'audio/wav',{'X-Speaking-Assessment-Key':SP.calibrationCandidate.key});SP.calibrationCandidate=null;if(btn){btn.textContent='Запись передана для двойной проверки'}toast('Спасибо. Эксперты не увидят имя или VK ID, а сырой звук будет удалён по правилам хранения.');return true}
-  catch(error){if(btn){btn.disabled=false;btn.textContent='Повторить передачу для калибровки';delete btn.dataset.busy}try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+  try{await apiPostBinary('/api/v1/speaking/calibration-samples',candidate.wavBlob,'audio/wav',{'X-Speaking-Assessment-Key':candidate.key});view.calibrationCandidate=null;if(SP!==view||epoch!==SP_VIEW_EPOCH)return true;if(btn&&btn.isConnected)btn.textContent='Запись передана для двойной проверки';toast('Спасибо. Эксперты не увидят имя или VK ID, а сырой звук будет удалён по правилам хранения.');return true}
+  catch(error){if(SP!==view||epoch!==SP_VIEW_EPOCH)return false;if(btn&&btn.isConnected){btn.disabled=false;btn.textContent='Повторить передачу для калибровки';delete btn.dataset.busy}try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 async function spEval(btn){
-  if(!SP)return false;
+  if(!SP||SP_EVALUATION_BUSY)return false;
   if(SP.t===1&&SP_TASK1_FLOW&&!SP.task1Completed)return false;
   var officialRecordings=spOfficialRecordings();
-  if(!officialRecordings&& !SP.blob)return;
-  var adaptiveRetry=document.getElementById('adaptive_speaking_retry');SP.evaluating=true;if(adaptiveRetry)adaptiveRetry.disabled=true;
-  if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent=officialRecordings?'Готовлю аудио…':'Расшифровываю запись…';btn.style.pointerEvents='none'}
+  if(!officialRecordings&&!SP.blob)return false;
+  var evaluationView=SP,evaluationSessionId=SP.session&&SP.session.id,evaluationTask=SP.t;
+  var evaluationToken=spBeginEvaluation(evaluationView,btn);if(evaluationToken===null)return false;
+  SP.evaluating=true;SP.evaluationError=null;if(btn)btn.textContent=officialRecordings?'Готовлю аудио…':'Расшифровываю запись…';
   try{
-    var tr='';var evaluationRequest;
-    if(officialRecordings){var uploaded=[];
-      var uploadCache=SP.pronunciationUploadCache;
-      if(!uploadCache||uploadCache.sessionId!==SP.session.id||uploadCache.taskType!==SP.t||uploadCache.items.length!==officialRecordings.length){
-        uploadCache={sessionId:SP.session.id,taskType:SP.t,items:officialRecordings.map(function(){return {key:window.crypto.randomUUID(),result:null}})};
-        SP.pronunciationUploadCache=uploadCache}
+    var tr='',evaluationRequest,uploaded=[];
+    if(officialRecordings){
+      var uploadCache=evaluationView.pronunciationUploadCache;
+      if(!uploadCache||uploadCache.sessionId!==evaluationSessionId||uploadCache.taskType!==evaluationTask||uploadCache.items.length!==officialRecordings.length){
+        uploadCache={sessionId:evaluationSessionId,taskType:evaluationTask,items:officialRecordings.map(function(){return {key:window.crypto.randomUUID(),result:null}})};
+        evaluationView.pronunciationUploadCache=uploadCache}
       for(var recordingIndex=0;recordingIndex<officialRecordings.length;recordingIndex++){
         if(btn)btn.textContent='Проверяю запись '+(recordingIndex+1)+' из '+officialRecordings.length+'…';
         var cachedUpload=uploadCache.items[recordingIndex];
-        if(!cachedUpload.result)cachedUpload.result=await spUploadPronunciation(SP.t,SP.session.id,officialRecordings[recordingIndex],cachedUpload.key);
+        if(!cachedUpload.result)cachedUpload.result=await spUploadPronunciation(evaluationTask,evaluationSessionId,officialRecordings[recordingIndex],cachedUpload.key);
+        if(!spEvaluationCurrent(evaluationToken,evaluationView,evaluationSessionId))return false;
         uploaded.push(cachedUpload.result)}
       tr=uploaded.map(function(item){return item.transcript}).filter(Boolean).join('\n');
-      evaluationRequest={taskType:SP.t,sessionId:SP.session.id};
-      if(SP.t===2||SP.t===3)evaluationRequest.pronunciationAssessmentKeys=uploaded.map(function(item){return item.key});
+      evaluationRequest={taskType:evaluationTask,sessionId:evaluationSessionId};
+      if(evaluationTask===2||evaluationTask===3)evaluationRequest.pronunciationAssessmentKeys=uploaded.map(function(item){return item.key});
       else evaluationRequest.pronunciationAssessmentKey=uploaded[0].key
     }else{throw new Error('серверная запись не найдена — начни тренировку заново')}
     if(btn)btn.textContent='Оцениваю по критериям…';
     var response=await apiPost('/api/v1/ai/evaluate-speaking',evaluationRequest,true);
+    if(!spEvaluationCurrent(evaluationToken,evaluationView,evaluationSessionId))return false;
     var d=response.review;
     if(!d||typeof d.got==='undefined')throw new Error('ИИ вернул неожиданный ответ, попробуй ещё раз');
     if(d.status==='needs_retry'){
-      SP.pronunciationUploadCache=null;
-      if(btn){btn.style.display='none';btn.style.pointerEvents='';delete btn.dataset.busy}
-      SP.evaluating=false;if(adaptiveRetry)adaptiveRetry.disabled=false;spShowEval(d,tr,null);return}
-    var score=speakingModule.clampScore(d,SP.t);d.got=score.got;d.max=score.max;
-    S.spkScores=speakingModule.appendScore(S.spkScores,{t:SP.t,g:d.got,m:d.max,ts:Date.now()});
-    SP.calibrationCandidate=SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.granted&&uploaded.length===1&&(SP.t===1||SP.t===4)
+      evaluationView.pronunciationUploadCache=null;evaluationView.evaluating=false;spShowEval(d,tr,null);spNormalizeView('needs-retry');spFinishEvaluationView(btn);return false}
+    var score=speakingModule.clampScore(d,evaluationTask);d.got=score.got;d.max=score.max;
+    S.spkScores=speakingModule.appendScore(S.spkScores,{t:evaluationTask,g:d.got,m:d.max,ts:Date.now()});
+    evaluationView.calibrationCandidate=SP_CALIBRATION_CONSENT&&SP_CALIBRATION_CONSENT.granted&&uploaded.length===1&&(evaluationTask===1||evaluationTask===4)
       ?{key:uploaded[0].key,wavBlob:uploaded[0].wavBlob}:null;
     spSync();save();
-    if(btn){btn.style.display='none'}
     var freshVoiceTutor=null;
     try{
       var freshVoiceReport=await apiGet('/api/v1/speaking/learning-report');
+      if(!spEvaluationCurrent(evaluationToken,evaluationView,evaluationSessionId))return false;
       var freshVoicePointer=freshVoiceReport&&freshVoiceReport.premium&&freshVoiceReport.premium.voiceTutor;
-      var freshVoiceOptions=spVoiceTutorOptions(freshVoicePointer);var freshVoiceReady=Boolean(freshVoiceOptions);
-      if(freshVoiceReady&&String(freshVoicePointer.attemptId)===String(response.attemptId)){
-        freshVoiceTutor=freshVoiceOptions
-      }
+      var freshVoiceOptions=spVoiceTutorOptions(freshVoicePointer);
+      if(freshVoiceOptions&&String(freshVoicePointer.attemptId)===String(response.attemptId))freshVoiceTutor=freshVoiceOptions
     }catch(_){}
-    spShowEval(d,tr,freshVoiceTutor);
-    completeAdaptiveServerAttempt('speaking',response.attemptId).then(function(result){if(result)showAdaptiveSpeakingReturn()}).catch(function(error){
-      try{toast('Оценка сохранена, но план пока не обновлён: '+apiMessage(error,'request'))}catch(_){}});
+    evaluationView.evaluating=false;spShowEval(d,tr,freshVoiceTutor);spNormalizeView('complete');spFinishEvaluationView(btn);
+    completeAdaptiveServerAttempt('speaking',response.attemptId).then(function(result){if(result&&SP===evaluationView&&String(SP.session&&SP.session.id)===String(evaluationSessionId))showAdaptiveSpeakingReturn()}).catch(function(error){
+      if(SP!==evaluationView)return;try{toast('Оценка сохранена, но план пока не обновлён: '+apiMessage(error,'request'))}catch(_){}});return true;
   }catch(e){
-    if(SP)SP.evaluating=false;if(adaptiveRetry)adaptiveRetry.disabled=false;
-    if(btn){btn.textContent='✨ Оценить с ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
-    try{toast(apiMessage(e,'stt'))}catch(_){}}}
+    if(!spEvaluationCurrent(evaluationToken,evaluationView,evaluationSessionId))return false;evaluationView.evaluating=false;evaluationView.evaluationError={code:String(e&&e.code||''),status:Number(e&&e.status||0),message:apiMessage(e,'stt')};
+    var evaluationErrorState=spEvaluationErrorState(e);spShowEvalError(e);spNormalizeView(evaluationErrorState);if(evaluationErrorState==='quota')spFinishEvaluationView(btn);else if(btn){btn.textContent='Повторить оценку';btn.removeAttribute('aria-busy');delete btn.dataset.busy}
+    try{toast(apiMessage(e,'stt'))}catch(_){}return false
+  }finally{spReleaseEvaluation(evaluationToken)}}
+function spEvaluationErrorState(error){if(Number(error&&error.status)===429)return 'quota';if(Number(error&&error.status)===503)return 'provider-unavailable';if(String(error&&error.code).includes('NETWORK'))return 'network-error';return 'retry'}
+function spShowEvalError(error){var box=document.getElementById('sp_evalbox');if(!box)return;var state=spEvaluationErrorState(error);var title=state==='quota'?'Лимит автоматической оценки исчерпан':state==='provider-unavailable'?'Сервис оценки сейчас недоступен':state==='network-error'?'Нет связи для отправки записи':'Не удалось завершить оценку';var action=state==='quota'?'Локальная запись и прослушивание по-прежнему доступны.':state==='provider-unavailable'?'Запись остаётся локальной. Попробуй позже.':'Проверь соединение и нажми «Повторить оценку» — ключ этой попытки будет использован повторно.';box.innerHTML='<div class="speaking-state" data-state="'+state+'" role="alert" aria-live="assertive"><strong>'+title+'</strong><span>'+action+'</span></div>'}
 function spShowEval(d,tr,voiceTutor){var box=document.getElementById('sp_evalbox');if(!box)return;
   /* всё, что пришло от модели или STT, попадает в DOM только экранированным */
   var safe=ui.escapeHtml;
   if(d.status==='needs_retry'){
-    box.innerHTML='<div class="clayCard" role="status" style="padding:18px;margin-top:12px;background:#FFF4E6;color:#714515;">'
-      +'<div style="font-weight:900;font-size:18px;">Нужна ещё одна запись</div>'
-      +'<div style="font-weight:600;font-size:13px;line-height:1.5;margin-top:6px;">'+safe(d.verdict||'Запись или расшифровка недостаточно надёжна для честного балла. Попробуй записать ответ ещё раз.')+'</div>'
-      +'<div style="font-weight:600;font-size:11.5px;line-height:1.5;margin-top:8px;">Ноль не поставлен: автоматическая система не уверена в доказательствах.</div></div>';return}
+    box.innerHTML='<div class="clayCard speaking-state speaking-evaluation-card speaking-evaluation-card--retry" data-state="needs-retry" role="status" aria-live="polite">'
+      +'<div class="speaking-evaluation-card__title">Нужна ещё одна запись</div>'
+      +'<div class="speaking-evaluation-card__copy">'+safe(d.verdict||'Запись или расшифровка недостаточно надёжна для честного балла. Попробуй записать ответ ещё раз.')+'</div>'
+      +'<div class="speaking-evaluation-card__evidence">Ноль не поставлен: автоматическая система не уверена в доказательствах.</div></div>';return}
   var pct=d.got/(d.max||1);
-  var col=pct>=0.7?'#1F8A50':(pct>=0.4?'#C77400':'#C0392B');
-  var h='<div class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-top:12px;animation:wflip .5s cubic-bezier(.25,.75,.35,1) both;">'
-    +'<div style="text-align:center;">'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:30px;color:'+col+';">'+d.got+' из '+d.max+'</div>'
-    +(speakingModule.isExperimentalTask(SP.t)||SP.t===1||SP.t===2?'<div class="ai-disclaimer" style="margin-top:6px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
-    +'<div style="font-weight:700;font-size:13.5px;color:#2B2B2B;margin-top:4px;">'+safe(d.verdict||'')+'</div></div>';
+  var scoreBand=pct>=0.7?'strong':(pct>=0.4?'developing':'weak');
+  var h='<div class="clayCard speaking-state speaking-evaluation-card" data-state="success" role="status" aria-live="polite" aria-atomic="true">'
+    +'<div class="speaking-evaluation-card__header">'
+    +'<div class="speaking-evaluation-score" data-score-band="'+scoreBand+'">'+d.got+' из '+d.max+'</div>'
+    +(speakingModule.isExperimentalTask(SP.t)||SP.t===1||SP.t===2?'<div class="ai-disclaimer speaking-evaluation-card__disclaimer">'+ui.escapeHtml(ui.AI_DISCLAIMER)+'</div>':'')
+    +'<div class="speaking-evaluation-card__verdict">'+safe(d.verdict||'')+'</div></div>';
   if(Array.isArray(d.criteria)&&d.criteria.length)
-    h+='<div style="margin-top:12px;">'+d.criteria.map(function(c){
-      return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #F4EFE9;font-weight:600;font-size:12.5px;color:#4A453E;"><span>'+safe(c.name)+'</span><b style="flex:none;color:'+((+c.got||0)>=(+c.max||1)?'#1F8A50':'#C77400')+';">'+safe(c.got)+' / '+safe(c.max)+'</b></div>'}).join('')+'</div>';
+    h+='<div class="speaking-evaluation-criteria">'+d.criteria.map(function(c){
+      return '<div class="speaking-evaluation-criterion"><span>'+safe(c.name)+'</span><b data-score-band="'+((+c.got||0)>=(+c.max||1)?'strong':'developing')+'">'+safe(c.got)+' / '+safe(c.max)+'</b></div>'}).join('')+'</div>';
   if(Array.isArray(d.good)&&d.good.length)
-    h+='<div style="margin-top:12px;background:#F2F8F4;border-radius:14px;padding:11px 13px;">'
-      +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ЧТО ПОЛУЧИЛОСЬ</div>'
-      +d.good.map(function(g){return '<div style="margin-top:5px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">• '+safe(g)+'</div>'}).join('')+'</div>';
+    h+='<div class="speaking-insight speaking-insight--success">'
+      +'<div class="speaking-insight__label">ЧТО ПОЛУЧИЛОСЬ</div>'
+      +d.good.map(function(g){return '<div class="speaking-insight__item">• '+safe(g)+'</div>'}).join('')+'</div>';
   if(Array.isArray(d.fix)&&d.fix.length)
-    h+='<div style="margin-top:10px;background:#FDF3EC;border-radius:14px;padding:11px 13px;">'
-      +'<div style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#C2421B;">НАД ЧЕМ ПОРАБОТАТЬ</div>'
-      +d.fix.map(function(f){return '<div style="margin-top:7px;font-weight:600;font-size:12.5px;color:#4A453E;line-height:1.5;">'
-        +(f.wrong?'<s style="color:#A83226;">'+safe(f.wrong)+'</s> → ':'')+(f.right?'<b style="color:#1D7F4A;">'+safe(f.right)+'</b><br>':'')+safe(f.note||'')+'</div>'}).join('')+'</div>';
+    h+='<div class="speaking-insight speaking-insight--improve">'
+      +'<div class="speaking-insight__label">НАД ЧЕМ ПОРАБОТАТЬ</div>'
+      +d.fix.map(function(f){return '<div class="speaking-insight__item">'
+        +(f.wrong?'<s class="speaking-insight__wrong">'+safe(f.wrong)+'</s> → ':'')+(f.right?'<b class="speaking-insight__right">'+safe(f.right)+'</b><br>':'')+safe(f.note||'')+'</div>'}).join('')+'</div>';
   var evidenceNote=SP.t===1
     ?'Автоматическая оценка учла распознанный текст, полноту чтения, беглость распознавания и отмеченные системой грубые ошибки в словах. Интонация и отдельные фонемы в балл не входили.'
     :'Автоматическая оценка учла распознанное содержание ответа и отмеченные системой грубые ошибки в словах. Интонация, отдельные фонемы и естественность пауз в балл не входили.';
-  h+='<div style="margin-top:10px;font-weight:600;font-size:11.5px;color:#777163;line-height:1.5;">'+safe(evidenceNote)+'</div>';
-  if(SP.calibrationCandidate)h+='<div style="margin-top:10px;padding:11px 13px;border-radius:14px;background:#F2F8F4;font-size:11.5px;line-height:1.5;color:#4A453E;"><b>Добровольная калибровка точности</b><br>Можно отдельно передать эту запись для двух независимых слепых оценок. Имя и VK ID экспертам не показываются.<button type="button" class="sq" onclick="spContributeCalibration(this)" style="display:block;width:100%;margin-top:9px;border:0;border-radius:11px;padding:10px;background:#E3F1F5;color:#317485;font-weight:800;cursor:pointer;">Передать анонимную запись</button></div>';
-  h+='<details style="margin-top:12px;"><summary style="font-weight:700;font-size:12px;color:#777163;cursor:pointer;">Расшифровка твоей речи</summary>'
-    +'<div style="margin-top:8px;font-weight:500;font-size:12.5px;color:#4A453E;line-height:1.6;font-style:italic;">'+safe(tr)+'</div><button class="sq" onclick="spFlagTranscript()" style="margin-top:8px;border:0;background:#F4EFE9;padding:7px 10px;border-radius:10px;font-weight:700;font-size:11px;">Расшифровка неточная</button></details>'
+  h+='<div class="speaking-evaluation-card__evidence">'+safe(evidenceNote)+'</div>';
+  if(SP.calibrationCandidate)h+='<div class="speaking-evaluation-calibration"><b>Добровольная калибровка точности</b><br>Можно отдельно передать эту запись для двух независимых слепых оценок. Имя и VK ID экспертам не показываются.<button type="button" class="sq speaking-support-action speaking-support-action--info" onclick="spContributeCalibration(this)">Передать анонимную запись</button></div>';
+  h+='<details class="speaking-evaluation-transcript"><summary>Расшифровка твоей речи</summary>'
+    +'<div class="speaking-evaluation-transcript__copy">'+safe(tr)+'</div><button class="sq speaking-support-action speaking-support-action--muted" onclick="spFlagTranscript()">Расшифровка неточная</button></details>'
     +(voiceTutor?voiceTutorButton(voiceTutor):'')
     +'</div>';
   box.innerHTML=h;
-  try{box.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){}}
-function showAdaptiveSpeakingReturn(){var box=document.getElementById('sp_evalbox');if(!box||document.getElementById('adaptive_speaking_return'))return;var retry=document.getElementById('adaptive_speaking_retry');if(retry)retry.style.display='none';var button=document.createElement('button');button.id='adaptive_speaking_return';button.type='button';button.className='sq';button.textContent='Вернуться к персональному плану';button.setAttribute('style','width:100%;margin-top:12px;border:0;border-radius:14px;padding:12px;background:#EAF7F0;color:#1D7F4A;font-weight:800;cursor:pointer;');button.addEventListener('click',openAdaptivePlan);box.appendChild(button)}
+  try{var reducedMotion=globalThis.matchMedia&&globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;box.scrollIntoView({behavior:reducedMotion?'auto':'smooth',block:'start'})}catch(e){}}
+function showAdaptiveSpeakingReturn(){var box=document.getElementById('sp_evalbox');if(!box||document.getElementById('adaptive_speaking_return'))return;var button=document.getElementById('adaptive_speaking_retry');if(button){button.removeAttribute('onclick')}else{button=document.createElement('button');button.type='button';button.className='sq aisy-button speaking-action speaking-action--primary '+SP_CANONICAL_PRIMARY_CLASS;button.dataset.speakingForward='';box.appendChild(button)}button.hidden=false;button.id='adaptive_speaking_return';button.textContent='Вернуться к персональному плану';button.addEventListener('click',openAdaptivePlan,{once:true});spNormalizeView();spPromoteForwardAction()}
 function spFlagTranscript(){S.sttFeedback=(S.sttFeedback||0)+1;save();try{toast('Спасибо, отметка сохранена')}catch(e){}}
 async function spSample(btn){
-  if(!SP)return;var t=SP.t,set=SP.set;
+  if(!SP)return false;var view=SP,epoch=SP_VIEW_EPOCH,t=view.t,set=view.set,box=document.getElementById('sp_evalbox');
   if(officialTask2Active()||officialTask3Active()||officialTask4Active())return;
-  if(btn){if(btn.dataset.busy)return;btn.dataset.busy=1;btn.textContent='Готовлю образец…';btn.style.pointerEvents='none'}
+  if(btn){if(btn.dataset.busy)return false;btn.dataset.busy=1;btn.disabled=true;btn.setAttribute('aria-busy','true');btn.textContent='Готовлю образец…'}
   try{
     var response=await apiPost('/api/v1/ai/generate-speaking-sample',{taskType:t,assignment:spAssignment(t,set)},true);
+    if(SP!==view||SP_VIEW_EPOCH!==epoch||document.getElementById('sp_evalbox')!==box||(btn&&btn.isConnected===false))return false;
     var d=response.data;if(!d||!d.text)throw new Error('не получилось');
     SP.sample=String(d.text);
-    var box=document.getElementById('sp_evalbox');
-    if(box)box.insertAdjacentHTML('afterbegin','<div class="clayCard" style="padding:16px;margin-top:12px;animation:win .35s both;">'
-      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
-      +'<span style="font-weight:800;font-size:10px;letter-spacing:1.2px;color:#1D7F4A;">ОБРАЗЕЦ ОТ ИИ</span>'
-      +'<button type="button" class="clk sq iconbtn" onclick="spVoiceSample()" style="display:inline-flex;align-items:center;gap:6px;background:#E3F1F5;border-radius:12px;padding:7px 12px;font-weight:800;font-size:11px;color:#317485;cursor:pointer;">🔊 Озвучить</button></div>'
-      +'<div style="margin-top:9px;font-weight:500;font-size:13px;color:#2B2B2B;line-height:1.65;">'+ui.escapeHtml(SP.sample)+'</div></div>');
-    if(btn){btn.style.display='none'}
+    if(box)box.insertAdjacentHTML('afterbegin','<div class="clayCard speaking-sample-card">'
+      +'<div class="speaking-sample-card__header">'
+      +'<span class="speaking-sample-card__label">ОБРАЗЕЦ ОТ ИИ</span>'
+      +'<button type="button" class="clk sq iconbtn speaking-support-action speaking-support-action--info speaking-sample-card__voice" onclick="spVoiceSample()">Озвучить</button></div>'
+      +'<div class="speaking-sample-card__copy">'+ui.escapeHtml(SP.sample)+'</div></div>');
+    if(btn){btn.hidden=true;btn.removeAttribute('aria-busy');delete btn.dataset.busy}spNormalizeView();return true
   }catch(e){
-    if(btn){btn.textContent='Образец ответа от ИИ · повторить';btn.style.pointerEvents='';delete btn.dataset.busy}
-    try{toast(apiMessage(e,'ai'))}catch(_){}}}
+    if(SP!==view||SP_VIEW_EPOCH!==epoch||document.getElementById('sp_evalbox')!==box||(btn&&btn.isConnected===false))return false;
+    if(btn){btn.disabled=false;btn.textContent='Образец ответа от ИИ · повторить';btn.removeAttribute('aria-busy');delete btn.dataset.busy}
+    try{toast(apiMessage(e,'ai'))}catch(_){}return false}}
 function spVoiceSample(){if(!SP||!SP.sample)return;
   var parts=speakingModule.sentences(SP.sample).map(function(x){return {s:0,t:x}});
   try{lPlayRaw(parts)}catch(e){}}
 /* ---- этап 3: экзамен устной части целиком ---- */
-let SPE=null,SPE_FLOW=null,SPE_TM=null,SPE_STARTING=false,SPE_PROMPT_SEQUENCE=0,SPE_FULL_RESULT=null,SPE_FULL_UPLOAD_CACHE=null;
-function speFullDispose(){clearInterval(SPE_TM);SPE_TM=null;SPE_STARTING=false;SPE_PROMPT_SEQUENCE++;try{lStop()}catch(_){}if(SPE_FLOW){SPE_FLOW.dispose();SPE_FLOW=null}SPE=null;SPE_FULL_RESULT=null;SPE_FULL_UPLOAD_CACHE=null}
+let SPE=null,SPE_FLOW=null,SPE_TM=null,SPE_PROMPT_SEQUENCE=0,SPE_FULL_RESULT=null,SPE_FULL_UPLOAD_CACHE=null,SPE_FULL_SUBMIT_KEY=null,SPE_FULL_SUBMITTING=false,SPE_FULL_STAGE_ACTION=null,SPE_FULL_STAGE_SEQUENCE=0,SPE_FULL_TIMEOUT_PENDING=null,SPE_FULL_EVALUATION_ACTION=null,SPE_FULL_EVALUATION_SEQUENCE=0,SPE_FULL_ASSESSMENT_READY=false,SPE_MIC_ERROR=null,SPE_RESTORED_WITHOUT_AUDIO=false;
+function speFullDispose(){clearInterval(SPE_TM);SPE_TM=null;SPE_FULL_SUBMITTING=false;SPE_FULL_SUBMIT_KEY=null;var stageLock=SPE_FULL_STAGE_ACTION,assessmentLock=SPE_FULL_EVALUATION_ACTION;SPE_FULL_STAGE_SEQUENCE++;SPE_FULL_STAGE_ACTION=null;SPE_FULL_TIMEOUT_PENDING=null;speFullClearStageBusy(stageLock);SPE_FULL_EVALUATION_SEQUENCE++;SPE_FULL_EVALUATION_ACTION=null;speFullClearEvaluationBusy(assessmentLock);SPE_FULL_ASSESSMENT_READY=false;SPE_PROMPT_SEQUENCE++;SPE_MIC_ERROR=null;SPE_RESTORED_WITHOUT_AUDIO=false;try{lStop()}catch(_){}if(SPE_FLOW){SPE_FLOW.dispose();SPE_FLOW=null}SPE=null;SPE_FULL_RESULT=null;SPE_FULL_UPLOAD_CACHE=null}
+function speFullRestoreLostAudio(session){return Boolean(session&&session.status!=='submitted'&&(session.phase==='recording'||(session.progress||[]).some(function(task){return (task.responses||[]).some(function(response){return response.status==='completed'})})))}
 function speFullPointerInvalid(error){return Number(error&&error.status)===404
   ||String(error&&error.code)==='SPEAKING_FULL_CATALOG_REVISION_MISMATCH'}
-function spExam(){var area=document.getElementById('s9_area');if(!area)return;spStopAll();SP=null;
+function speFullStageMessage(action){var messages={begin:['Подготавливаем этап','Сервер запускает официальный таймер.'],start:['Запускаем запись','Проверяем текущий ответ и включаем микрофон.'],stop:['Завершаем запись','Фиксируем локальную запись этого ответа.'],complete:['Сохраняем ответ','Сервер переводит экзамен к следующему ответу.'],timeout:['Время закончилось','Завершаем текущий ответ по официальному таймеру.']};return messages[action]||messages.complete}
+function speFullSetStageBusy(lock,btn){var area=document.getElementById('s9_area'),route=spRoute();if(!area||!route)return;if(typeof area.setAttribute==='function')area.setAttribute('aria-busy','true');if(typeof route.querySelectorAll==='function')route.querySelectorAll('button.speaking-action').forEach(function(control){control.disabled=true;if(typeof control.setAttribute==='function')control.setAttribute('aria-disabled','true');if(control.dataset)control.dataset.speFullStageLock=String(lock.id)});if(btn){btn.disabled=true;if(typeof btn.setAttribute==='function'){btn.setAttribute('aria-disabled','true');btn.setAttribute('aria-busy','true')}if(btn.dataset)btn.dataset.speFullStageLock=String(lock.id)}var host=document.getElementById('s9_card')||area;var status=document.getElementById('spe_full_action_status');if(!status&&typeof document.createElement==='function'&&host&&typeof host.append==='function'){status=document.createElement('div');status.id='spe_full_action_status';status.className='speaking-state speaking-full-action-status';if(typeof status.setAttribute==='function'){status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true')}host.append(status)}var message=speFullStageMessage(lock.action);if(status){if(status.dataset)status.dataset.state='processing';status.innerHTML='<strong>'+message[0]+'</strong><span>'+message[1]+'</span>'}spNormalizeView('processing')}
+function speFullAcquireStage(action,btn,sharedLock){if(sharedLock)return SPE_FULL_STAGE_ACTION===sharedLock?{lock:sharedLock,owner:false}:null;if(!SPE_FLOW||SPE_FULL_STAGE_ACTION)return null;var state=SPE_FLOW.state(),session=state&&state.session;if(!session)return null;var lock={id:++SPE_FULL_STAGE_SEQUENCE,action:action,flow:SPE_FLOW,sessionId:String(session.id)};SPE_FULL_STAGE_ACTION=lock;speFullSetStageBusy(lock,btn);return {lock:lock,owner:true}}
+function speFullStageCurrent(lock,flow){if(!lock||SPE_FULL_STAGE_ACTION!==lock||SPE_FLOW!==flow||lock.flow!==flow)return false;try{return String(flow.state().session.id)===lock.sessionId}catch(_){return false}}
+function speFullStageSnapshot(session){var current=session&&session.current;if(!session||!current)return null;return {sessionId:String(session.id),taskType:Number(current.taskType),responseNumber:Number(current.responseNumber),phase:String(session.phase),stageDeadlineAt:String(current.stageDeadlineAt||'')}}
+function speFullStageMatches(snapshot){if(!snapshot||!SPE_FLOW)return false;try{var current=speFullStageSnapshot(SPE_FLOW.state().session);return Boolean(current&&current.sessionId===snapshot.sessionId&&current.taskType===snapshot.taskType&&current.responseNumber===snapshot.responseNumber&&current.phase===snapshot.phase&&current.stageDeadlineAt===snapshot.stageDeadlineAt)}catch(_){return false}}
+function speFullClearStageBusy(lock){var area=document.getElementById('s9_area'),route=spRoute();if(area&&typeof area.removeAttribute==='function')area.removeAttribute('aria-busy');if(route&&lock&&typeof route.querySelectorAll==='function')route.querySelectorAll('[data-spe-full-stage-lock="'+lock.id+'"]').forEach(function(control){control.disabled=false;if(typeof control.removeAttribute==='function'){control.removeAttribute('aria-disabled');control.removeAttribute('aria-busy')}if(control.dataset)delete control.dataset.speFullStageLock});var status=document.getElementById('spe_full_action_status');if(status&&typeof status.remove==='function')status.remove()}
+function speFullReleaseStage(lock){if(!lock||SPE_FULL_STAGE_ACTION!==lock)return;SPE_FULL_STAGE_ACTION=null;speFullClearStageBusy(lock);spNormalizeView();var expiredStage=SPE_FULL_TIMEOUT_PENDING;SPE_FULL_TIMEOUT_PENDING=null;if(expiredStage&&speFullStageMatches(expiredStage))void speFullTimeout(expiredStage)}
+function speFullAcquireEvaluation(btn,flow,result){if(!btn||SPE_FULL_EVALUATION_ACTION)return null;var state=flow&&flow.state(),session=state&&state.session;if(!session)return null;var lock={id:++SPE_FULL_EVALUATION_SEQUENCE,flow:flow,result:result,sessionId:String(session.id)};SPE_FULL_EVALUATION_ACTION=lock;var route=spRoute(),area=document.getElementById('s9_area');if(route&&typeof route.setAttribute==='function')route.setAttribute('aria-busy','true');if(area&&typeof area.setAttribute==='function')area.setAttribute('aria-busy','true');if(route&&typeof route.querySelectorAll==='function')route.querySelectorAll('button').forEach(function(control){if(control.dataset){control.dataset.speFullEvaluationLock=String(lock.id);control.dataset.speFullEvaluationWasDisabled=String(control.disabled);control.dataset.speFullEvaluationWasAriaDisabled=String(typeof control.getAttribute==='function'&&control.getAttribute('aria-disabled')==='true')}control.disabled=true;if(typeof control.setAttribute==='function')control.setAttribute('aria-disabled','true')});if(typeof btn.setAttribute==='function')btn.setAttribute('aria-busy','true');spNormalizeView('processing');return lock}
+function speFullClearEvaluationBusy(lock){var route=spRoute(),area=document.getElementById('s9_area');if(route&&!SPE_FULL_STAGE_ACTION&&typeof route.removeAttribute==='function')route.removeAttribute('aria-busy');if(area&&!SPE_FULL_STAGE_ACTION&&typeof area.removeAttribute==='function')area.removeAttribute('aria-busy');if(!route||!lock||typeof route.querySelectorAll!=='function')return;route.querySelectorAll('[data-spe-full-evaluation-lock="'+lock.id+'"]').forEach(function(control){var data=control.dataset||{},keepDisabled=data.speFullEvaluationKeepDisabled==='true',wasDisabled=data.speFullEvaluationWasDisabled==='true',wasAriaDisabled=data.speFullEvaluationWasAriaDisabled==='true';control.disabled=keepDisabled||wasDisabled;if((keepDisabled||wasAriaDisabled)&&typeof control.setAttribute==='function')control.setAttribute('aria-disabled','true');else if(typeof control.removeAttribute==='function')control.removeAttribute('aria-disabled');if(typeof control.removeAttribute==='function')control.removeAttribute('aria-busy');if(control.dataset){delete control.dataset.speFullEvaluationLock;delete control.dataset.speFullEvaluationWasDisabled;delete control.dataset.speFullEvaluationWasAriaDisabled;delete control.dataset.speFullEvaluationKeepDisabled}})}
+function speFullReleaseEvaluation(lock){if(!lock||SPE_FULL_EVALUATION_ACTION!==lock)return;SPE_FULL_EVALUATION_ACTION=null;speFullClearEvaluationBusy(lock);spNormalizeView()}
+function spExam(){var area=document.getElementById('s9_area');if(!area)return;SP_VIEW_EPOCH++;spStopAll();spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();SP=null;
   var lock=adaptiveSpeakingLock();if(lock){launchAdaptiveSpeakingLock(lock);return}
-  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">КАК НА ЕГЭ</span>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;margin-top:12px;">Устная часть целиком</div>'
-    +'<div style="font-weight:600;font-size:13.5px;color:#4A453E;line-height:1.6;margin-top:8px;">Чтение → 4 прямых вопроса → 5 ответов интервью → монолог. Сервер закрепляет один вариант и ведёт по официальным таймерам. Аудио остаётся только на этом устройстве.</div>'
-    +'<div style="margin-top:12px;font-weight:700;font-size:12.5px;color:#777163;">Максимум: 20 баллов · после сдачи доступна примерная автоматическая оценка</div>'
-    +'</div>'
-    +'<div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'
+  area.innerHTML='<section id="s9_card" class="clayCard speaking-sheet speaking-sheet--roomy speaking-stack speaking-full-intro" aria-labelledby="spe_full_intro_title">'
+    +'<p class="speaking-kicker">КАК НА ЕГЭ</p>'
+    +'<h2 id="spe_full_intro_title" class="speaking-heading">Устная часть целиком</h2>'
+    +'<p class="speaking-copy">Чтение → 4 прямых вопроса → 5 ответов интервью → монолог. Сервер закрепляет один вариант и ведёт по официальным таймерам. До отдельного запуска оценки аудио остаётся только на устройстве; при оценке записи явно отправляются внешнему speech-провайдеру и не сохраняются как исходный звук.</p>'
+    +'<p class="speaking-meta speaking-meta--strong">Максимум: 20 баллов · после сдачи доступна примерная автоматическая оценка</p>'
+    +'</section>'
+    +'<div class="speaking-action-stack">'
     +spBtn(S.speakingFullSessionId?'Продолжить экзамен':'Начать экзамен','speStart()',true)
-    +spBtn('← К заданиям','initSpeaking()')+'</div>';
+    +spBtn('К заданиям','initSpeaking()')+'</div>';
   spAnim('win','.32s')}
 async function speStart(){return speFullStart()}
-async function speFullStart(){var area=document.getElementById('s9_area');if(!area)return false;speFullDispose();
-  area.innerHTML='<div class="clayCard" role="status" aria-live="polite" style="padding:20px;text-align:center;font-weight:700;color:#777163;">Сервер закрепляет полный вариант…</div>';
-  SPE_FLOW=createSpeakingFullBrowserFlow({api:{post:function(path,body){return apiPost(path,body)},get:function(path){return apiGet(path)}},prepareAssessmentRecording:spePrepareAssessmentRecording});
+async function speFullStart(){var area=document.getElementById('s9_area');if(!area)return false;var epoch=++SP_VIEW_EPOCH;speFullDispose();
+  area.innerHTML='<div class="clayCard speaking-state" data-state="loading" role="status" aria-live="polite">Сервер закрепляет полный вариант…</div>';spNormalizeView('loading');
+  var flow=createSpeakingFullBrowserFlow({api:{post:function(path,body){return apiPost(path,body)},get:function(path){return apiGet(path)}},prepareAssessmentRecording:spePrepareAssessmentRecording});SPE_FLOW=flow;
   try{var session=null;
-    if(S.speakingFullSessionId){try{session=await SPE_FLOW.restoreSession(S.speakingFullSessionId)}catch(error){
+    if(S.speakingFullSessionId){try{session=await flow.restoreSession(S.speakingFullSessionId);if(epoch!==SP_VIEW_EPOCH||SPE_FLOW!==flow)return false;SPE_RESTORED_WITHOUT_AUDIO=speFullRestoreLostAudio(session)}catch(error){
       if(!speFullPointerInvalid(error))throw error;delete S.speakingFullSessionId;save()}}
-    if(!session||session.status==='submitted')session=await SPE_FLOW.loadAssignment();
-    S.speakingFullSessionId=session.id;save();SPE=SPE_FLOW.state();
-    if(session.task&&session.task.taskType===4)await SPE_FLOW.prepareCurrentAssets();
-    SPE=SPE_FLOW.state();speRender();return true
-  }catch(error){speFullDispose();try{toast(apiMessage(error,'request'))}catch(_){}spExam();return false}}
-async function speFullMicCheck(btn){if(!SPE_FLOW)return false;if(btn)btn.disabled=true;try{await SPE_FLOW.checkMicrophone();SPE=SPE_FLOW.state();speRender();return true}
-  catch(error){if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}SPE=SPE_FLOW.state();speRender();return false}}
-async function speFullBeginStage(){if(!SPE_FLOW)return false;var current=SPE_FLOW.state().session;
-  if(current.task.taskType===3&&current.phase==='ready')return speFullStartRecording();
-  try{await SPE_FLOW.beginStage();SPE=SPE_FLOW.state();
-    if(SPE.session.phase==='recording')return speFullStartRecording();speRender();return true}
-  catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
-async function speFullStartRecording(){if(!SPE_FLOW||SPE_STARTING)return false;SPE_STARTING=true;try{
-    var promptSequence=++SPE_PROMPT_SEQUENCE,before=SPE_FLOW.state(),beforeSession=before.session;
+    if(!session||session.status==='submitted'){session=await flow.loadAssignment();if(epoch!==SP_VIEW_EPOCH||SPE_FLOW!==flow)return false}
+    S.speakingFullSessionId=session.id;save();SPE=flow.state();
+    if(session.task&&session.task.taskType===4){await flow.prepareCurrentAssets();if(epoch!==SP_VIEW_EPOCH||SPE_FLOW!==flow)return false}
+    SPE=flow.state();speRender();return true
+  }catch(error){if(epoch!==SP_VIEW_EPOCH||SPE_FLOW!==flow)return false;speFullDispose();try{toast(apiMessage(error,'request'))}catch(_){}spExam();return false}}
+async function speFullMicCheck(btn){if(!SPE_FLOW)return false;if(btn)btn.disabled=true;var flow=SPE_FLOW;try{await flow.checkMicrophone();if(SPE_FLOW!==flow)return false;SPE_MIC_ERROR=null;SPE=flow.state();speRender();return true}
+  catch(error){if(SPE_FLOW!==flow)return false;SPE_MIC_ERROR={code:String(error&&error.code||'MICROPHONE_UNAVAILABLE')};if(btn)btn.disabled=false;try{toast(apiMessage(error,'request'))}catch(_){}SPE=flow.state();speRender();return false}}
+async function speFullBeginStage(btn,sharedLock){if(!SPE_FLOW)return false;var acquired=speFullAcquireStage('begin',btn,sharedLock);if(!acquired)return false;var lock=acquired.lock,flow=lock.flow;
+  try{if(!speFullStageCurrent(lock,flow))return false;var current=flow.state().session;
+    if(current.task.taskType===3&&current.phase==='ready')return await speFullStartRecording(null,lock);
+    await flow.beginStage();if(!speFullStageCurrent(lock,flow))return false;SPE=flow.state();
+    if(SPE.session.phase==='recording')return await speFullStartRecording(null,lock);speRender();return true}
+  catch(error){if(!speFullStageCurrent(lock,flow))return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}
+  finally{if(acquired.owner)speFullReleaseStage(lock)}}
+async function speFullStartRecording(btn,sharedLock){if(!SPE_FLOW)return false;var acquired=speFullAcquireStage('start',btn,sharedLock);if(!acquired)return false;var lock=acquired.lock,flow=lock.flow;try{
+    if(!speFullStageCurrent(lock,flow))return false;var promptSequence=++SPE_PROMPT_SEQUENCE,before=flow.state(),beforeSession=before.session;
     var beforePosition=beforeSession.current?{taskType:beforeSession.current.taskType,responseNumber:beforeSession.current.responseNumber,phase:beforeSession.phase}:null;
-    if(beforeSession.task.taskType===4)await SPE_FLOW.prepareCurrentAssets();
+    if(beforeSession.task.taskType===4){await flow.prepareCurrentAssets();if(!speFullStageCurrent(lock,flow))return false}
     if(beforeSession.task.taskType===3&&beforeSession.phase!=='recording'){
       var question=beforeSession.task.questions[beforeSession.current.responseNumber-1];
       try{await Promise.resolve(lPlayRaw([{s:1,t:question}]))}catch(_){}
-      if(!SPE_FLOW||promptSequence!==SPE_PROMPT_SEQUENCE)return false;var afterPrompt=SPE_FLOW.state().session;
+      if(!speFullStageCurrent(lock,flow)||promptSequence!==SPE_PROMPT_SEQUENCE)return false;var afterPrompt=flow.state().session;
       if(afterPrompt.id!==beforeSession.id||afterPrompt.phase!==beforePosition.phase
         ||afterPrompt.current.taskType!==beforePosition.taskType
         ||afterPrompt.current.responseNumber!==beforePosition.responseNumber)return false}
-    await SPE_FLOW.startRecording();SPE=SPE_FLOW.state();
+    if(!speFullStageCurrent(lock,flow))return false;await flow.startRecording();if(!speFullStageCurrent(lock,flow))return false;SPE=flow.state();
     speRender();return true
-  }catch(error){SPE=SPE_FLOW?SPE_FLOW.state():null;try{toast(apiMessage(error,'request'))}catch(_){}if(SPE)speRender();return false}
-  finally{SPE_STARTING=false}}
-async function speFullStopRecording(){if(!SPE_FLOW)return false;try{await SPE_FLOW.stopRecording();SPE=SPE_FLOW.state();speRender();return true}
-  catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
-async function speFullComplete(status,issue){if(!SPE_FLOW)return false;try{
+  }catch(error){if(!speFullStageCurrent(lock,flow))return false;SPE=flow.state();try{toast(apiMessage(error,'request'))}catch(_){}if(SPE)speRender();return false}
+  finally{if(acquired.owner)speFullReleaseStage(lock)}}
+async function speFullStopRecording(btn,sharedLock){if(!SPE_FLOW)return false;var acquired=speFullAcquireStage('stop',btn,sharedLock);if(!acquired)return false;var lock=acquired.lock,flow=lock.flow;try{if(!speFullStageCurrent(lock,flow))return false;await flow.stopRecording();if(!speFullStageCurrent(lock,flow))return false;SPE=flow.state();speRender();return true}
+  catch(error){if(!speFullStageCurrent(lock,flow))return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}
+  finally{if(acquired.owner)speFullReleaseStage(lock)}}
+async function speFullComplete(status,issue,btn,sharedLock){if(!SPE_FLOW)return false;var acquired=speFullAcquireStage('complete',btn,sharedLock);if(!acquired)return false;var lock=acquired.lock,flow=lock.flow;try{
     SPE_PROMPT_SEQUENCE++;try{lStop()}catch(_){}
-    while(['ready','preparing'].includes(SPE_FLOW.state().session.phase))await SPE_FLOW.beginStage();
-    await SPE_FLOW.completeResponse(status,issue||null);SPE=SPE_FLOW.state();
-    if(SPE.session.task&&SPE.session.task.taskType===4)await SPE_FLOW.prepareCurrentAssets();
-    SPE=SPE_FLOW.state();speRender();return true
-  }catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
-async function speFullTimeout(){if(!SPE_FLOW||!SPE)return;var state=SPE_FLOW.state();
-  if(state.session.phase==='preparing'){await speFullStartRecording();return}
-  if(state.session.phase==='recording'){
-    if(state.isRecording)await SPE_FLOW.stopRecording();
-    state=SPE_FLOW.state();await speFullComplete(state.recording?'completed':'technical_issue',state.recording?null:'recording_failed')}}
+    while(['ready','preparing'].includes(flow.state().session.phase)){if(!speFullStageCurrent(lock,flow))return false;await flow.beginStage();if(!speFullStageCurrent(lock,flow))return false}
+    await flow.completeResponse(status,issue||null);if(!speFullStageCurrent(lock,flow))return false;SPE=flow.state();
+    if(SPE.session.task&&SPE.session.task.taskType===4){await flow.prepareCurrentAssets();if(!speFullStageCurrent(lock,flow))return false}
+    SPE=flow.state();speRender();return true
+  }catch(error){if(!speFullStageCurrent(lock,flow))return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}
+  finally{if(acquired.owner)speFullReleaseStage(lock)}}
+async function speFullTimeout(expiredStage){if(!SPE_FLOW||!SPE)return false;var snapshot=expiredStage||speFullStageSnapshot(SPE_FLOW.state().session);if(!speFullStageMatches(snapshot))return false;if(SPE_FULL_STAGE_ACTION){SPE_FULL_TIMEOUT_PENDING=snapshot;return false}var acquired=speFullAcquireStage('timeout',null,null);if(!acquired)return false;SPE_FULL_TIMEOUT_PENDING=null;var lock=acquired.lock,flow=lock.flow;try{if(!speFullStageCurrent(lock,flow)||!speFullStageMatches(snapshot))return false;var state=flow.state();
+    if(state.session.phase==='preparing')return await speFullStartRecording(null,lock);
+    if(state.session.phase==='recording'){
+      if(state.isRecording){var stopped=await speFullStopRecording(null,lock);if(!stopped||!speFullStageCurrent(lock,flow))return false}
+      state=flow.state();return await speFullComplete(state.recording?'completed':'technical_issue',state.recording?null:'recording_failed',null,lock)}return false
+  }finally{if(acquired.owner)speFullReleaseStage(lock)}}
 function speFullArmTimer(){clearInterval(SPE_TM);SPE_TM=null;if(!SPE||!SPE.session.current||!SPE.session.current.stageDeadlineAt)return;
-  var update=function(){if(!SPE_FLOW)return;var current=SPE_FLOW.state().session.current;if(!current||!current.stageDeadlineAt)return;
-    var left=Math.max(0,Math.ceil((new Date(current.stageDeadlineAt).getTime()-Date.now())/1000));setTxt('s9_timer',spFmt(left));
-    setTxt('s9_today','задание '+current.taskType+' · ответ '+current.responseNumber+' · '+spFmt(left));
-    if(left<=0){clearInterval(SPE_TM);SPE_TM=null;void speFullTimeout()}};
-  update();if(SPE_TM===null)SPE_TM=setInterval(update,1000)}
+  var expired=false;var update=function(){if(!SPE_FLOW)return;var flowState=SPE_FLOW.state(),current=flowState.session.current;if(!current||!current.stageDeadlineAt)return;
+    var left=Math.max(0,Math.ceil((new Date(current.stageDeadlineAt).getTime()-Date.now())/1000)),value=spFmt(left);setTxt('s9_timer',value);var timer=document.getElementById('s9_timer');if(timer&&typeof timer.setAttribute==='function')timer.setAttribute('aria-label','Оставшееся время: '+value);
+    if(left<=0){expired=true;clearInterval(SPE_TM);SPE_TM=null;void speFullTimeout(speFullStageSnapshot(flowState.session))}};
+  update();if(!expired&&SPE_TM===null)SPE_TM=setInterval(update,1000)}
 function speTaskBody(){var task=SPE.session.task,pos=SPE.session.current,safe=ui.escapeHtml;if(!task||!pos)return '';
-  if(task.taskType===1)return '<div style="font-weight:500;font-size:13.5px;line-height:1.7;color:#2B2B2B;margin-top:10px;">'+safe(task.text)+'</div>';
+  if(task.taskType===1)return '<section class="speaking-stack speaking-full-task" aria-labelledby="spe_full_task_heading"><h3 id="spe_full_task_heading" class="aisy-sr-only">Текст для чтения</h3><p class="speaking-copy speaking-full-reading">'+safe(task.text)+'</p></section>';
   if(task.taskType===2){var preparing=SPE.session.phase==='preparing';var supportBody=preparing
-    ?task.supports.map(function(support,index){return '<div style="margin-top:5px;font-weight:700;font-size:13px;color:#C2421B;">'+(index+1)+'. '+safe(support)+'</div>'}).join('')
-    :'<div style="margin-top:5px;font-weight:700;font-size:13px;color:#C2421B;">'+safe(task.supports[pos.responseNumber-1])+'</div>';
-    return '<div style="margin-top:10px;background:#FAF6F1;border-radius:14px;padding:11px 13px;font-weight:600;font-size:13px;color:#4A453E;line-height:1.6;font-style:italic;">'+safe(task.advertisement)+'</div>'
-    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">'+(preparing?'Подготовь четыре прямых вопроса:':'Задай прямой вопрос о пункте '+pos.responseNumber+':')+'</div>'+supportBody}
-  if(task.taskType===3){if(SPE.session.phase==='ready')return '<div role="status" style="margin-top:10px;padding:12px;border-radius:14px;background:#E3F1F5;color:#317485;font-weight:700;font-size:13px;line-height:1.5;">Вопрос прозвучит после запуска. Отдельного времени на подготовку нет; затем начнутся запись и 40 секунд ответа.</div>';
-    var question=task.questions[pos.responseNumber-1];return '<div style="font-weight:600;font-size:12px;color:#777163;margin-top:10px;">Вопрос '+pos.responseNumber+' из 5</div>'
-    +'<div style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:17px;color:#2B2B2B;line-height:1.5;margin-top:6px;">'+safe(question)+'</div>'
+    ?'<ol class="speaking-list speaking-full-supports">'+task.supports.map(function(support){return '<li>'+safe(support)+'</li>'}).join('')+'</ol>'
+    :'<p class="speaking-full-support">'+safe(task.supports[pos.responseNumber-1])+'</p>';
+    return '<section class="speaking-stack speaking-full-task" aria-labelledby="spe_full_task_heading"><p class="speaking-note speaking-quote">'+safe(task.advertisement)+'</p>'
+    +'<h3 id="spe_full_task_heading" class="speaking-subheading">'+(preparing?'Подготовь четыре прямых вопроса:':'Задай прямой вопрос о пункте '+pos.responseNumber+':')+'</h3>'+supportBody+'</section>'}
+  if(task.taskType===3){if(SPE.session.phase==='ready')return '<div class="speaking-note speaking-note--info speaking-full-task" role="status">Вопрос прозвучит после запуска. Отдельного времени на подготовку нет; затем начнутся запись и 40 секунд ответа.</div>';
+    var question=task.questions[pos.responseNumber-1];return '<section class="speaking-stack speaking-stack--tight speaking-full-task" aria-labelledby="spe_full_task_heading"><p class="speaking-meta">Вопрос '+pos.responseNumber+' из 5</p>'
+    +'<h3 id="spe_full_task_heading" class="speaking-subheading">'+safe(question)+'</h3></section>'
     }
-  return '<div style="margin-top:10px;font-weight:700;font-size:13.5px;color:#2B2B2B;">Проект: '+safe(task.projectTitle)+'</div>'
-    +'<img src="'+safe(task.photoPair.src)+'" alt="'+safe(task.photoPair.alt)+'" style="display:block;width:100%;height:auto;margin-top:10px;border-radius:16px;">'
-    +'<div style="margin-top:9px;font-weight:600;font-size:12.5px;color:#2B2B2B;">План:</div>'
-    +task.plan.map(function(point,index){return '<div style="margin-top:4px;font-weight:600;font-size:12.5px;color:#4A453E;">'+(index+1)+'. '+safe(point)+'</div>'}).join('')}
-function speFullProgress(){return SPE.session.progress.map(function(item){return '<span style="font-weight:800;font-size:11px;color:'+(item.completedResponses===item.responseCount?'#1D7F4A':'#777163')+';background:'+(item.completedResponses===item.responseCount?'#EAF7F0':'#F4EFE9')+';padding:6px 9px;border-radius:12px;">'+item.taskType+': '+item.completedResponses+'/'+item.responseCount+'</span>'}).join('')}
+  return '<section class="speaking-stack speaking-full-task" aria-labelledby="spe_full_task_heading"><h3 id="spe_full_task_heading" class="speaking-subheading">Проект: '+safe(task.projectTitle)+'</h3>'
+    +'<img class="speaking-full-photo" src="'+safe(task.photoPair.src)+'" alt="'+safe(task.photoPair.alt)+'">'
+    +'<p class="speaking-meta speaking-meta--strong">План:</p><ol class="speaking-list speaking-full-plan">'
+    +task.plan.map(function(point){return '<li>'+safe(point)+'</li>'}).join('')+'</ol></section>'}
+function speFullProgress(){return SPE.session.progress.map(function(item){var complete=item.completedResponses===item.responseCount;return '<span class="speaking-chip speaking-full-progress__item '+(complete?'speaking-chip--success':'')+'" data-state="'+(complete?'complete':'pending')+'">'+item.taskType+': '+item.completedResponses+'/'+item.responseCount+'</span>'}).join('')}
+function speFullMicStatus(){var ready=SPE&&SPE.micCheck==='passed';var state=ready?'ready':(SPE_MIC_ERROR&&SPE_MIC_ERROR.code==='MICROPHONE_PERMISSION_DENIED'?'permission-denied':(SPE_MIC_ERROR?'error':'unchecked'));var role=SPE_MIC_ERROR?'alert':'status';var message=ready?'Микрофон готов для текущего ответа.':state==='permission-denied'?'Нет доступа к микрофону. Разреши его для этого сайта в настройках браузера и повтори проверку.':state==='error'?'Микрофон не готов. Проверь подключение и повтори проверку.':'Перед записью проверь микрофон.';return '<div id="speaking_mic_status" class="speaking-state speaking-mic-status" data-state="'+state+'" role="'+role+'" aria-live="polite">'+message+'</div>'}
+function speFullNamedButton(label,action,primary){return spBtn(label,action,primary).replace('<button ','<button aria-label="'+ui.escapeHtml(label)+'" ')}
 function speFullControls(){var state=SPE,session=state.session,phase=session.phase;
-  if(phase==='ready_to_submit')return spBtn('Сдать устную часть','speFullSubmit()',true);
-  var mic='<button type="button" class="sq" onclick="speFullMicCheck(this)" style="'+WBTN+'min-height:44px;color:#317485;">'+(state.micCheck==='passed'?'✓ Микрофон готов':'Проверить микрофон')+'</button>';
-  var skip='<div style="height:10px;"></div>'+spBtn('Пропустить ответ','speFullComplete(\'skipped\')');
-  if(phase==='ready')return mic+'<div style="height:10px;"></div>'+spBtn(session.task.preparationSeconds&&session.current.responseNumber===1?'Начать подготовку':'Начать запись','speFullBeginStage()',true)
-    +skip+'<div style="height:10px;"></div>'+spBtn('Не могу записать','speFullComplete(\'technical_issue\',\'recording_failed\')');
-  if(phase==='preparing')return mic+'<div style="height:10px;"></div>'+spBtn('Готово — к записи','speFullStartRecording()',true)
-    +skip+'<div style="height:10px;"></div>'+spBtn('Техническая проблема','speFullComplete(\'technical_issue\',\'recording_failed\')');
-  if(state.recording)return '<div role="status" style="font-weight:800;font-size:13px;color:#1D7F4A;margin-bottom:10px;">Ответ записан локально · '+state.recording.durationSeconds+' сек.</div>'
-    +spBtn('Сохранить ответ','speFullComplete(\'completed\')',true)+'<div style="height:10px;"></div>'+spBtn('Перезаписать','speFullStartRecording()')+skip;
-  if(state.isRecording)return spBtn('Стоп — закончить запись','speFullStopRecording()',true);
-  return (state.recordingLostOnRestore?'<div role="alert" style="font-weight:700;font-size:12.5px;color:#A83226;margin-bottom:10px;">После перезагрузки локальная запись недоступна. Начни её заново или отметь проблему.</div>':'')
-    +mic+'<div style="height:10px;"></div>'+spBtn('Начать запись','speFullStartRecording()',true)
-    +skip+'<div style="height:10px;"></div>'+spBtn('Техническая проблема','speFullComplete(\'technical_issue\',\'recording_failed\')')}
+  if(phase==='ready_to_submit')return spBtn('Сдать устную часть','speFullSubmit(this)',true);
+  var micLabel=state.micCheck==='passed'?'✓ Микрофон готов':'Проверить микрофон';var mic=spBtn(micLabel,'speFullMicCheck(this)',state.micCheck!=='passed').replace('aria-label="Проверить микрофон"','aria-label="'+micLabel+'"');
+  var skip=spBtn('Пропустить ответ','speFullComplete(\'skipped\',null,this)');
+  if(phase==='ready'){var beginLabel=session.task.preparationSeconds&&session.current.responseNumber===1?'Начать подготовку':'Начать запись';return mic+speFullNamedButton(beginLabel,'speFullBeginStage(this)',true)
+    +skip+spBtn('Не могу записать','speFullComplete(\'technical_issue\',\'recording_failed\',this)');
+  }if(phase==='preparing')return mic+speFullNamedButton('Готово — к записи','speFullStartRecording(this)',true)
+    +skip+spBtn('Техническая проблема','speFullComplete(\'technical_issue\',\'recording_failed\',this)');
+  if(state.recording)return '<div class="speaking-state speaking-full-recording-ready" data-state="playback" role="status">Ответ записан локально · '+state.recording.durationSeconds+' сек.</div>'
+    +spBtn('Сохранить ответ','speFullComplete(\'completed\',null,this)',true)+spBtn('Перезаписать','speFullStartRecording(this)')+skip;
+  if(state.isRecording)return spBtn('Стоп — закончить запись','speFullStopRecording(this)',true);
+  return (state.recordingLostOnRestore?'<div class="speaking-state speaking-full-recording-lost" data-state="error" role="alert">После перезагрузки локальная запись недоступна. Начни её заново или отметь проблему.</div>':'')
+    +mic+speFullNamedButton('Начать запись','speFullStartRecording(this)',true)
+    +skip+spBtn('Техническая проблема','speFullComplete(\'technical_issue\',\'recording_failed\',this)')}
 function speRender(){var area=document.getElementById('s9_area');if(!area||!SPE)return;var session=SPE.session;
   if(session.status==='submitted'){speFullFinal(session.submission);return}
-  var current=session.current,phase=session.phase,chip=phase==='preparing'?'ПОДГОТОВКА':phase==='recording'?'● ЗАПИСЬ':'ГОТОВО';
-  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:18px;margin-bottom:12px;">'+wDeco()
-    +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">'
-    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#B54E2F;background:#FFEDE4;padding:5px 10px;border-radius:20px;">ЭКЗАМЕН · '+(current?current.taskType:4)+' ИЗ 4</span>'
-    +'<span style="font-weight:700;font-size:10px;letter-spacing:1.2px;color:#A56000;background:#FFF4DE;padding:5px 10px;border-radius:20px;">'+chip+'</span></div>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">'+speFullProgress()+'</div>'+speTaskBody()
-    +(current&&current.stageDeadlineAt?'<div id="s9_timer" aria-live="polite" style="text-align:center;font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:34px;color:#2B2B2B;margin-top:12px;">—</div>':'')
-    +'</div><div style="display:flex;flex-direction:column;gap:0;">'+speFullControls()+'</div>';
-  setTxt('s9_today',current?'задание '+current.taskType+' · ответ '+current.responseNumber:'готово к сдаче');speFullArmTimer()}
-async function speFullSubmit(){if(!SPE_FLOW)return false;try{var idempotencyKey=globalThis.crypto.randomUUID();
-    var result=await SPE_FLOW.submit(idempotencyKey);SPE_FULL_RESULT=result;delete S.speakingFullSessionId;save();speFullFinal(result);return true
-  }catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
-async function speFullPlay(taskType,responseNumber){if(!SPE_FLOW)return false;try{return await SPE_FLOW.playRecording(taskType,responseNumber)}
-  catch(error){try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+  var current=session.current,phase=session.phase,chip=phase==='preparing'?'ПОДГОТОВКА':phase==='recording'?'ЗАПИСЬ':'ГОТОВО';
+  area.innerHTML='<section id="s9_card" class="clayCard speaking-sheet speaking-stack speaking-full-session" aria-labelledby="spe_full_session_title">'
+    +'<div class="speaking-row speaking-row--between speaking-row--wrap speaking-full-stage-header">'
+    +'<h2 id="spe_full_session_title" class="speaking-kicker">ЭКЗАМЕН · '+(current?current.taskType:4)+' ИЗ 4</h2>'
+    +'<span class="speaking-state" data-state="'+(phase==='recording'?'recording':(phase==='preparing'?'preparing':'ready'))+'" role="status" aria-live="polite">'+chip+'</span></div>'
+    +'<div class="speaking-full-progress" aria-label="Прогресс по заданиям">'+speFullProgress()+'</div>'
+    +(SPE_RESTORED_WITHOUT_AUDIO?'<div class="speaking-state speaking-full-restore-warning" data-state="warning" role="status" aria-live="polite"><strong>Сессия восстановлена без локального аудио.</strong><span>Предыдущие записи не сохранялись и недоступны для автоматической оценки. Можно честно закончить экзамен, но для полного авторазбора понадобится новый вариант.</span></div>':'')+speTaskBody()+speFullMicStatus()
+    +(current&&current.stageDeadlineAt?'<div id="s9_timer" class="speaking-timer speaking-full-timer" role="timer" aria-label="Оставшееся время: —" aria-live="off">—</div>':'')
+    +'</section><div class="speaking-action-stack">'+speFullControls()+'</div>';
+  setTxt('s9_today',current?'задание '+current.taskType+' · ответ '+current.responseNumber:'готово к сдаче');if(SPE_FULL_STAGE_ACTION)speFullSetStageBusy(SPE_FULL_STAGE_ACTION,null);else spNormalizeView(phase==='recording'?'recording':phase);speFullArmTimer()}
+function speFullSubmissionStatus(){var area=document.getElementById('s9_area');if(!area)return null;var status=document.getElementById('spe_full_submission_status');if(status)return status;status=document.createElement('div');status.id='spe_full_submission_status';status.className='speaking-state';status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');area.append(status);return status}
+async function speFullSubmit(btn){if(!SPE_FLOW||SPE_FULL_SUBMITTING)return false;var flow=SPE_FLOW,sessionId=flow.state().session.id;var idempotencyKey=SPE_FULL_SUBMIT_KEY||globalThis.crypto.randomUUID();SPE_FULL_SUBMIT_KEY=idempotencyKey;SPE_FULL_SUBMITTING=true;
+  var status=speFullSubmissionStatus();if(status){status.dataset.state='processing';status.setAttribute('role','status');status.innerHTML='<b>Сдаём устную часть</b><span>Сервер фиксирует один итог этой экзаменационной сессии. Не закрывай экран.</span>'}
+  if(btn){btn.dataset.busy='1';btn.disabled=true;btn.setAttribute('aria-busy','true');btn.textContent='Сдаю устную часть…'}spNormalizeView('processing');
+  try{var result=await flow.submit(idempotencyKey);if(SPE_FLOW!==flow||String(flow.state().session.id)!==String(sessionId))return false;SPE_FULL_SUBMITTING=false;SPE_FULL_SUBMIT_KEY=null;SPE_FULL_RESULT=result;delete S.speakingFullSessionId;save();speFullFinal(result);return true
+  }catch(error){if(SPE_FLOW!==flow)return false;SPE_FULL_SUBMITTING=false;if(btn){btn.disabled=false;btn.textContent='Повторить сдачу';btn.removeAttribute('aria-busy');delete btn.dataset.busy}var state=spEvaluationErrorState(error);if(status&&document.getElementById('spe_full_submission_status')===status){status.dataset.state=state;status.setAttribute('role','alert');status.innerHTML='<b>Сдача пока не подтверждена</b><span>Проверь соединение и повтори. Используется тот же ключ отправки, поэтому второй итог не появится.</span>'}spNormalizeView(state);try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+async function speFullPlay(taskType,responseNumber){if(!SPE_FLOW)return false;var flow=SPE_FLOW;try{var played=await flow.playRecording(taskType,responseNumber);return SPE_FLOW===flow&&played}
+  catch(error){if(SPE_FLOW!==flow)return false;try{toast(apiMessage(error,'request'))}catch(_){}return false}}
 function speFullExpectedAssessmentSeconds(result,recordings){var completed=new Set((result.taskResults||[]).filter(function(item){return item.recordingStatus==='completed'}).map(function(item){return item.taskType}));return recordings.filter(function(item){return completed.has(item.taskType)}).reduce(function(total,item){return total+Math.ceil(item.durationSeconds)},0)}
+function speFullAssessmentRecordingReadiness(result,recordings){var counts={1:1,2:4,3:5,4:1},completedTasks=(result&&result.taskResults||[]).filter(function(item){return item.recordingStatus==='completed'}).map(function(item){return Number(item.taskType)}),items=Array.isArray(recordings)?recordings:[];if(!completedTasks.length)return {ready:false,expectedSeconds:0,reason:'no-completed-recordings'};var ready=completedTasks.every(function(taskType){var expectedCount=counts[taskType],taskRecordings=items.filter(function(item){return Number(item.taskType)===taskType}).sort(function(a,b){return Number(a.responseNumber)-Number(b.responseNumber)});return Boolean(expectedCount&&taskRecordings.length===expectedCount&&taskRecordings.every(function(item,index){return Number(item.responseNumber)===index+1&&item.blob&&Number.isFinite(Number(item.durationSeconds))&&Number(item.durationSeconds)>0&&/^[0-9a-f]{64}$/u.test(String(item.sha256||''))}))});var expectedSeconds=ready?items.filter(function(item){return completedTasks.includes(Number(item.taskType))}).reduce(function(total,item){return total+Math.ceil(Number(item.durationSeconds))},0):0;return {ready:ready,expectedSeconds:expectedSeconds,reason:ready?null:'recording-quality-unavailable'}}
 async function spePrepareAssessmentRecording(recording){if(!globalThis.crypto||!globalThis.crypto.subtle)throw new Error('безопасная привязка записи недоступна — обнови браузер');var wav=await convertRecordingToPcm16Wav(recording.blob);var bytes=await wav.blob.arrayBuffer();var digest=await globalThis.crypto.subtle.digest('SHA-256',bytes);var sha256=Array.from(new Uint8Array(digest)).map(function(value){return value.toString(16).padStart(2,'0')}).join('');return {blob:wav.blob,durationSeconds:wav.durationSeconds,sha256:sha256}}
-async function speFullLoadAssessmentStatus(result){var box=document.getElementById('spe_full_assessment_status');if(!box||!SPE_FLOW||result.assessment&&result.assessment.available)return;var recordings=SPE_FLOW.assessmentRecordings();var expected=speFullExpectedAssessmentSeconds(result,recordings);
-  try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');if(!document.getElementById('spe_full_assessment_status'))return;var quota=payload&&payload.quota||{};var provider=payload&&payload.provider||{};
-    if(provider.available){box.innerHTML='<b>До отправки:</b> ожидаемое списание до '+spFmt(expected)+' · осталось '+spFmt(Number(quota.remainingSeconds||0))+'. Локальное прослушивание лимит не расходует. Записи обработает внешний сервис Azure Speech; обычный исходный звук не сохраняется.';box.style.background='#EAF7F0';box.style.color='#1D6944'}
-    else{box.innerHTML='<b>Автоматическая оценка сейчас недоступна.</b> Записи остаются локально до ухода с экрана.'}}
-  catch(_){if(box)box.innerHTML='<b>Не удалось проверить лимит.</b> Повтори перед отправкой записей.'}}
+function speFullAssessmentButton(){return document.querySelector('[data-speaking-assessment-action="evaluate"]')}
+function speFullSetAssessmentReady(button,ready,checking){SPE_FULL_ASSESSMENT_READY=Boolean(ready);if(!button)return;button.disabled=!ready;if(button.dataset)button.dataset.assessmentReady=ready?'true':'false';if(ready&&typeof button.removeAttribute==='function')button.removeAttribute('aria-disabled');else if(!ready&&typeof button.setAttribute==='function')button.setAttribute('aria-disabled','true');if(checking&&typeof button.setAttribute==='function')button.setAttribute('aria-busy','true');else if(!checking&&typeof button.removeAttribute==='function')button.removeAttribute('aria-busy')}
+function speFullAssessmentRetryMarkup(){return '<button type="button" class="sq aisy-button aisy-button--secondary speaking-inline-action speaking-full-status-retry" onclick="speFullRetryAssessmentStatus(this)">Повторить проверку доступности</button>'}
+function speFullRetireAssessmentAction(button){speFullSetAssessmentReady(button,false,false);if(button){button.hidden=true;if(typeof button.removeAttribute==='function')button.removeAttribute('aria-busy')}spPromoteForwardAction()}
+async function speFullRetryAssessmentStatus(btn){if(!SPE_FLOW||!SPE_FULL_RESULT||SPE_RESTORED_WITHOUT_AUDIO)return false;var result=SPE_FULL_RESULT;if(btn){btn.disabled=true;if(typeof btn.setAttribute==='function'){btn.setAttribute('aria-disabled','true');btn.setAttribute('aria-busy','true')}}return speFullLoadAssessmentStatus(result)}
+async function speFullLoadAssessmentStatus(result){var box=document.getElementById('spe_full_assessment_status'),button=speFullAssessmentButton();speFullSetAssessmentReady(button,false,true);if(SPE_RESTORED_WITHOUT_AUDIO||!box||!button||!SPE_FLOW||result.assessment&&result.assessment.available){speFullSetAssessmentReady(button,false,false);return false}var flow=SPE_FLOW,viewResult=SPE_FULL_RESULT,recordings=flow.assessmentRecordings(),recordingReadiness=speFullAssessmentRecordingReadiness(result,recordings);if(!recordingReadiness.ready){if(box.classList&&typeof box.classList.add==='function')box.classList.add('speaking-state');if(typeof box.removeAttribute==='function')box.removeAttribute('aria-busy');if(box.dataset)box.dataset.state='quality';box.innerHTML='<b>Автоматическая оценка записей недоступна.</b><span>Не удалось безопасно подготовить полный комплект локальных записей. Прослушивание остаётся доступно до ухода с этой страницы; для полного авторазбора начни новый вариант.</span>';speFullRetireAssessmentAction(button);return false}var expected=recordingReadiness.expectedSeconds;if(typeof box.setAttribute==='function')box.setAttribute('aria-busy','true');
+  try{var payload=await apiGet('/api/v1/speaking/pronunciation-assessments/status');if(SPE_RESTORED_WITHOUT_AUDIO||SPE_FLOW!==flow||SPE_FULL_RESULT!==viewResult||document.getElementById('spe_full_assessment_status')!==box||speFullAssessmentButton()!==button)return false;var quota=payload&&payload.quota||{};var provider=payload&&payload.provider||{};if(box.classList&&typeof box.classList.add==='function')box.classList.add('speaking-state');if(typeof box.removeAttribute==='function')box.removeAttribute('aria-busy');
+    if(provider.available&&Number(quota.remainingSeconds||0)>=expected){box.dataset.state='ready';box.innerHTML='<b>До отправки:</b><span>ожидаемое списание до '+spFmt(expected)+' · осталось '+spFmt(Number(quota.remainingSeconds||0))+'. Локальное прослушивание лимит не расходует. Записи обработает внешний сервис Azure Speech; обычный исходный звук не сохраняется.</span>';speFullSetAssessmentReady(button,true,false);return true}
+    if(provider.available){box.dataset.state='quota';box.innerHTML='<b>Для полного авторазбора не хватает лимита.</b><span>Локальные записи и прослушивание остаются доступны.</span>';speFullRetireAssessmentAction(button);return false}
+    box.dataset.state='provider-unavailable';box.innerHTML='<b>Автоматическая оценка сейчас недоступна.</b><span>Записи остаются локально до ухода с экрана.</span>'+speFullAssessmentRetryMarkup();speFullSetAssessmentReady(button,false,false);return false}
+  catch(_){if(SPE_RESTORED_WITHOUT_AUDIO||SPE_FLOW!==flow||SPE_FULL_RESULT!==viewResult||document.getElementById('spe_full_assessment_status')!==box||speFullAssessmentButton()!==button)return false;if(box.classList&&typeof box.classList.add==='function')box.classList.add('speaking-state');if(typeof box.removeAttribute==='function')box.removeAttribute('aria-busy');if(box.dataset)box.dataset.state='network-error';box.innerHTML='<b>Не удалось проверить лимит.</b><span>Проверь соединение и повтори перед отправкой записей.</span>'+speFullAssessmentRetryMarkup();speFullSetAssessmentReady(button,false,false);return false}}
 async function spUploadFullPronunciation(sessionId,recording,cacheItem,locale){var headers={
     'Idempotency-Key':cacheItem.key,'X-Speech-Locale':locale,'X-Audio-Duration-Seconds':String(recording.durationSeconds),
     'X-Speaking-Task':String(recording.taskType)};
@@ -826,34 +723,37 @@ async function spUploadFullPronunciation(sessionId,recording,cacheItem,locale){v
   var result=await apiPostBinary('/api/v1/speaking/full-sessions/'+sessionId+'/pronunciation-assessment',recording.blob,'audio/wav',headers);
   if(!result||!result.billing||!result.billing.assessmentId||result.assessment&&result.assessment.status!=='success'){var unavailable=new Error('автоматическая оценка записи сейчас недоступна — попробуй позже');unavailable.code='SPEAKING_PRONUNCIATION_UNAVAILABLE';throw unavailable}
   return {key:cacheItem.key}}
-async function speFullEvaluate(btn){if(!SPE_FLOW||!SPE_FULL_RESULT)return false;if(btn){if(btn.dataset.busy)return false;btn.dataset.busy=1;btn.disabled=true;btn.textContent='Проверяю лимит и записи…'}
-  try{var flowState=SPE_FLOW.state(),session=flowState.session,result=SPE_FULL_RESULT,recordings=SPE_FLOW.assessmentRecordings();var completedTasks=(result.taskResults||[]).filter(function(item){return item.recordingStatus==='completed'}).map(function(item){return item.taskType});var counts={1:1,2:4,3:5,4:1};
+async function speFullEvaluate(btn){if(!SPE_FLOW||!SPE_FULL_RESULT||SPE_RESTORED_WITHOUT_AUDIO||!SPE_FULL_ASSESSMENT_READY||!btn||btn.dataset.busy||btn.dataset.assessmentReady!=='true')return false;var flow=SPE_FLOW,viewResult=SPE_FULL_RESULT,assessmentLock=speFullAcquireEvaluation(btn,flow,viewResult);if(!assessmentLock)return false;btn.dataset.busy=1;btn.textContent='Проверяю лимит и записи…';spNormalizeView('processing');
+  try{var flowState=flow.state(),session=flowState.session,result=viewResult,recordings=flow.assessmentRecordings();var sessionId=session.id;var completedTasks=(result.taskResults||[]).filter(function(item){return item.recordingStatus==='completed'}).map(function(item){return item.taskType});var counts={1:1,2:4,3:5,4:1};
     if(completedTasks.some(function(taskType){return recordings.filter(function(item){return item.taskType===taskType&&item.sha256}).length!==counts[taskType]}))throw new Error('часть локальных записей не удалось безопасно привязать при сдаче — общий балл нельзя рассчитать надёжно');
     var locale=session.accentProfile&&session.accentProfile.locale||(SP_ACCENT&&SP_ACCENT.locale)||'en-GB';
     if(!SPE_FULL_UPLOAD_CACHE||SPE_FULL_UPLOAD_CACHE.sessionId!==session.id)SPE_FULL_UPLOAD_CACHE={sessionId:session.id,items:{}};
     var attemptIds=[];
     for(var taskIndex=0;taskIndex<completedTasks.length;taskIndex++){var taskType=completedTasks[taskIndex];var taskRecordings=recordings.filter(function(item){return item.taskType===taskType}).sort(function(a,b){return a.responseNumber-b.responseNumber});var keys=[];
       for(var recordingIndex=0;recordingIndex<taskRecordings.length;recordingIndex++){var recording=taskRecordings[recordingIndex];var cacheKey=taskType+':'+recording.responseNumber;var cacheItem=SPE_FULL_UPLOAD_CACHE.items[cacheKey];if(!cacheItem){cacheItem={key:window.crypto.randomUUID(),result:null};SPE_FULL_UPLOAD_CACHE.items[cacheKey]=cacheItem}
-        if(btn)btn.textContent='Проверяю задание '+taskType+' · запись '+(recordingIndex+1)+' из '+taskRecordings.length+'…';if(!cacheItem.result)cacheItem.result=await spUploadFullPronunciation(session.id,recording,cacheItem,locale);keys.push(cacheItem.result.key)}
+        if(btn)btn.textContent='Проверяю задание '+taskType+' · запись '+(recordingIndex+1)+' из '+taskRecordings.length+'…';if(!cacheItem.result)cacheItem.result=await spUploadFullPronunciation(session.id,recording,cacheItem,locale);if(SPE_FLOW!==flow||SPE_FULL_RESULT!==viewResult||String(flow.state().session.id)!==String(sessionId))return false;keys.push(cacheItem.result.key)}
       var request={taskType:taskType,sessionMode:'full_section',sessionId:session.id};if(taskType===2||taskType===3)request.pronunciationAssessmentKeys=keys;else request.pronunciationAssessmentKey=keys[0];
-      if(btn)btn.textContent='Рассчитываю примерный результат задания '+taskType+'…';var evaluated=await apiPost('/api/v1/ai/evaluate-speaking',request,true);if(!evaluated||!Number.isSafeInteger(Number(evaluated.attemptId)))throw new Error('сервер не вернул сохранённую попытку');attemptIds.push(Number(evaluated.attemptId))}
-    if(btn)btn.textContent='Собираю общий результат…';var fullResult=await apiPost('/api/v1/speaking/full-sessions/'+session.id+'/evaluation',{attemptIds:attemptIds});SPE_FULL_RESULT=fullResult;speFullFinal(fullResult);return true
-  }catch(error){if(btn){btn.disabled=false;btn.textContent='Получить примерную автоматическую оценку';delete btn.dataset.busy}try{toast(apiMessage(error,'request'))}catch(_){}return false}}
+      if(btn)btn.textContent='Рассчитываю примерный результат задания '+taskType+'…';var evaluated=await apiPost('/api/v1/ai/evaluate-speaking',request,true);if(SPE_FLOW!==flow||SPE_FULL_RESULT!==viewResult||String(flow.state().session.id)!==String(sessionId))return false;if(!evaluated||!Number.isSafeInteger(Number(evaluated.attemptId)))throw new Error('сервер не вернул сохранённую попытку');attemptIds.push(Number(evaluated.attemptId))}
+    if(btn)btn.textContent='Собираю общий результат…';var fullResult=await apiPost('/api/v1/speaking/full-sessions/'+session.id+'/evaluation',{attemptIds:attemptIds});if(SPE_FLOW!==flow||SPE_FULL_RESULT!==viewResult||String(flow.state().session.id)!==String(sessionId))return false;SPE_FULL_RESULT=fullResult;speFullReleaseEvaluation(assessmentLock);speFullFinal(fullResult);return true
+  }catch(error){if(SPE_FLOW!==flow||SPE_FULL_RESULT!==viewResult)return false;var state=spEvaluationErrorState(error),terminalQuota=state==='quota',providerUnavailable=state==='provider-unavailable',knownUnavailable=terminalQuota||providerUnavailable;SPE_FULL_ASSESSMENT_READY=!knownUnavailable;if(btn){btn.dataset.assessmentReady=knownUnavailable?'false':'true';btn.textContent='Повторить автоматическую оценку';if(knownUnavailable){btn.dataset.speFullEvaluationKeepDisabled='true';btn.setAttribute('aria-disabled','true')}delete btn.dataset.busy}var status=document.getElementById('spe_full_assessment_status');if(status){status.classList.add('speaking-state');status.dataset.state=state;status.innerHTML='<b>'+(terminalQuota?'Лимит автоматической оценки исчерпан':providerUnavailable?'Сервис оценки сейчас недоступен':'Не удалось завершить автоматическую оценку')+'</b><span>Локальные записи пока доступны. Повтор не создаст новую оценку для уже отправленного аудио.</span>'+(providerUnavailable?speFullAssessmentRetryMarkup():'');if(terminalQuota)speFullRetireAssessmentAction(btn)}spNormalizeView(state);try{toast(apiMessage(error,'request'))}catch(_){}return false}
+  finally{speFullReleaseEvaluation(assessmentLock)}}
 function speFullFinal(result){var area=document.getElementById('s9_area');if(!area||!result)return;clearInterval(SPE_TM);SPE_TM=null;SPE_FULL_RESULT=result;
+  SPE_FULL_ASSESSMENT_READY=false;
   var recordings=SPE_FLOW?SPE_FLOW.state().localRecordings:[];
   var plan=result.improvementPlan||{available:false,message:'План улучшения пока недоступен.'};
-  var rows=result.taskResults.map(function(item){var local=recordings.filter(function(recording){return recording.taskType===item.taskType});return '<div style="padding:10px 2px;border-bottom:1px solid #F4EFE9;">'
-    +'<div style="display:flex;justify-content:space-between;gap:10px;font-weight:700;font-size:13px;color:#2B2B2B;"><span>'+SP_CONF[item.taskType].name+'</span><span>'+(item.earnedScore==null?'—':item.earnedScore)+' / '+item.maximumScore+' · '+item.recordingStatus+' · '+Math.round(item.usedSeconds)+' сек.</span></div>'
-    +(item.recordingQuality?'<div style="margin-top:4px;font-size:11.5px;color:#777163;">Качество записи: '+ui.escapeHtml(item.recordingQuality)+'</div>':'')
-    +local.map(function(recording){return '<button type="button" class="sq" onclick="speFullPlay('+recording.taskType+','+recording.responseNumber+')" style="min-width:44px;min-height:44px;margin-top:7px;border:0;border-radius:12px;background:#E3F1F5;color:#317485;font-weight:800;">▶ Ответ '+recording.responseNumber+'</button>'}).join('')+'</div>'}).join('');
-  var assessed=result.assessment&&result.assessment.status;var score=Number.isInteger(result.earnedScore)?'<div style="font-weight:900;font-size:19px;color:#1D7F4A;margin-top:7px;">Примерный результат: '+result.earnedScore+' из 20</div>':'<div style="font-weight:800;font-size:13px;color:#A56000;margin-top:7px;">Примерная автоматическая оценка запускается отдельно</div>';
-  var planMarkup=plan.available?'<div role="status" style="margin-top:12px;padding:11px 13px;border-radius:14px;background:#EAF7F0;color:#1D6944;font-weight:700;font-size:12.5px;"><b>Общий план:</b><ul style="margin:6px 0 0;padding-left:18px;">'+(plan.items||[]).map(function(item){return '<li>'+ui.escapeHtml(item)+'</li>'}).join('')+'</ul></div>':'<div role="status" style="margin-top:12px;padding:11px 13px;border-radius:14px;background:#FFF4DE;color:#8A641A;font-weight:700;font-size:12.5px;">'+ui.escapeHtml(plan.message||'План появится после примерной оценки.')+'</div>';
-  var assessmentAction=assessed?'':'<div id="spe_full_assessment_status" role="status" aria-live="polite" style="margin-top:12px;padding:11px 13px;border-radius:14px;background:#FFF4DE;color:#714515;font-weight:650;font-size:12px;line-height:1.5;"><b>Перед отправкой:</b> проверяем ожидаемое списание и остаток лимита. Записи обработает внешний сервис Azure Speech; обычный исходный звук не сохраняется.</div><div style="height:10px;"></div>'+spBtn('Получить примерную автоматическую оценку','speFullEvaluate(this)',true);
-  area.innerHTML='<div id="s9_card" class="clayCard" style="position:relative;overflow:hidden;padding:22px;">'+wDeco()
-    +'<div style="text-align:center;"><div style="font-size:42px;">✓</div><div style="font-family:Nunito,Manrope,sans-serif;font-weight:900;font-size:21px;color:#2B2B2B;margin-top:8px;">Устная часть сдана</div>'
-    +score+'<div style="font-weight:600;font-size:12px;color:#777163;line-height:1.5;margin-top:5px;">'+(assessed?ui.escapeHtml(result.assessment.warning||'Результат тренировочный и примерный.'):'Локальное прослушивание доступно только до ухода с этой страницы.')+'</div></div>'
-    +'<div style="margin-top:12px;">'+rows+'</div>'+planMarkup+'</div><div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">'+assessmentAction
-    +spBtn('Новый вариант','speStart()',true)+spBtn('К заданиям','initSpeaking()')+'</div>';setTxt('s9_today',Number.isInteger(result.earnedScore)?('примерно '+result.earnedScore+' из 20'):'сдано · максимум 20');spAnim('win','.32s');if(!assessed)void speFullLoadAssessmentStatus(result)}
+  var rows=result.taskResults.map(function(item){var local=recordings.filter(function(recording){return recording.taskType===item.taskType});return '<section class="speaking-full-result-row" aria-labelledby="spe_full_result_task_'+item.taskType+'">'
+    +'<div class="speaking-full-result-row__summary"><h3 id="spe_full_result_task_'+item.taskType+'" class="speaking-subheading">'+SP_CONF[item.taskType].name+'</h3><span class="speaking-meta speaking-meta--strong">'+(item.earnedScore==null?'—':item.earnedScore)+' / '+item.maximumScore+' · '+ui.escapeHtml(item.recordingStatus)+' · '+Math.round(item.usedSeconds)+' сек.</span></div>'
+    +(item.recordingQuality?'<p class="speaking-meta">Качество записи: '+ui.escapeHtml(item.recordingQuality)+'</p>':'')
+    +(local.length?'<div class="speaking-row speaking-row--wrap speaking-full-playback-list">'+local.map(function(recording){return '<button type="button" class="sq speaking-media-action speaking-full-playback" onclick="speFullPlay('+recording.taskType+','+recording.responseNumber+')">Ответ '+recording.responseNumber+'</button>'}).join('')+'</div>':'')+'</section>'}).join('');
+  var assessed=result.assessment&&result.assessment.status;var score=Number.isInteger(result.earnedScore)?'<p class="speaking-score">Примерный результат: '+result.earnedScore+' из 20</p>':'<p class="speaking-score speaking-score--pending">Примерная автоматическая оценка запускается отдельно</p>';
+  var planMarkup=plan.available?'<div class="speaking-note speaking-note--success speaking-full-plan-result" role="status"><b>Общий план:</b><ul class="speaking-list">'+(plan.items||[]).map(function(item){return '<li>'+ui.escapeHtml(item)+'</li>'}).join('')+'</ul></div>':'<div class="speaking-note speaking-note--warning speaking-full-plan-result" role="status">'+ui.escapeHtml(plan.message||'План появится после примерной оценки.')+'</div>';
+  var evaluationButton=spBtn('Получить примерную автоматическую оценку','speFullEvaluate(this)',true).replace(' data-speaking-action="evaluate"',' disabled aria-disabled="true" aria-busy="true" data-speaking-assessment-action="evaluate" data-assessment-ready="false" data-speaking-action="evaluate"');
+  var assessmentAction=assessed?'':(SPE_RESTORED_WITHOUT_AUDIO?'<div id="spe_full_assessment_status" class="speaking-state speaking-full-assessment-status" data-state="warning" role="status" aria-live="polite"><b>Автоматическая оценка после перезагрузки недоступна.</b><span>Предыдущие локальные записи не сохранялись. Начни новый вариант, чтобы получить полный авторазбор.</span></div>':'<div id="spe_full_assessment_status" class="speaking-state speaking-full-assessment-status" data-state="processing" role="status" aria-live="polite" aria-busy="true"><b>Перед отправкой:</b><span>проверяем ожидаемое списание и остаток лимита. Записи обработает внешний сервис Azure Speech; обычный исходный звук не сохраняется.</span></div>'+evaluationButton);
+  area.innerHTML='<section id="s9_card" class="clayCard speaking-sheet speaking-sheet--roomy speaking-stack speaking-full-result" aria-labelledby="spe_full_result_title">'
+    +'<header class="speaking-stack speaking-stack--tight speaking-center"><span class="speaking-result-mark speaking-result-mark--complete" aria-hidden="true"></span><h2 id="spe_full_result_title" class="speaking-heading speaking-heading--result">Устная часть сдана</h2>'
+    +score+'<p class="speaking-meta">'+(assessed?ui.escapeHtml(result.assessment.warning||'Результат тренировочный и примерный.'):'Локальное прослушивание доступно только до ухода с этой страницы.')+'</p></header>'
+    +'<div class="speaking-full-results">'+rows+'</div>'+planMarkup+'</section><div class="speaking-action-stack">'+assessmentAction
+    +spBtn('Новый вариант','speStart()',true).replace('<button','<button data-speaking-forward')+spBtn('К заданиям','initSpeaking()')+'</div>';setTxt('s9_today',Number.isInteger(result.earnedScore)?('примерно '+result.earnedScore+' из 20'):'сдано · максимум 20');spAnim('win','.32s');if(!assessed&&!SPE_RESTORED_WITHOUT_AUDIO)void speFullLoadAssessmentStatus(result)}
 /* ---- фоновая ИИ-генерация комплектов говорения ---- */
 var SPGEN=false;
 async function spGen(){
@@ -873,6 +773,8 @@ async function spGen(){
 /* уборка при уходе с экрана + синк */
 registerRouteHook(function(id){
   if(id!=='scr9'){
+    SP_VIEW_EPOCH++;
+    var frame=document.getElementById('frame');if(frame)delete frame.dataset.speakingDockActive;
     if(SP){spStopAll();SP=null}spDisposeTask1Flow();spDisposeTask2Flow();spDisposeTask3Flow();spDisposeTask4Flow();
     speFullDispose()}});
 registerRouteHook(function(id){if(id==='scr9')initSpeaking()});
@@ -882,5 +784,5 @@ export {
   SP,SPE,
   initSpeaking,spAccentFinishUnknown,spAccentSetup,spAccentStartUnknown,spCalibrationConsentSetup,spChooseAccent,spCompleteTask1,spCompleteTask2Question,spCompleteTask3Answer,spCompleteTask4,spContributeCalibration,spDeleteRecording,spEtalon,spEval,spExam,spFinish,spFlagTranscript,spMicCheck,spNextQ,spSaveCalibrationConsent,
   launchSpeakingTask,spHub,spNextSet,spOpen,spPlay,spPlayTask2Question,spPlayTask3Answer,spPrep,spRec,spRestartAdaptive,spSample,spStartTargetedPractice,spStopAll,spToggleSheet,spVoiceSample,
-  speFullBeginStage,speFullComplete,speFullEvaluate,speFullMicCheck,speFullPlay,speFullStartRecording,speFullStopRecording,speFullSubmit,speStart,
+  speFullBeginStage,speFullComplete,speFullEvaluate,speFullMicCheck,speFullPlay,speFullRetryAssessmentStatus,speFullStartRecording,speFullStopRecording,speFullSubmit,speStart,
 };
