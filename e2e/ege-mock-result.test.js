@@ -46,8 +46,15 @@ let temporaryDirectory;
 try {
   temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ege-mock-result-'));
   const dataFile = path.join(temporaryDirectory, 'data.json');
+  const createdAt = Date.now();
   await fs.writeFile(dataFile, JSON.stringify({
-    users: { [username]: { created: Date.now(), sub_until: Date.now() + 86_400_000 } },
+    users: { [username]: {
+      created: createdAt, sub_until: createdAt + 86_400_000,
+      privacy_consent: {
+        text_processing: true, voice_processing: false,
+        policy_version: '2026-08-26-vk-id-v1', updated_at: new Date(createdAt).toISOString(),
+      },
+    } },
     progress: { [username]: {} },
   }), 'utf8');
   const repository = createFileRepository(dataFile);
@@ -163,8 +170,13 @@ try {
   await secondPage.goto(baseUrl, { waitUntil: 'networkidle' });
   await openLatestEgeResult(secondPage);
   await secondPage.getByRole('heading', { name: /^0–(?:20|40) из 82$/u }).waitFor({ timeout: 15_000 });
-  page.once('dialog', (dialog) => dialog.dismiss());
   await page.getByRole('button', { name: 'Начать тренировочный повтор' }).press('Enter');
+  const repeatDialog = page.getByRole('dialog', { name: 'Начать тренировочный повтор?' });
+  await repeatDialog.waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'ege_mock_confirm_cancel');
+  await page.locator('#ege_mock_confirm_dialog').press('Escape');
+  await repeatDialog.waitFor({ state: 'hidden' });
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.egeAction), 'result-repeat');
   assert.equal(await page.getByRole('button', { name: 'Начать тренировочный повтор' }).isEnabled(), true,
     'cancelling confirmation cannot permanently disable the only repeat control');
 
@@ -186,8 +198,14 @@ try {
   await page.getByRole('button', { name: 'Повторить загрузку' }).press('Enter');
   await page.getByRole('button', { name: 'Начать тренировочный повтор' }).waitFor({ timeout: 15_000 });
 
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: 'Начать тренировочный повтор' }).press('Enter');
+  await page.locator('[data-ege-action="result-repeat"]').press('Enter');
+  const acceptedRepeatDialog = page.locator('#ege_mock_confirm_dialog[open]');
+  await acceptedRepeatDialog.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#ege_mock_confirm_title').innerText(),
+    'Начать тренировочный повтор?');
+  assert.equal(await page.locator('#ege_mock_confirm_accept').innerText(),
+    'Начать тренировочный повтор');
+  await page.locator('#ege_mock_confirm_accept').press('Enter');
   await page.waitForFunction(() => !document.querySelector('[data-ege-action="result-repeat"]'), null,
     { timeout: 15_000 });
   const ownerHeaders = { 'X-EasyBoost-Expected-Owner': username };

@@ -26,8 +26,15 @@ try {
   const port = await availablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const dataFile = path.join(temporaryDirectory, 'data.json');
+  const createdAt = Date.now();
   await fs.writeFile(dataFile, JSON.stringify({
-    users: { [username]: { created: Date.now(), sub_until: Date.now() + 86_400_000 } },
+    users: { [username]: {
+      created: createdAt, sub_until: createdAt + 86_400_000,
+      privacy_consent: {
+        text_processing: true, voice_processing: false,
+        policy_version: '2026-08-26-vk-id-v1', updated_at: new Date(createdAt).toISOString(),
+      },
+    } },
     progress: { [username]: {} },
   }), 'utf8');
   const output = [];

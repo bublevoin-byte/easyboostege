@@ -21,14 +21,14 @@ export function renderEgeMockWritingAssessmentActions(
     if (queued) {
       return '<p class="ege-mock__status" role="status">Явный запуск проверки после продления подписки сохранён и будет отправлен после восстановления сети.</p>';
     }
-    return '<p class="ege-mock__error" role="alert">Для предварительной автоматической оценки нужна активная подписка. Продлите подписку, затем запустите проверку явно.</p><button class="ege-mock__action" type="button" data-ege-action="run-assessment-after-renewal">Запустить проверку после продления подписки</button>';
+    return '<p class="ege-mock__error" role="alert" data-state="locked">Для предварительной автоматической оценки нужна активная подписка. Продлите подписку, затем запустите проверку явно.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="run-assessment-after-renewal">Запустить проверку после продления подписки</button>';
   }
   if (!assessment?.retryAllowed || !['retryable', 'ambiguous'].includes(assessment.status)) return '';
   if (queued) {
     return '<p class="ege-mock__status" role="status">Повтор предварительной оценки сохранён и будет отправлен после восстановления сети.</p>';
   }
   if (assessment.status === 'ambiguous') {
-    return '<button class="ege-mock__action" type="button" data-ege-action="retry-assessment-ambiguous">Подтвердить возможный повтор проверки у провайдера</button>';
+    return '<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="retry-assessment-ambiguous">Подтвердить возможный повтор проверки у провайдера</button>';
   }
-  return '<button class="ege-mock__action" type="button" data-ege-action="retry-assessment">Повторить предварительную оценку</button>';
+  return '<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="retry-assessment">Повторить предварительную оценку</button>';
 }

@@ -60,9 +60,16 @@ try {
     assert.equal(Number.isFinite(authorityNowMs), true);
     await fs.writeFile(testClockFile, new Date(authorityNowMs).toISOString(), 'utf8');
   };
-  await setAuthorityNow(Date.now());
+  const createdAt = Date.now();
+  await setAuthorityNow(createdAt);
   await fs.writeFile(dataFile, JSON.stringify({
-    users: { [username]: { created: Date.now(), sub_until: Date.now() + 86_400_000 } },
+    users: { [username]: {
+      created: createdAt, sub_until: createdAt + 86_400_000,
+      privacy_consent: {
+        text_processing: true, voice_processing: false,
+        policy_version: '2026-08-26-vk-id-v1', updated_at: new Date(createdAt).toISOString(),
+      },
+    } },
     progress: { [username]: {} },
   }), 'utf8');
   const port = await availablePort();
@@ -181,6 +188,16 @@ try {
   await page.locator('#scr16.on [data-ege-text]').waitFor({ state: 'visible', timeout: 20_000 });
   assert.equal(await page.locator('[data-ege-text]').inputValue(), 'went offline');
   assert.match(await page.locator('#ege_mock_save').innerText(), /в очереди/u);
+  assert.deepEqual(await page.evaluate(() => {
+    const back = document.querySelector('.ege-mock__back');
+    const backStyle = getComputedStyle(back);
+    return {
+      topDisplay: getComputedStyle(document.querySelector('.ege-mock__top')).display,
+      backMinInlineSize: backStyle.minInlineSize,
+      backWidth: back.getBoundingClientRect().width,
+    };
+  }), { topDisplay: 'grid', backMinInlineSize: '44px', backWidth: 44 },
+  'the production Paper stylesheet must survive an exact-attempt offline reload');
   await context.setOffline(false);
   await page.waitForFunction(async ({ baseUrl: url, owner }) => {
     const response = await fetch(`${url}/api/v1/ege-mocks/attempts/current`, {
@@ -194,8 +211,11 @@ try {
     await page.getByRole('heading', { name: `Задание ${position}`, exact: true }).waitFor();
     visitedWritten.add(position);
   }
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: /Завершить задания 1–36/u }).press('Enter');
+  await page.locator('#ege_mock_confirm_dialog[open]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#ege_mock_confirm_title').innerText(), 'Завершить задания 1–36?');
+  assert.equal(await page.locator('#ege_mock_confirm_accept').innerText(), 'Завершить задания 1–36');
+  await page.locator('#ege_mock_confirm_accept').press('Enter');
   await page.getByRole('heading', { name: 'Задания 1–36 сохранены' }).waitFor({ timeout: 15_000 });
   await page.locator('[data-ege-action="continue-writing"]').press('Enter');
   await page.getByRole('heading', { name: 'Задание 37', exact: true }).waitFor();
@@ -207,14 +227,21 @@ try {
   await page.getByRole('heading', { name: 'Задание 38', exact: true }).waitFor();
   visitedWritten.add(38);
   await page.locator('[data-ege-writing]').fill(answer38);
-  page.once('dialog', (dialog) => dialog.accept());
   await page.locator('[data-ege-action="complete-written"]').press('Enter');
+  await page.locator('#ege_mock_confirm_dialog[open]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#ege_mock_confirm_title').innerText(), 'Сдать письменную часть?');
+  assert.equal(await page.locator('#ege_mock_confirm_accept').innerText(), 'Сдать письменную часть');
+  await page.locator('#ege_mock_confirm_accept').press('Enter');
   await page.getByRole('heading', { name: 'Задания 1–38 сданы' }).waitFor({ timeout: 20_000 });
   assert.deepEqual([...visitedWritten], exactSequence(1, 38));
 
   await page.getByRole('button', { name: 'Перейти к устной части' }).press('Enter');
   await page.getByRole('button', { name: 'Проверить микрофон и материалы' }).press('Enter');
-  await page.getByRole('button', { name: 'Начать 17 минут' }).press('Enter');
+  try {
+    await page.getByRole('button', { name: 'Начать 17 минут' }).press('Enter', { timeout: 15_000 });
+  } catch (error) {
+    throw new Error(`${error.message}\n${await page.locator('#ege_mock_area').innerText()}\n${output.join('').slice(-4_000)}`);
+  }
   await page.getByRole('heading', { name: /Задание 39/u }).waitFor();
   const ownerHeaders = { 'X-EasyBoost-Expected-Owner': username };
   const currentResponse = await context.request.get(
@@ -237,7 +264,18 @@ try {
         buttons.filter((button) => {
           const box = button.getBoundingClientRect();
           return box.width < 44 || box.height < 44;
-        }).map((button) => button.textContent?.trim())
+        }).map((button) => {
+          const box = button.getBoundingClientRect();
+          const style = getComputedStyle(button);
+          return {
+            label: button.getAttribute('aria-label') || button.textContent?.trim(),
+            width: box.width, height: box.height,
+            className: button.className, parentClassName: button.parentElement?.className,
+            inlineSize: style.inlineSize, minInlineSize: style.minInlineSize,
+            gridTemplate: getComputedStyle(button.parentElement).gridTemplateColumns,
+            viewport: `${innerWidth}x${innerHeight}`,
+          };
+        })
       )), []);
     }
 

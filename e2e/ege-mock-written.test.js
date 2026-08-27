@@ -32,10 +32,21 @@ try {
   const port = await availablePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const dataFile = path.join(temporaryDirectory, 'data.json');
+  const createdAt = Date.now();
+  const activeUser = () => ({
+    created: createdAt,
+    sub_until: createdAt + 86_400_000,
+    privacy_consent: {
+      text_processing: true,
+      voice_processing: false,
+      policy_version: '2026-08-26-vk-id-v1',
+      updated_at: new Date(createdAt).toISOString(),
+    },
+  });
   await fs.writeFile(dataFile, JSON.stringify({
     users: {
-      [username]: { created: Date.now(), sub_until: Date.now() + 86_400_000 },
-      [otherUsername]: { created: Date.now(), sub_until: Date.now() + 86_400_000 },
+      [username]: activeUser(),
+      [otherUsername]: activeUser(),
     },
     progress: { [username]: {}, [otherUsername]: {} },
   }), 'utf8');
@@ -143,10 +154,11 @@ try {
   await page.setViewportSize({ width: 375, height: 812 });
   assert.equal(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), true);
   assert.deepEqual(await page.locator('#scr16 button, #scr16 input, #scr16 select').evaluateAll((controls) => controls
+    .filter((control) => control.getClientRects().length)
     .map((control) => ({ label: control.getAttribute('aria-label') || control.textContent?.trim(), height: control.getBoundingClientRect().height }))
     .filter((control) => control.height < 44)), []);
 
-  await page.getByRole('button', { name: 'Назад', exact: true }).press('Enter');
+  await page.getByRole('button', { name: 'Назад в раздел ЕГЭ', exact: true }).press('Enter');
   await page.locator('#aisy-ege.on').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#frame.ege-mock-expanded').count(), 0,
     'the native EGE Back action must run the route leave hook');
@@ -237,6 +249,27 @@ try {
   assert.equal(await page.locator('[data-ege-text]').inputValue(), 'went offline');
   assert.match(await page.locator('#ege_mock_save').innerText(), /в очереди/u);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+
+  assert.equal(await page.evaluate(() => document.body.dataset.learningAccess), 'exam-only');
+  assert.equal(await page.locator('#aisy-shell-nav, #aisy-shell-back, #tabbar').evaluateAll((controls) => (
+    controls.length >= 2 && controls.every((control) => control.hidden && control.inert)
+  )), true);
+  await page.getByRole('button', { name: 'Назад в раздел ЕГЭ' }).press('Enter');
+  await page.locator('#access_gate').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#aisy-ege.on, #scr1.on, #aisy-practice.on').count(), 0,
+    'offline exam exit must not expose the hub or cached private study screens');
+  assert.notEqual(await page.evaluate(() => document.body.dataset.learningAccess), 'active');
+  assert.equal(await page.locator('#asya-launcher').isHidden(), true);
+  assert.equal(await page.locator('#aisy-shell-nav, #aisy-shell-back, #tabbar').evaluateAll((controls) => (
+    controls.every((control) => control.hidden && control.inert)
+  )), true);
+  await context.setOffline(false);
+  await page.getByRole('button', { name: 'Повторить проверку' }).press('Enter');
+  await page.locator('#scr1.on').waitFor({ state: 'visible', timeout: 15_000 });
+  await openEgeMock(page);
+  await page.locator('#scr16.on [data-ege-text]').waitFor({ state: 'visible', timeout: 20_000 });
+  assert.equal(await page.locator('[data-ege-text]').inputValue(), 'went offline');
+  await context.setOffline(true);
   const offlineAudio = await page.evaluate(async (assetPath) => {
     const response = await fetch(assetPath, { headers: { Range: 'bytes=0-99' } });
     return {
@@ -256,8 +289,11 @@ try {
   }, { baseUrl, username }, { timeout: 10_000 });
 
   await context.setOffline(true);
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: /Завершить задания 1–36/u }).press('Enter');
+  await page.locator('#ege_mock_confirm_dialog[open]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#ege_mock_confirm_title').innerText(), 'Завершить задания 1–36?');
+  assert.equal(await page.locator('#ege_mock_confirm_accept').innerText(), 'Завершить задания 1–36');
+  await page.locator('#ege_mock_confirm_accept').press('Enter');
   await page.waitForTimeout(250);
   try {
     await page.getByRole('heading', { name: 'Сохраняем задания 1–36' }).waitFor();
@@ -311,6 +347,7 @@ try {
     await navigator.serviceWorker.ready;
     return Boolean(navigator.serviceWorker.controller);
   }, null, { timeout: 15_000 });
+  await authorityPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 8_000 });
   await openEgeMock(authorityPage);
   await authorityPage.getByRole('heading', { name: /Задание \d+/u }).waitFor({ timeout: 30_000 });
   await authorityPage.getByRole('button', { name: 'Грамматика и лексика', exact: true }).press('Enter');
@@ -371,12 +408,16 @@ try {
     'the exact task 38 draft must survive an offline reload');
   assert.match(await page.locator('#ege_mock_word_count').innerText(), /210/u);
   await context.setOffline(false);
-  page.once('dialog', (dialog) => dialog.accept());
   await page.locator('[data-ege-action="complete-written"]').press('Enter');
+  const writtenConfirmation = page.locator('#ege_mock_confirm_dialog[open]');
+  await writtenConfirmation.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#ege_mock_confirm_title').innerText(), 'Сдать письменную часть?');
+  assert.equal(await page.locator('#ege_mock_confirm_accept').innerText(), 'Сдать письменную часть');
+  await page.locator('#ege_mock_confirm_accept').press('Enter');
   await page.getByRole('heading', { name: 'Задания 1–38 сданы' }).waitFor({ timeout: 15_000 });
   try {
     await page.waitForFunction(() => (
-      /experimental \/ approximate\): retryable/iu.test(
+      /experimental \/ approximate\): (?:retryable|ambiguous)/iu.test(
         document.querySelector('#ege_mock_area')?.textContent || '',
       )
     ), null, { timeout: 15_000 });
@@ -391,7 +432,7 @@ try {
   }
   const terminalText = await page.locator('#ege_mock_area').innerText();
   assert.match(terminalText,
-    /Предварительная автоматическая оценка \(experimental \/ approximate\): retryable/iu);
+    /Предварительная автоматическая оценка \(experimental \/ approximate\): (?:retryable|ambiguous)/iu);
   assert.equal(terminalText.includes(AUTOMATIC_ASSESSMENT_WARNING), true,
     'the terminal must render the exact shared experimental approximate warning');
   assert.doesNotMatch(terminalText, /ваш балл|правильный ответ|criteriaRef/iu);
@@ -402,9 +443,21 @@ try {
   assert.equal(finalAttempt.state, 'oral_ready');
   assert.equal(finalAttempt.draft['37'], answer37);
   assert.equal(finalAttempt.draft['38'], answer38);
-  assert.equal(finalAttempt.writingAssessment.status, 'retryable');
+  assert.match(finalAttempt.writingAssessment.status, /^(?:retryable|ambiguous)$/u);
+  assert.match(terminalText, new RegExp(`: ${finalAttempt.writingAssessment.status}`, 'iu'),
+    'the visible assessment must match the authoritative terminal status');
   assert.equal(finalAttempt.writingAssessment.mode, 'experimental');
   assert.equal(finalAttempt.writingAssessment.scoreKind, 'approximate');
+  if (finalAttempt.writingAssessment.status === 'ambiguous') {
+    await page.getByRole('button', {
+      name: 'Подтвердить возможный повтор проверки у провайдера', exact: true,
+    }).press('Enter');
+    const ambiguousConfirmation = page.locator('#ege_mock_confirm_dialog[open]');
+    await ambiguousConfirmation.waitFor({ state: 'visible' });
+    assert.match(await page.locator('#ege_mock_confirm_copy').innerText(), /повтор/iu);
+    await page.locator('#ege_mock_confirm_cancel').press('Enter');
+    await ambiguousConfirmation.waitFor({ state: 'hidden' });
+  }
 
   const blockedWritingAssessment = structuredClone(finalAttempt.writingAssessment);
   blockedWritingAssessment.status = 'pending';

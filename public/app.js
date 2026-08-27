@@ -366,6 +366,19 @@ function offlineEgeMockContinuation(){
   return egeMockLocalContinuation(localStorage,owner,form)?owner:null
 }
 function currentEgeMockOwnerBinding(){return currentOwnerBinding()||(OFFLINE_EGE_MOCK_CONTINUATION?offlineEgeMockContinuation():null)}
+function startOfflineEgeMockContinuation(){
+  const owner=offlineEgeMockContinuation();if(!owner)return false;
+  OFFLINE_EGE_MOCK_CONTINUATION=true;store.sync.setOwner(owner.username);
+  /* The exact attempt may resume, but cached learner navigation and Asya stay unavailable
+     until the subscription can be confirmed again. */
+  hideLearningShell();document.body.dataset.learningAccess='exam-only';
+  closeAccessGate();firstLaunch.release();nav('scr16');return true
+}
+function exitOfflineEgeMockContinuation(){
+  if(!OFFLINE_EGE_MOCK_CONTINUATION)return false;
+  OFFLINE_EGE_MOCK_CONTINUATION=false;
+  applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null});return true
+}
 async function commitEgeMockOwnerMutation(owner,canCommit,commit){
   const changed=()=>Object.assign(new Error('EGE_MOCK_OWNER_AUTHORITY_CHANGED'),{code:'EGE_MOCK_OWNER_AUTHORITY_CHANGED'});
   if(!owner||typeof canCommit!=='function'||typeof commit!=='function')throw changed();
@@ -586,6 +599,7 @@ window.checkSub=pwCheck;
     await opening;
     const access=await accessCheck;
     if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
+    if(access.state===LEARNING_ACCESS_STATES.NETWORK_UNKNOWN&&startOfflineEgeMockContinuation())return;
     applyLearningAccess(access);
   })();
   /* статус подписки в профиле */
@@ -1163,7 +1177,7 @@ export {SRV,registerProfileHook,registerStartHook,toast};
  */
 export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
-  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentDisplayName,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,recheckLearningAccess,registerAuthorityReset,
+  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentDisplayName,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,exitOfflineEgeMockContinuation,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,recheckLearningAccess,registerAuthorityReset,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,

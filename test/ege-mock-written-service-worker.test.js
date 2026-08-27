@@ -177,6 +177,15 @@ test('built output preserves the derived oral and written EGE closure and neutra
   const builtWorker = await fs.readFile(
     new URL('../dist/public/service-worker.js', import.meta.url), 'utf8',
   );
+  const builtHtml = await fs.readFile(new URL('../dist/public/index.html', import.meta.url), 'utf8');
+  const builtShell = JSON.parse(
+    builtWorker.match(/const APP_SHELL=(\[[^\]]*\]);/u)[1].replaceAll("'", '"'),
+  );
+  const linkedStyles = [...builtHtml.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/gu)]
+    .map((match) => match[1]);
+  assert.ok(linkedStyles.length > 0, 'the production document must link its emitted stylesheet');
+  assert.equal(linkedStyles.every((pathname) => builtShell.includes(pathname)), true,
+    'every stylesheet requested by production index.html must survive an offline shell reload');
   const listeners = new Map();
   const stores = new Map();
   let online = true;

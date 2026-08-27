@@ -20,6 +20,8 @@ const ICON_PATHS = Object.freeze({
 
 let loadRevision = 0;
 
+function ownerKey(owner) { return owner ? `${owner.username}\u0000${owner.generation}` : ''; }
+
 function icon(name) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -53,6 +55,11 @@ function ownerStillCurrent(owner) {
     && current?.generation === owner?.generation;
 }
 
+function strictMockIntentStillCurrent(revision, expectedOwnerKey) {
+  return cur() === 'aisy-ege' && loadRevision === revision
+    && ownerKey(currentEgeMockOwnerBinding()) === expectedOwnerKey;
+}
+
 function responseOwned(payload, owner) {
   return apiResponseOwner(payload) === owner?.username;
 }
@@ -68,7 +75,28 @@ function button(label, className, action, disabled = false) {
 }
 
 async function openStrictMock(kind = 'start', attemptId = '') {
-  const mockScreen = await import('./ege-mock.js');
+  const originRevision = loadRevision;
+  const originOwnerKey = ownerKey(currentEgeMockOwnerBinding());
+  let mockScreen;
+  try {
+    mockScreen = await import('./ege-mock.js');
+  } catch {
+    if (!strictMockIntentStillCurrent(originRevision, originOwnerKey)) return;
+    const status = document.getElementById('ege-hub-state');
+    if (!status) return;
+    status.hidden = false;
+    status.dataset.state = 'error';
+    status.replaceChildren();
+    const message = document.createElement('span');
+    message.textContent = 'Не удалось открыть пробник. Проверьте соединение и повторите загрузку.';
+    const retry = button(
+      'Перезагрузить приложение', 'aisy-button aisy-button--secondary',
+      () => window.location.reload(),
+    );
+    status.append(message, retry);
+    return;
+  }
+  if (!strictMockIntentStillCurrent(originRevision, originOwnerKey)) return;
   mockScreen.setEgeMockOpenIntent(kind === 'result' ? { kind, attemptId }
     : kind === 'start' ? { kind: 'start' } : null);
   nav('scr16');
@@ -175,7 +203,7 @@ function renderSections(view) {
   if (!root) return;
   root.replaceChildren(...view.sections.map((section) => {
     const item = document.createElement('li');
-    item.className = 'ege-hub-section aisy-surface';
+    item.className = 'ege-hub-section';
     const mark = document.createElement('span');
     mark.className = 'ege-hub-section__icon';
     mark.appendChild(icon(section.icon));
@@ -197,6 +225,7 @@ function renderSections(view) {
 function renderEgeHub(view) {
   const status = document.getElementById('ege-hub-state');
   if (status) {
+    delete status.dataset.state;
     status.hidden = !view.network.label;
     status.textContent = view.network.label;
   }
@@ -210,6 +239,7 @@ function renderLoadError(error) {
   const status = document.getElementById('ege-hub-state');
   if (!status) return;
   status.hidden = false;
+  status.dataset.state = 'error';
   status.replaceChildren();
   const message = document.createElement('span');
   message.textContent = apiMessage(error, 'request');

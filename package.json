@@ -20,7 +20,7 @@
     "test:e2e:speaking-paper": "npm run build:frontend && node e2e/aisy-speaking-paper.test.js",
     "test:e2e:asya-paper": "npm run build:frontend && node e2e/asya-assistant.test.js && node e2e/aisy-asya-paper.test.js",
     "test:e2e:writing-paper": "npm run build:frontend && node e2e/aisy-writing-paper.test.js && node e2e/aisy-writing-offline-cache.test.js",
-    "test:e2e:ege-mock": "npm run build:frontend && node e2e/ege-mock-written.test.js && node e2e/ege-mock-oral.test.js && node e2e/ege-mock-result.test.js && node e2e/ege-mock-release.test.js",
+    "test:e2e:ege-mock": "npm run build:frontend && node e2e/aisy-ege-hub.test.js && node e2e/ege-mock-written.test.js && node e2e/ege-mock-oral.test.js && node e2e/ege-mock-result.test.js && node e2e/ege-mock-release.test.js",
     "test:e2e:grammar": "npm run build:frontend && node e2e/grammar-2-release.test.js",
     "test:e2e:speaking-task4": "npm run build:frontend && node e2e/speaking-task4.test.js",
     "test:e2e:speaking-full": "npm run build:frontend && node e2e/speaking-full.test.js",

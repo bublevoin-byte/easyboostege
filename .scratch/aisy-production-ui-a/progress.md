@@ -10,7 +10,7 @@
 | 06 — Reading + Listening | done | Paper A responsive matrix + owner-safe Reading/Listening; 120 focused tests and affected Chromium green; ZERO×2; full suite run once with 4 HEAD-proven inherited failures |
 | 07 — Writing + AI review | done | Paper A route + canonical CTA; durable owner-bound exactly-once evaluation and authoritative progress; Writing/SW-offline Chromium green; ZERO×2; one full-suite run documented in ticket; deploy gated by Ticket 11 controlled SW activation |
 | 08 — Speaking + Asya | done | Paper A Speaking 1–4/full + contextual Asya/Voice Tutor; ZERO×2 review; 69 focused + affected tests green; responsive Chromium matrix and 390×844 visual QA; one full-suite run documented in ticket |
-| 09 — EGE + full mock | ready-for-agent | Ticket 03 dependency complete |
+| 09 — EGE + full mock | done | Paper A strict EGE hub/runners/result; exact exam-only offline boundary; ZERO×2; focused + full EGE Chromium release contour green; responsive dark/reduced matrix |
 | 10 — Progress + Profile | ready-for-agent | Ticket 03 dependency complete |
 | 11 — PWA + release evidence | blocked by 02–10 | — |
 

@@ -14,6 +14,7 @@ const DEEP_DESTINATION_BY_SCREEN=new Map([
   ['scr14','practice'],['scr15','practice'],['scr16','ege'],['scr17','progress'],
 ]);
 const CONTEXTUAL_LEARNING_SCREENS=new Set(['scr2','scr3','scr4','scr7','scr8','scr9','scr12','scr13','scr14','scr15']);
+const EXAM_CHROME_SCREENS=new Set(['scr16']);
 const ICON_PATHS={
   back:['M19 12H5','m11 7-5 5 5 5'],
   today:['M3 11.5 12 4l9 7.5','M5.5 10.5V20h13v-9.5'],
@@ -82,11 +83,12 @@ function installLearnerShell({document,navigateTopLevel,navigateBackToHub,curren
     else if(previousTop.topLevel)entryDestination=previousTop.activeDestination;
     currentProjection=projectLearnerShell(screenId,{entryDestination});
     const authorized=document.body?.dataset.learningAccess==='active';
+    const ownsDeepChrome=EXAM_CHROME_SCREENS.has(screenId);
     navigation.hidden=!authorized||!currentProjection.topLevel;
     navigation.inert=!authorized||!currentProjection.topLevel;
     const backDestination=DESTINATION_BY_ID.get(currentProjection.activeDestination);
-    backControl.hidden=!authorized||!currentProjection.backTarget;
-    backControl.inert=!authorized||!currentProjection.backTarget;
+    backControl.hidden=!authorized||!currentProjection.backTarget||ownsDeepChrome;
+    backControl.inert=!authorized||!currentProjection.backTarget||ownsDeepChrome;
     if(backDestination){
       const backLabel=`Назад в раздел ${backDestination.label}`;
       backControl.setAttribute('aria-label',backLabel);
@@ -94,8 +96,9 @@ function installLearnerShell({document,navigateTopLevel,navigateBackToHub,curren
     }
     navigation.dataset.activeDestination=currentProjection.activeDestination||'';
     frame.dataset.aisyShellTopLevel=String(currentProjection.topLevel);
+    frame.dataset.aisyExamChrome=String(ownsDeepChrome);
     document.body.classList.toggle('aisy-shell-top-level',currentProjection.topLevel);
-    document.body.classList.toggle('aisy-shell-deep',Boolean(currentProjection.backTarget));
+    document.body.classList.toggle('aisy-shell-deep',Boolean(currentProjection.backTarget)&&!ownsDeepChrome);
     navigation.querySelectorAll('[data-destination]').forEach(button=>{
       if(button.dataset.destination===currentProjection.activeDestination)button.setAttribute('aria-current','page');
       else button.removeAttribute('aria-current');

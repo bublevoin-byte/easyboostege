@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import test from 'node:test';
 
-const [markup, screen, entry, screenLoader, worker, app, sync, router, runnerSource, performanceSource, performanceBaseline] = await Promise.all([
+const [markup, styles, screen, entry, screenLoader, worker, app, sync, router, runnerSource, performanceSource, performanceBaseline] = await Promise.all([
   fs.readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+  fs.readFile(new URL('../public/ege-mock.css', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/screens/ege-mock.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8'),
   fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8'),
@@ -19,9 +20,11 @@ const [markup, screen, entry, screenLoader, worker, app, sync, router, runnerSou
 test('written mock exposes one accessible responsive runner without score or key controls', () => {
   assert.match(markup, /data-ege-mock-root/u);
   assert.match(markup, /role="timer"/u);
-  assert.match(markup, /\.ege-mock button,[^{]*\.ege-mock input,[^{]*\.ege-mock select\{min-height:44px\}/u);
-  assert.match(markup, /\.ege-mock\{[^}]*overflow-x:hidden/u);
-  assert.match(markup, /@media\(prefers-reduced-motion:reduce\)\{\.ege-mock \*\{/u);
+  assert.match(styles, /\.ege-mock :is\(button, input:not\(\[type="radio"\]\):not\(\[type="checkbox"\]\), select, textarea, summary\)\s*\{[^}]*min-block-size:\s*var\(--aisy-touch-target\)/su);
+  assert.match(styles, /\.ege-mock__choice input\s*\{[^}]*min-block-size:\s*20px[^}]*block-size:\s*20px/su);
+  assert.match(styles, /\.ege-mock__choice:focus-within span\s*\{[^}]*outline:/su);
+  assert.match(styles, /\.ege-mock\s*\{[^}]*overflow-x:\s*(?:clip|hidden)/su);
+  assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)/u);
   assert.match(screen, /blankPositions/u);
   assert.match(screen, /currentEgeMockOwnerBinding/u);
   assert.match(screen, /apiResponseOwner\(result\) !== owner\.username/u);
@@ -152,7 +155,7 @@ test('oral cross-tab and reconnect merges reload the complete result projection'
 test('oral stage countdown is quiet and the verified task-42 composite spans the mobile grid', () => {
   assert.match(screen, /<p><span>Этап<\/span><strong>/u);
   assert.doesNotMatch(screen, /<p role="status"><span>Этап<\/span>/u);
-  assert.match(markup, /\.ege-mock__oral-photos img\{[^}]*grid-column:1\/-1/u);
+  assert.match(styles, /\.ege-mock__oral-photos img\s*\{[^}]*grid-column:\s*1 \/ -1/u);
 });
 
 test('a failed oral reopen preserves its actionable error instead of returning to a silent written card', () => {

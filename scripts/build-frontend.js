@@ -268,7 +268,14 @@ if (declaredSorted.join('\n') !== expectedSorted.join('\n')) {
 }
 
 const offlineLazyChunks = new Set(offlineLazyModules.map((name) => modules[name]));
-const builtShell = shellFrom([...shellChunks, ...offlineLazyChunks, ...shellStaticAssets]);
+/* Vite folds every stylesheet linked by index.html into one hashed CSS asset. The source CSS
+ * copies remain useful for source-mode/offline compatibility, but the production document no
+ * longer requests them. Cache the emitted stylesheet too or an offline reload gets unstyled UI. */
+const builtStyles = output.filter((item) => item.type === 'asset' && item.fileName.endsWith('.css'))
+  .map((item) => item.fileName);
+const builtShell = shellFrom([...new Set([
+  ...shellChunks, ...offlineLazyChunks, ...shellStaticAssets, ...builtStyles,
+])]);
 let workerBuilt = `${workerSource.slice(0, shellStart)}${SHELL_MARKER_START}\nconst APP_SHELL=${JSON.stringify(builtShell).replaceAll('"', "'")};\n${workerSource.slice(shellEnd)}`;
 const egeMockFormStart = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_START);
 const egeMockFormEnd = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_END);

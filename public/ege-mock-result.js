@@ -319,7 +319,7 @@ export function renderEgeMockResult(envelope, history = null, options = {}) {
   const baseline = history?.baselineAttemptId === result.attemptId
     ? '<p class="ege-mock__status">Этот результат закреплён как исходная диагностика.</p>' : '';
   const repeat = options.allowRepeat !== false
-    ? '<section class="ege-mock__card"><h3>Повтор</h3><p>Новый проход раскрытого варианта будет тренировочным и не заменит исходную диагностику.</p><button type="button" class="ege-mock__action" data-ege-action="result-repeat">Начать тренировочный повтор</button></section>'
+    ? '<section class="ege-mock__card"><h3>Повтор</h3><p>Новый проход раскрытого варианта будет тренировочным и не заменит исходную диагностику.</p><button type="button" class="ege-mock__action ege-mock__action--primary" data-ege-action="result-repeat">Начать тренировочный повтор</button></section>'
     : '';
   return `<section class="ege-mock__result" aria-labelledby="ege_mock_result_title">
     <header class="ege-mock__card ege-mock__result-summary"><p>${escapeHtml(result.label)}</p><h2 id="ege_mock_result_title" tabindex="-1">${total} из 82</h2>${baseline}${pending}<p><strong>${escapeHtml(result.forecast.label)}: ${escapeHtml(predicted)}</strong><br>${escapeHtml(result.forecast.disclaimer)} · ${escapeHtml(result.forecast.policyId)}</p><p>${escapeHtml(result.assessmentWarning)}</p></header>

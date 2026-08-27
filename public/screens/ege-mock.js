@@ -27,10 +27,10 @@ import {
   apiGet, apiIsAuthorityFailure, apiMessage, apiPost, apiPostBinary, apiPostIdempotent, apiPut,
   apiResponseOwner, apiResponseServerTime,
   commitEgeMockOwnerMutation,
-  currentEgeMockOwnerBinding, invalidateLearningAuthority, listeningModule, readingModule,
+  currentEgeMockOwnerBinding, exitOfflineEgeMockContinuation, invalidateLearningAuthority, listeningModule, readingModule,
   registerAuthorityReset,
 } from '../app.js';
-import { registerRouteHook, tab } from '../router.js';
+import { back, registerRouteHook, tab } from '../router.js';
 
 const SECTION_LABELS = Object.freeze({
   listening: 'Аудирование', reading: 'Чтение', grammar_lexis: 'Грамматика и лексика',
@@ -77,12 +77,112 @@ let finalResultRequiredAssessmentRevision = -1;
 let historicalResultAttemptId = '';
 let historicalResultOwnerKey = '';
 let answerDispatch = Promise.resolve();
+let confirmation = null;
+let renderedPresentationPhase = '';
 const finalResultLoadAuthority = createEgeMockResultLoadAuthority();
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/gu, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
+}
+
+function confirmationFocusable(dialog) {
+  return Array.from(dialog.querySelectorAll(
+    'button:not(:disabled), [href], input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  )).filter((control) => !control.hidden);
+}
+
+function settleEgeConfirmation(value) {
+  const current = confirmation;
+  if (!current) return;
+  confirmation = null;
+  if (current.dialog.open) current.dialog.close();
+  current.resolve(Boolean(value));
+  queueMicrotask(() => {
+    const fallback = document.querySelector('[data-ege-exit]');
+    const target = current.returnFocus?.isConnected && !current.returnFocus.disabled
+      && current.returnFocus.getClientRects().length
+      ? current.returnFocus : fallback;
+    if (target?.getClientRects?.().length) target.focus({ preventScroll: true });
+  });
+}
+
+function bindEgeChrome() {
+  const dialog = document.getElementById('ege_mock_confirm_dialog');
+  const exit = document.querySelector('[data-ege-exit]');
+  if (exit && exit.dataset.bound !== 'true') {
+    exit.dataset.bound = 'true';
+    exit.addEventListener('click', () => { if (!exitOfflineEgeMockContinuation()) back(); });
+  }
+  if (!dialog || dialog.dataset.bound === 'true') return dialog;
+  dialog.dataset.bound = 'true';
+  document.getElementById('ege_mock_confirm_cancel')?.addEventListener(
+    'click', () => settleEgeConfirmation(false),
+  );
+  document.getElementById('ege_mock_confirm_accept')?.addEventListener(
+    'click', () => settleEgeConfirmation(true),
+  );
+  dialog.addEventListener('cancel', (event) => {
+    event.preventDefault();
+    settleEgeConfirmation(false);
+  });
+  dialog.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      settleEgeConfirmation(false);
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = confirmationFocusable(dialog);
+    if (!focusable.length) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+  return dialog;
+}
+
+function openEgeConfirmation({ title, copy, confirmLabel }) {
+  const dialog = bindEgeChrome();
+  if (!dialog || confirmation) return Promise.resolve(false);
+  document.getElementById('ege_mock_confirm_title').textContent = title;
+  document.getElementById('ege_mock_confirm_copy').textContent = copy;
+  document.getElementById('ege_mock_confirm_accept').textContent = confirmLabel;
+  const returnFocus = document.activeElement;
+  return new Promise((resolve) => {
+    confirmation = { dialog, resolve, returnFocus };
+    dialog.showModal();
+    document.getElementById('ege_mock_confirm_cancel')?.focus({ preventScroll: true });
+  });
+}
+
+function commitPresentationPhase(phase) {
+  if (!phase || phase === renderedPresentationPhase) return;
+  renderedPresentationPhase = phase;
+  const resetViewport = ['running', 'writing', 'written_submitted', 'result'].includes(phase)
+    || phase.startsWith('oral:');
+  if (!resetViewport) return;
+  requestAnimationFrame(() => {
+    if (renderedPresentationPhase !== phase || !document.getElementById('scr16')?.classList.contains('on')) return;
+    const screen = document.getElementById('scr16');
+    screen.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    const focusTarget = phase === 'result'
+      ? document.getElementById('ege_mock_result_title')
+      : document.querySelector('#ege_mock_area .ege-mock__task h2[tabindex="-1"]');
+    if (!focusTarget) return;
+    focusTarget.focus({ preventScroll: true });
+  });
 }
 
 export function setEgeMockOpenIntent(intent) {
@@ -124,6 +224,16 @@ function currentRunnerOperation() {
     epoch: openEpoch, ownerKey: runnerOwnerKey, owner: currentEgeMockOwnerBinding(),
     runner, form, storageKey: runnerStorageKey,
   } : null;
+}
+
+function captureAnswerOperation(target) {
+  const operation = currentRunnerOperation();
+  if (!operation || !document.getElementById('ege_mock_area')?.contains(target)) return null;
+  return Object.freeze({ ...operation, position: operation.runner.snapshot().currentPosition });
+}
+
+function answerOperationCurrent(operation) {
+  return runnerOperationCurrent(operation) && Number.isInteger(operation.position);
 }
 
 function runnerOperationCurrent(operation) {
@@ -279,6 +389,8 @@ function clearPrivateRunnerDom() {
 
 function resetRunnerState(keepOpening = false, invalidateOpening = true) {
   if (invalidateOpening) openEpoch += 1;
+  settleEgeConfirmation(false);
+  answerDispatch = Promise.resolve();
   stopTimers();
   clearPrivateRunnerDom();
   runner = null;
@@ -308,6 +420,7 @@ function resetRunnerState(keepOpening = false, invalidateOpening = true) {
   historicalResultAttemptId = '';
   historicalResultOwnerKey = '';
   finalResultLoadAuthority.reset();
+  renderedPresentationPhase = '';
   form = null;
   if (!keepOpening) {
     opening = null;
@@ -416,6 +529,17 @@ async function loadFinalResult(operation, attemptId) {
 function assessmentRevision(assessment) {
   const revision = Number(assessment?.assessmentRevision);
   return Number.isSafeInteger(revision) && revision >= 0 ? revision : -1;
+}
+
+function writtenSubmittedProjectionIdentity(snapshot) {
+  if (snapshot?.phase !== 'written_submitted') return '';
+  const assessment = snapshot.result?.writingAssessment;
+  return JSON.stringify([
+    assessmentRevision(assessment), assessment?.status ?? null,
+    assessment?.retryAllowed === true, assessment?.runDisposition ?? null,
+    assessment?.retryWarning ?? null, snapshot.assessmentRunQueued === true,
+    snapshot.assessmentRetryQueued === true, snapshot.assessmentRunBlocked === true,
+  ]);
 }
 
 function speakingAssessmentIdentity(assessment) {
@@ -530,7 +654,7 @@ async function discardMissingAttempt(error, operation = null) {
 function renderDiscardedAttempt() {
   const area = document.getElementById('ege_mock_area');
   if (!area) return;
-  area.innerHTML = `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro"><h2>Старая попытка закрыта</h2><p>Локальные ответы относились к другой версии аккаунта или к удалённой попытке и были безопасно скрыты.</p><button class="ege-mock__action" type="button" data-ege-action="retry-open">Открыть актуальный пробник</button></section>`;
+  area.innerHTML = `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro" data-state="locked"><h2>Старая попытка закрыта</h2><p>Локальные ответы относились к другой версии аккаунта или к удалённой попытке и были безопасно скрыты.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="retry-open">Открыть актуальный пробник</button></section>`;
 }
 
 function renderUnavailableAttempt() {
@@ -543,7 +667,7 @@ function renderUnavailableAttempt() {
   document.getElementById('frame')?.classList.add('ege-mock-expanded');
   const area = document.getElementById('ege_mock_area');
   if (!area) return;
-  area.innerHTML = `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro"><h2>Состояние попытки не подтверждено</h2><p>Состояние попытки не удалось подтвердить. Редактирование и новый старт заблокированы, пока сервер не ответит однозначно.</p><button class="ege-mock__action" type="button" data-ege-action="retry-open">Повторить проверку</button></section>`;
+  area.innerHTML = `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro" data-state="locked"><h2>Состояние попытки не подтверждено</h2><p>Состояние попытки не удалось подтвердить. Редактирование и новый старт заблокированы, пока сервер не ответит однозначно.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="retry-open">Повторить проверку</button></section>`;
 }
 
 function sectionFor(position) {
@@ -565,9 +689,12 @@ function renderTimer(snapshot) {
   const element = document.getElementById('ege_mock_timer');
   if (!element) return;
   const running = ['running', 'writing', 'asset_blocked', 'objective_queued', 'objective_completed', 'submit_queued'].includes(snapshot.phase);
-  element.innerHTML = `${running ? formatTime(snapshot.remainingSeconds) : '—'}<small>${running ? 'до сдачи' : '190 минут'}</small>`;
   const warning = running && snapshot.timerWarningMinutes != null;
+  const warningLabel = warning
+    ? `<span class="ege-mock__timer-warning-label">⚠ Осталось ${snapshot.timerWarningMinutes} мин</span>` : '';
+  element.innerHTML = `${warningLabel}${running ? formatTime(snapshot.remainingSeconds) : '—'}<small>${running ? 'до сдачи' : '190 минут'}</small>`;
   element.classList.toggle('ege-mock__timer--warning', warning);
+  element.dataset.state = warning ? 'warning' : running ? 'running' : 'idle';
   element.setAttribute('aria-live', 'off');
   element.setAttribute('aria-label', running ? `До автоматической сдачи ${formatTime(snapshot.remainingSeconds)}` : 'Таймер не запущен');
   const notice = document.getElementById('ege_mock_timer_notice');
@@ -597,14 +724,17 @@ function renderOralHeader(snapshot) {
   if (!element) return;
   const running = snapshot?.phase === 'oral';
   const remainingSeconds = running ? Math.ceil(Number(snapshot.remainingMs) / 1_000) : null;
-  element.innerHTML = `${running ? formatTime(remainingSeconds) : '—'}<small>${running ? 'до сдачи' : '17 минут'}</small>`;
+  const warning = oralTimerWarningMinutes(snapshot);
+  const warningLabel = warning == null
+    ? '' : `<span class="ege-mock__timer-warning-label">⚠ Осталось ${warning} мин</span>`;
+  element.innerHTML = `${warningLabel}${running ? formatTime(remainingSeconds) : '—'}<small>${running ? 'до сдачи' : '17 минут'}</small>`;
   element.setAttribute('role', 'timer');
   element.setAttribute('aria-live', 'off');
   element.setAttribute('aria-label', running
     ? `До автоматической сдачи устной части ${formatTime(remainingSeconds)}`
     : 'Таймер устной части не запущен');
-  const warning = oralTimerWarningMinutes(snapshot);
   element.classList.toggle('ege-mock__timer--warning', warning != null);
+  element.dataset.state = warning == null ? running ? 'running' : 'idle' : 'warning';
   const notice = document.getElementById('ege_mock_timer_notice');
   if (notice && warning !== announcedOralWarning) {
     announcedOralWarning = warning;
@@ -616,7 +746,7 @@ function renderOralHeader(snapshot) {
 function introMarkup(snapshot) {
   const working = snapshot.phase === 'preflighting';
   const ready = snapshot.phase === 'ready';
-  return `${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}<section class="ege-mock__card ege-mock__intro">
+  return `${visibleError ? `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p>` : ''}<section class="ege-mock__card ege-mock__intro" data-state="${working ? 'loading' : ready ? 'ready' : 'idle'}">
     <p class="ege-mock__status" role="status">${working ? 'Проверяем и сохраняем 20 аудиофайлов…' : ready ? 'Техническая проверка завершена. Таймер ещё не запущен.' : 'Один эталонный авторский вариант по структуре ЕГЭ-2026.'}</p>
     <h2>Задания 1–38 в единой строгой письменной части</h2>
     <p>До старта приложение загрузит и сверит все записи. После запуска сервер отсчитает 190 минут: перезагрузка и отсутствие сети не ставят время на паузу.</p>
@@ -627,15 +757,15 @@ function introMarkup(snapshot) {
       <div class="ege-mock__fact"><strong>Без подсказок</strong> ключи и баллы скрыты</div>
     </div>
     ${ready
-      ? '<button class="ege-mock__action" type="button" data-ege-action="start">Начать письменную часть</button>'
-      : `<button class="ege-mock__action" type="button" data-ege-action="prepare" ${working ? 'disabled' : ''}>${working ? 'Проверяем файлы…' : 'Проверить готовность'}</button>`}
+      ? '<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="start">Начать письменную часть</button>'
+      : `<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="prepare" ${working ? 'disabled aria-disabled="true"' : ''}>${working ? 'Проверяем файлы…' : 'Проверить готовность'}</button>`}
   </section>`;
 }
 
 function optionMarkup(options, selected, name) {
-  return `<div class="ege-mock__choices">${options.map((option) => `<label class="ege-mock__choice">
+  return `<fieldset class="ege-mock__field ege-mock__choice-group"><legend>Выберите один ответ</legend><div class="ege-mock__choices">${options.map((option) => `<label class="ege-mock__choice">
     <input type="radio" name="${escapeHtml(name)}" value="${escapeHtml(option.id)}" aria-label="${escapeHtml(option.text)}" ${selected === option.id ? 'checked' : ''}>
-    <span>${escapeHtml(option.text)}</span></label>`).join('')}</div>`;
+    <span>${escapeHtml(option.text)}</span></label>`).join('')}</div></fieldset>`;
 }
 
 function arrayFields(item, answer, count, labels, options) {
@@ -732,6 +862,7 @@ function runningMarkup(snapshot) {
   const next = snapshot.currentPosition + 1;
   const writingPhase = snapshot.phase === 'writing';
   const positionCount = writingPhase ? 38 : 36;
+  const atEnd = next > positionCount;
   const answeredCount = writingPhase ? snapshot.writtenAnsweredCount : snapshot.answeredCount;
   const blankPositions = writingPhase ? snapshot.writtenBlankPositions : snapshot.blankPositions;
   const sectionEntries = Object.entries(SECTION_STARTS).filter(([id]) => writingPhase || id !== 'writing');
@@ -741,15 +872,15 @@ function runningMarkup(snapshot) {
   const writingDraftRecovery = snapshot.writingDraftRecovery?.positions?.length
     ? `<p class="ege-mock__status" role="status">Черновик задания ${snapshot.writingDraftRecovery.positions.join(', ')} восстановлен из устаревшего формата. Проверьте его перед сдачей.</p>` : '';
   return `${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}${writingDraftRecovery}<div class="ege-mock__layout">
+    <section class="ege-mock__card ege-mock__task">
+      <header class="ege-mock__task-head"><div><p>${SECTION_LABELS[section]}</p><h2 tabindex="-1">Задание ${item.position}</h2></div><p>Ответ сохраняется</p></header>
+      ${audioMarkup(item, snapshot)}${writingCriteriaMarkup(item.presentation.kind)}${taskFields(item, answer)}
+      <div class="ege-mock__nav"><button class="ege-mock__action ege-mock__action--secondary" type="button" data-ege-position="${previous}" ${previous < 1 ? 'disabled aria-disabled="true"' : ''}>Назад</button><button class="ege-mock__action ${atEnd ? 'ege-mock__action--secondary' : 'ege-mock__action--primary'}" type="button" data-ege-position="${next}" ${atEnd ? 'disabled aria-disabled="true"' : ''}>Далее</button><button class="ege-mock__action ${atEnd ? 'ege-mock__action--primary' : 'ege-mock__action--secondary'} ege-mock__submit" type="button" data-ege-action="${writingPhase ? 'complete-written' : 'complete-objective'}">${finish}</button></div>
+    </section>
     <aside class="ege-mock__side">
       <section class="ege-mock__card ege-mock__progress"><p><span>Заполнено</span><strong>${answeredCount} из ${positionCount}</strong></p><progress max="${positionCount}" value="${answeredCount}"></progress><p id="ege_mock_save" role="status"><span>Сохранение</span><strong>${snapshot.saveStatus === 'saved' ? 'на сервере' : snapshot.saveStatus === 'queued' ? 'в очереди' : 'локально'}</strong></p></section>
       <nav class="ege-mock__card" aria-label="Разделы"><div class="ege-mock__sections">${sectionEntries.map(([id, start]) => `<button type="button" data-ege-position="${start}" aria-current="${id === section}">${SECTION_LABELS[id]}</button>`).join('')}</div><div class="ege-mock__review" aria-label="Обзор ответов">${Array.from({ length: positionCount }, (_, index) => { const position = index + 1; const blank = blankPositions.includes(position); return `<button type="button" data-ege-position="${position}" data-blank="${blank}" aria-current="${position === snapshot.currentPosition}" aria-label="Задание ${position}${blank ? ', пропущено' : ', отвечено'}">${position}</button>`; }).join('')}</div></nav>
     </aside>
-    <section class="ege-mock__card ege-mock__task">
-      <header class="ege-mock__task-head"><div><p>${SECTION_LABELS[section]}</p><h2 tabindex="-1">Задание ${item.position}</h2></div><p>Ответ сохраняется</p></header>
-      ${audioMarkup(item, snapshot)}${writingCriteriaMarkup(item.presentation.kind)}${taskFields(item, answer)}
-      <div class="ege-mock__nav"><button class="ege-mock__action ege-mock__action--secondary" type="button" data-ege-position="${previous}" ${previous < 1 ? 'disabled' : ''}>Назад</button><button class="ege-mock__action" type="button" data-ege-position="${next}" ${next > positionCount ? 'disabled' : ''}>Далее</button><button class="ege-mock__action ege-mock__action--secondary ege-mock__submit" type="button" data-ege-action="${writingPhase ? 'complete-written' : 'complete-objective'}">${finish}</button></div>
-    </section>
   </div>`;
 }
 
@@ -774,24 +905,24 @@ function oralTaskMarkup(snapshot) {
 
 function oralMarkup(snapshot) {
   const warning = `<p class="ege-mock__status"><strong>Оценка речи предварительная.</strong> ${escapeHtml(AUTOMATIC_ASSESSMENT_WARNING)}</p>`;
-  if (snapshot.phase === 'ready') return `<section class="ege-mock__card ege-mock__success"><h2>Письменная часть сдана</h2><p>Устную часть можно начать после проверки микрофона и фотографий. Отдельные 17 минут начнутся только после этой проверки.</p>${warning}<button class="ege-mock__action" type="button" data-ege-action="oral-preflight">Проверить микрофон и материалы</button></section>`;
-  if (snapshot.phase === 'prepared') return `<section class="ege-mock__card ege-mock__success"><h2>Устная часть готова</h2><p>Микрофон и материалы доступны. После старта таймер нельзя поставить на паузу.</p><button class="ege-mock__action" type="button" data-ege-action="oral-start">Начать 17 минут</button></section>`;
+  if (snapshot.phase === 'ready') return `<section class="ege-mock__card ege-mock__success" data-state="submitted"><h2>Письменная часть сдана</h2><p>Устную часть можно начать после проверки микрофона и фотографий. Отдельные 17 минут начнутся только после этой проверки.</p>${warning}<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="oral-preflight">Проверить микрофон и материалы</button></section>`;
+  if (snapshot.phase === 'prepared') return `<section class="ege-mock__card ege-mock__success" data-state="success"><h2>Устная часть готова</h2><p>Микрофон и материалы доступны. После старта таймер нельзя поставить на паузу.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="oral-start">Начать 17 минут</button></section>`;
   if (snapshot.phase === 'submitted') {
     const assessment = snapshot.speakingAssessment;
     const rows = Object.values(assessment?.items || {}).map((item) => `<li>Задание ${item.position}: ${item.score == null ? '—' : item.score} из ${item.maximum} · ${escapeHtml(item.status)}</li>`).join('');
     const localReady = snapshot.assessmentEvidenceReady === true;
     const assessmentAction = oralProviderRepeatAckRequired
-      ? '<p class="ege-mock__error" role="alert">Предыдущий вызов провайдера мог состояться. Повтор может создать ещё один платный вызов.</p><button class="ege-mock__action" type="button" data-ege-action="oral-assess-repeat">Повторить, понимаю риск повторного платного вызова</button>'
+      ? '<p class="ege-mock__error" role="alert" data-state="error">Предыдущий вызов провайдера мог состояться. Повтор может создать ещё один платный вызов.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="oral-assess-repeat">Повторить, понимаю риск повторного платного вызова</button>'
       : assessment?.status === 'completed'
       ? `<p role="status">Ориентировочная оценка готова.</p><ul>${rows}</ul>`
       : assessment?.status === 'retryable'
         ? `<p class="ege-mock__error" role="alert">Данных одной или нескольких записей недостаточно. Нулевой балл за недоступное доказательство не выставлен.</p><ul>${rows}</ul>`
-        : `<p role="status">Оценка запускается только отдельным явным действием. Записи обработает внешний сервис; обычный исходный звук сервер приложения не сохраняет.</p><button class="ege-mock__action" type="button" data-ege-action="oral-assess" ${oralAssessing || !localReady ? 'disabled' : ''}>${oralAssessing ? 'Получаем примерную оценку…' : localReady ? 'Получить примерную автоматическую оценку' : 'Локальные записи недоступны'}</button>`;
-    return `<section class="ege-mock__card ege-mock__success"><h2>Устная часть сдана</h2>${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}${warning}<p>Записи привязаны к этой попытке. Сбой или неоднозначный ответ провайдера не создаст повторную платную оценку при перезагрузке.</p>${assessmentAction}</section>`;
+        : `<p role="status">Оценка запускается только отдельным явным действием. Записи обработает внешний сервис; обычный исходный звук сервер приложения не сохраняет.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="oral-assess" ${oralAssessing || !localReady ? 'disabled aria-disabled="true"' : ''}>${oralAssessing ? 'Получаем примерную оценку…' : localReady ? 'Получить примерную автоматическую оценку' : 'Локальные записи недоступны'}</button>`;
+    return `<section class="ege-mock__card ege-mock__success" data-state="submitted"><h2>Устная часть сдана</h2>${visibleError ? `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p>` : ''}${warning}<p>Записи привязаны к этой попытке. Сбой или неоднозначный ответ провайдера не создаст повторную платную оценку при перезагрузке.</p>${assessmentAction}</section>`;
   }
-  if (snapshot.phase === 'expired') return '<section class="ege-mock__card ege-mock__error" role="alert"><h2>Устная часть завершена по времени</h2><p>Сервер закрыл отдельные 17 минут. Уже подтверждённые ответы сохранены.</p></section>';
+  if (snapshot.phase === 'expired') return '<section class="ege-mock__card ege-mock__error" role="alert" data-state="locked"><h2>Устная часть завершена по времени</h2><p>Сервер закрыл отдельные 17 минут. Уже подтверждённые ответы сохранены.</p></section>';
   if (snapshot.phase !== 'oral') return '<section class="ege-mock__card"><p role="status">Восстанавливаем устную часть…</p></section>';
-  if (snapshot.readyToSubmit) return `<section class="ege-mock__card ege-mock__success"><h2>Все задания 39–42 пройдены</h2>${warning}<button class="ege-mock__action" type="button" data-ege-action="oral-submit">Сдать устную часть</button></section>`;
+  if (snapshot.readyToSubmit) return `<section class="ege-mock__card ege-mock__success" data-state="success"><h2>Все задания 39–42 пройдены</h2>${warning}<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="oral-submit">Сдать устную часть</button></section>`;
   const current = snapshot.current;
   const stage = current.phase === 'ready' ? 'ГОТОВО' : current.phase === 'preparing' ? 'ПОДГОТОВКА' : '● ЗАПИСЬ';
   const stageRemaining = current.stageDeadlineAt
@@ -802,8 +933,8 @@ function oralMarkup(snapshot) {
   const captureOwned = oralMedia?.hasRecordingLease?.() === true;
   const controls = current.phase === 'ready'
     ? captureOwned
-      ? '<button class="ege-mock__action" type="button" data-ege-action="oral-advance">Начать этап</button>'
-      : '<p role="status">Запись активна в другой вкладке. Здесь отображается подтверждённый прогресс.</p><button class="ege-mock__action" type="button" disabled>Начать этап</button>'
+      ? '<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="oral-advance">Начать этап</button>'
+      : '<p role="status">Запись активна в другой вкладке. Здесь отображается подтверждённый прогресс.</p><button class="ege-mock__action ege-mock__action--primary" type="button" disabled aria-disabled="true">Начать этап</button>'
     : current.phase === 'preparing'
       ? '<p role="status">Подготовка идёт до серверного дедлайна. Запись начнётся автоматически.</p>'
       : oralCaptured
@@ -1132,14 +1263,17 @@ function render() {
   const area = document.getElementById('ege_mock_area');
   if (!area || !runner) return;
   const snapshot = runner.snapshot();
+  const presentationPhase = snapshot.phase === 'written_submitted' && oralRunner
+    ? (oralRunner.snapshot().phase === 'submitted' && finalResult ? 'result' : `oral:${oralRunner.snapshot().phase}`)
+    : snapshot.phase;
   const alert = visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : '';
   renderTimer(snapshot);
   if (['idle', 'preflighting', 'ready', 'error'].includes(snapshot.phase)) area.innerHTML = introMarkup(snapshot);
   else if (['running', 'writing'].includes(snapshot.phase)) area.innerHTML = runningMarkup(snapshot);
-  else if (snapshot.phase === 'asset_blocked') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__error" role="alert"><h2>Нужны проверенные аудиофайлы</h2><p>Exact-кэш этой формы недоступен. Ответы и навигация заблокированы до подключения к сети и повторной проверки файлов; строгий письменный таймер продолжает идти.</p></section>`;
-  else if (snapshot.phase === 'objective_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Сохраняем задания 1–36</h2><p>Checkpoint надёжно записан на этом устройстве и будет подтверждён сервером после восстановления сети. Общий письменный таймер продолжает идти.</p></section>`;
-  else if (snapshot.phase === 'objective_completed') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Задания 1–36 сохранены</h2><p>Сервер подтвердил checkpoint. Письменная часть ещё не сдана: общий таймер продолжает идти для заданий 37–38.</p><button class="ege-mock__action" type="button" data-ege-action="continue-writing">Перейти к заданиям 37–38</button></section>`;
-  else if (snapshot.phase === 'submit_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success"><h2>Сохраняем всю письменную часть</h2><p>Ожидаем авторитетное подтверждение сервера. Локальная очередь сохранена и не создаст повторную сдачу.</p></section>`;
+  else if (snapshot.phase === 'asset_blocked') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__error" role="alert" data-state="locked"><h2>Нужны проверенные аудиофайлы</h2><p>Exact-кэш этой формы недоступен. Ответы и навигация заблокированы до подключения к сети и повторной проверки файлов; строгий письменный таймер продолжает идти.</p></section>`;
+  else if (snapshot.phase === 'objective_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success" data-state="submitted"><h2>Сохраняем задания 1–36</h2><p>Checkpoint надёжно записан на этом устройстве и будет подтверждён сервером после восстановления сети. Общий письменный таймер продолжает идти.</p></section>`;
+  else if (snapshot.phase === 'objective_completed') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success" data-state="success"><h2>Задания 1–36 сохранены</h2><p>Сервер подтвердил checkpoint. Письменная часть ещё не сдана: общий таймер продолжает идти для заданий 37–38.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="continue-writing">Перейти к заданиям 37–38</button></section>`;
+  else if (snapshot.phase === 'submit_queued') area.innerHTML = `${alert}<section class="ege-mock__card ege-mock__success" data-state="submitted"><h2>Сохраняем всю письменную часть</h2><p>Ожидаем авторитетное подтверждение сервера. Локальная очередь сохранена и не создаст повторную сдачу.</p></section>`;
   else if (snapshot.phase === 'written_submitted') {
     if (oralRunner) {
       const oralSnapshot = oralRunner.snapshot();
@@ -1148,9 +1282,10 @@ function render() {
         && finalResultAttemptId === snapshot.attemptId && finalResult) {
         try {
           const staleResult = finalResultLoadFailedAttemptId === snapshot.attemptId
-            ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><button class="ege-mock__action" type="button" data-ege-action="result-refresh">Повторить загрузку результата</button>`
+          ? `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p><button class="ege-mock__action ege-mock__action--secondary" type="button" data-ege-action="result-refresh">Повторить загрузку результата</button>`
             : visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : '';
           area.innerHTML = `${staleResult}${renderEgeMockResult(finalResult, finalHistory)}${finalAssessmentControls(snapshot, oralSnapshot)}`;
+          normalizePrimaryActions(area);
           if (finalResultFocusedAttemptId !== snapshot.attemptId) {
             finalResultFocusedAttemptId = snapshot.attemptId;
             requestAnimationFrame(() => document.getElementById('ege_mock_result_title')?.focus?.());
@@ -1162,7 +1297,7 @@ function render() {
       } else {
         const resultFailure = oralSnapshot.phase === 'submitted'
           && finalResultLoadFailedAttemptId === snapshot.attemptId
-          ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><button class="ege-mock__action" type="button" data-ege-action="result-refresh">Повторить загрузку результата</button>` : '';
+          ? `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="result-refresh">Повторить загрузку результата</button>` : '';
         area.innerHTML = `${oralMarkup(oralSnapshot)}${oralSnapshot.phase === 'submitted' && finalResultLoading ? '<p class="ege-mock__status" role="status">Собираем итоговый результат…</p>' : ''}${resultFailure}`;
         if (oralSnapshot.phase === 'submitted' && !finalResultLoading
           && finalResultLoadFailedAttemptId !== snapshot.attemptId) {
@@ -1170,6 +1305,8 @@ function render() {
           if (operation) queueMicrotask(() => loadFinalResult(operation, snapshot.attemptId));
         }
       }
+      normalizePrimaryActions(area);
+      commitPresentationPhase(presentationPhase);
       return;
     }
     const retryWarning = snapshot.result?.writingAssessment?.retryWarning;
@@ -1180,8 +1317,19 @@ function render() {
         revisionBlocked: snapshot.assessmentRunBlocked,
       },
     );
-    area.innerHTML = `<section class="ege-mock__card ege-mock__success"><h2>Задания 1–38 сданы</h2>${visibleError ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p>` : ''}${renderEgeMockWritingAssessmentStatus(snapshot.result?.writingAssessment)}${retryWarning ? `<p class="ege-mock__error" role="alert">${escapeHtml(retryWarning)}</p>` : ''}${retryActions}<p>Сервер принял ответы и пропуски. Баллы, критерии и ключи не раскрываются до завершения обеих частей пробника.</p>${snapshot.result?.offlineChangesNotAccepted ? '<p class="ege-mock__error" role="alert">После истечения времени сервер уже закрыл письменную часть. Изменения, оставшиеся только на этом устройстве, не вошли в принятую работу.</p>' : ''}<button class="ege-mock__action" type="button" data-ege-action="oral-open">Перейти к устной части</button></section>`;
+    area.innerHTML = `<section class="ege-mock__card ege-mock__success" data-state="submitted"><h2>Задания 1–38 сданы</h2>${visibleError ? `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p>` : ''}${renderEgeMockWritingAssessmentStatus(snapshot.result?.writingAssessment)}${retryWarning ? `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(retryWarning)}</p>` : ''}${retryActions}<p>Сервер принял ответы и пропуски. Баллы, критерии и ключи не раскрываются до завершения обеих частей пробника.</p>${snapshot.result?.offlineChangesNotAccepted ? '<p class="ege-mock__error" role="alert" data-state="error">После истечения времени сервер уже закрыл письменную часть. Изменения, оставшиеся только на этом устройстве, не вошли в принятую работу.</p>' : ''}<button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="oral-open">Перейти к устной части</button></section>`;
   }
+  normalizePrimaryActions(area);
+  commitPresentationPhase(presentationPhase);
+}
+
+function normalizePrimaryActions(container = document.getElementById('ege_mock_area')) {
+  const primaryActions = Array.from(container?.querySelectorAll('.ege-mock__action--primary') || []);
+  primaryActions.forEach((action, index) => {
+    const keepPrimary = index === primaryActions.length - 1;
+    action.classList.toggle('ege-mock__action--primary', keepPrimary);
+    action.classList.toggle('ege-mock__action--secondary', !keepPrimary);
+  });
 }
 
 function scheduleSave() {
@@ -1314,13 +1462,48 @@ async function handleAction(event) {
   }
   const button = event.target.closest('[data-ege-action]');
   if (!button) return;
-  if (button.dataset.egeAction === 'result-repeat') {
-    if (!confirm('Начать тренировочный повтор? Исходная диагностика останется без изменений.')) return;
+  const action = button.dataset.egeAction;
+  if (action === 'result-repeat') {
+    const accepted = await openEgeConfirmation({
+      title: 'Начать тренировочный повтор?',
+      copy: 'Исходная диагностика останется без изменений. Новый проход будет отмечен как тренировочный.',
+      confirmLabel: 'Начать тренировочный повтор',
+    });
+    if (!accepted) return;
     button.disabled = true;
     try { await startTrainingRepeat(); }
     catch (error) { visibleError = apiMessage(error); render(); }
     finally { if (button.isConnected) button.disabled = false; }
     return;
+  }
+  if (['complete-objective', 'complete-written', 'retry-assessment-ambiguous'].includes(action)) {
+    const operation = currentRunnerOperation();
+    if (!operation) return;
+    const snapshot = operation.runner.snapshot();
+    let confirmationInput;
+    if (action === 'complete-objective') {
+      const omissions = snapshot.blankPositions.length;
+      confirmationInput = {
+        title: 'Завершить задания 1–36?',
+        copy: `${omissions ? `Пропущено заданий: ${omissions}. ` : ''}Письменный таймер продолжит идти для заданий 37–38.`,
+        confirmLabel: 'Завершить задания 1–36',
+      };
+    } else if (action === 'complete-written') {
+      const omissions = snapshot.writtenBlankPositions.length;
+      confirmationInput = {
+        title: 'Сдать письменную часть?',
+        copy: `${omissions ? `Пропущено заданий: ${omissions}. ` : ''}После сдачи изменить ответы нельзя.`,
+        confirmLabel: 'Сдать письменную часть',
+      };
+    } else {
+      confirmationInput = {
+        title: 'Повторить платную проверку?',
+        copy: snapshot.result?.writingAssessment?.retryWarning
+          || 'Предыдущую работу провайдера нельзя подтвердить. Повтор может создать ещё один вызов.',
+        confirmLabel: 'Повторить проверку',
+      };
+    }
+    if (!await openEgeConfirmation(confirmationInput) || !runnerOperationCurrent(operation)) return;
   }
   button.disabled = true;
   if (button.dataset.egeAction === 'retry-open') {
@@ -1390,16 +1573,12 @@ async function handleAction(event) {
     if (button.dataset.egeAction === 'prepare') await operation.runner.dispatch({ type: 'prepare', form: operation.form });
     if (button.dataset.egeAction === 'start') await operation.runner.dispatch({ type: 'start' });
     if (button.dataset.egeAction === 'complete-objective') {
-      const omissions = operation.runner.snapshot().blankPositions.length;
-      if (!confirm(`Завершить задания 1–36?${omissions ? ` Пропущено: ${omissions}.` : ''} Письменный таймер продолжит идти для заданий 37–38.`)) return;
       await operation.runner.dispatch({ type: 'completeObjective' });
     }
     if (button.dataset.egeAction === 'continue-writing') {
       await operation.runner.dispatch({ type: 'continueWriting' });
     }
     if (button.dataset.egeAction === 'complete-written') {
-      const omissions = operation.runner.snapshot().writtenBlankPositions.length;
-      if (!confirm(`Сдать всю письменную часть?${omissions ? ` Пропущено: ${omissions}.` : ''} После сдачи изменить ответы нельзя.`)) return;
       await operation.runner.dispatch({ type: 'completeWritten' });
     }
     if (button.dataset.egeAction === 'retry-assessment') {
@@ -1409,9 +1588,6 @@ async function handleAction(event) {
       await operation.runner.dispatch({ type: 'runAssessmentAfterRenewal' });
     }
     if (button.dataset.egeAction === 'retry-assessment-ambiguous') {
-      const warning = operation.runner.snapshot().result?.writingAssessment?.retryWarning
-        || 'Предыдущую работу провайдера нельзя подтвердить. Повтор может создать ещё один вызов.';
-      if (!confirm(`${warning} Продолжить?`)) return;
       await operation.runner.dispatch({
         type: 'retryAssessment', acknowledgePossibleProviderRepeat: true,
       });
@@ -1430,10 +1606,9 @@ async function handleAction(event) {
   }
 }
 
-async function handleAnswer({ target, value }) {
-  const operation = currentRunnerOperation();
-  if (!operation) return;
-  const item = operation.form?.positions[operation.runner.snapshot().currentPosition - 1];
+async function handleAnswer({ target, value }, operation) {
+  if (!answerOperationCurrent(operation)) return;
+  const item = operation.form?.positions[operation.position - 1];
   if (!item) return;
   let answer;
   if (target.matches('[data-ege-text],[data-ege-writing]')) answer = value;
@@ -1481,7 +1656,8 @@ function startClock() {
   timer = setInterval(async () => {
     const operation = currentRunnerOperation();
     if (!operation) return;
-    const phase = operation.runner.snapshot().phase;
+    const beforeTick = operation.runner.snapshot();
+    const phase = beforeTick.phase;
     try { await operation.runner.dispatch({ type: 'tick' }); } catch (error) {
       if (!runnerOperationCurrent(operation)) return;
       await handleRunnerError(error, operation);
@@ -1508,8 +1684,10 @@ function startClock() {
     if (!runnerOperationCurrent(operation)) return;
     const snapshot = operation.runner.snapshot();
     renderTimer(snapshot);
-    if (phase === snapshot.phase) refreshRunningProjection(snapshot);
-    else render();
+    if (phase !== snapshot.phase
+      || writtenSubmittedProjectionIdentity(beforeTick)
+        !== writtenSubmittedProjectionIdentity(snapshot)) render();
+    else refreshRunningProjection(snapshot);
   }, 1000);
 }
 
@@ -1611,7 +1789,8 @@ async function openHistoricalResult(operation) {
   area.innerHTML = renderEgeMockResult(result, history, {
     allowRepeat: current.attempt == null,
   });
-  requestAnimationFrame(() => document.getElementById('ege_mock_result_title')?.focus?.());
+  normalizePrimaryActions(area);
+  commitPresentationPhase('result');
 }
 
 async function handleOpenFailure(error, operation) {
@@ -1627,8 +1806,8 @@ async function handleOpenFailure(error, operation) {
   document.getElementById('frame')?.classList.add('ege-mock-expanded');
   const area = document.getElementById('ege_mock_area');
   if (area) area.innerHTML = operation.intent?.kind === 'result'
-    ? `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro"><h2>Результат не загрузился</h2><p>Показываем только согласованный точный результат и историю этой попытки. Попробуйте снова после восстановления связи.</p><button class="ege-mock__action" type="button" data-ege-action="retry-open" data-ege-result-attempt="${escapeHtml(operation.intent.attemptId)}">Повторить загрузку</button></section>`
-    : `<p class="ege-mock__error" role="alert">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro"><h2>Вариант не загрузился</h2><p>Точный файл формы сейчас недоступен. Таймер не запущен, ответы не изменены.</p><button class="ege-mock__action" type="button" data-ege-action="retry-open">Повторить загрузку</button></section>`;
+    ? `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro" data-state="error"><h2>Результат не загрузился</h2><p>Показываем только согласованный точный результат и историю этой попытки. Попробуйте снова после восстановления связи.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="retry-open" data-ege-result-attempt="${escapeHtml(operation.intent.attemptId)}">Повторить загрузку</button></section>`
+    : `<p class="ege-mock__error" role="alert" data-state="error">${escapeHtml(visibleError)}</p><section class="ege-mock__card ege-mock__intro" data-state="error"><h2>Вариант не загрузился</h2><p>Точный файл формы сейчас недоступен. Таймер не запущен, ответы не изменены.</p><button class="ege-mock__action ege-mock__action--primary" type="button" data-ege-action="retry-open">Повторить загрузку</button></section>`;
 }
 
 function beginOpenRunner() {
@@ -1651,10 +1830,13 @@ function beginOpenRunner() {
 }
 
 const area = document.getElementById('ege_mock_area');
+bindEgeChrome();
 area?.addEventListener('click', (event) => { handleAction(event); });
 area?.addEventListener('input', (event) => {
+  const operation = captureAnswerOperation(event.target);
+  if (!operation) return;
   const input = { target: event.target, value: event.target.value };
-  const current = answerDispatch.then(() => handleAnswer(input));
+  const current = answerDispatch.then(() => handleAnswer(input, operation));
   answerDispatch = current.catch((error) => queueMicrotask(() => { throw error; }));
 });
 window.addEventListener('online', () => {
@@ -1738,6 +1920,7 @@ registerRouteHook((id) => {
   if (id === 'scr16') {
     beginOpenRunner();
   } else {
+    settleEgeConfirmation(false);
     openEpoch += 1;
     opening = null;
     openingOwnerKey = '';
