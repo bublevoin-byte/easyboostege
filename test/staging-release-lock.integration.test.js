@@ -129,7 +129,6 @@ async function boundedOutcome(promise, milliseconds) {
   let timer;
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve({ type: 'timeout' }), milliseconds);
-    timer.unref?.();
   });
   try {
     return await Promise.race([promise, timeout]);
@@ -152,8 +151,7 @@ async function waitForChildState(child, milliseconds, label) {
   const deadline = Date.now() + milliseconds;
   while (childIsLive(child) && Date.now() < deadline) {
     await new Promise((resolve) => {
-      const timer = setTimeout(resolve, 25);
-      timer.unref?.();
+      setTimeout(resolve, 25);
     });
   }
   if (childIsLive(child)) throw new Error(`${label} remained live after SIGKILL`);

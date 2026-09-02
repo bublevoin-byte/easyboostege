@@ -461,6 +461,7 @@ test('rollback rejects normalized-name collisions in an exact retained archive b
   const stored = path.join(fixture.appDir, 'rollbacks', 'releases', `release-${sha}.tar.gz`);
   await fs.writeFile(stored, bytes);
   await fs.writeFile(`${stored}.sha256`, `${sha}\n`);
+  await Promise.all([fs.chmod(stored, 0o600), fs.chmod(`${stored}.sha256`, 0o600)]);
 
   const result = runRollback(fixture, sha);
   assert.equal(result.status, 67, `${result.stdout}\n${result.stderr}`);

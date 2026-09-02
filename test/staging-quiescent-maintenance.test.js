@@ -537,7 +537,7 @@ test('a revoked lock or replaced payload is retained instead of reclaimed', () =
     assert.throws(() => binding.reclaimRetainedEvidence(request), /lock is no longer proven/u);
     assert.equal(fs.existsSync(container), true);
     held.value = true;
-    fs.rmSync(payload);
+    fs.renameSync(payload, path.join(temporaryRoot, 'held-original-payload'));
     fs.writeFileSync(payload, 'replacement');
     assert.throws(() => binding.reclaimRetainedEvidence(request), /changed before reclaim/u);
     assert.equal(fs.readFileSync(payload, 'utf8'), 'replacement');
@@ -715,7 +715,8 @@ test('startup retains source and moved-payload ABA plus a foreign exact transact
     assert.throws(() => crashBinding.reclaimRetainedEvidence(retainedRequest(
       crashBinding, abaFixture.controlRoot, retained.container, retained.payload, 'RETIREMENT',
     )), /fixture crash before move/u);
-    fs.rmSync(retained.container, { force: false, recursive: true });
+    fs.renameSync(retained.container, path.join(abaFixture.temporaryRoot,
+      'held-original-container'));
     const replacement = writeRetainedFixture(
       abaFixture.controlRoot, '.fixture-aba-slot.tombstone',
     );
@@ -758,7 +759,9 @@ test('startup retains source and moved-payload ABA plus a foreign exact transact
     )), /fixture crash after moved ABA seed/u);
     const [transactionName] = deletionTransactions(movedAbaFixture.controlRoot);
     const transactionPath = path.join(movedAbaFixture.controlRoot, transactionName);
-    fs.rmSync(path.join(transactionPath, 'payload'), { force: false, recursive: true });
+    fs.renameSync(path.join(transactionPath, 'payload'), path.join(
+      movedAbaFixture.temporaryRoot, 'held-original-moved-payload',
+    ));
     const replacement = writeRetainedFixture(transactionPath, 'payload');
     fs.writeFileSync(replacement.payload, 'foreign replacement');
     const replayModule = await freshMaintenanceModule();

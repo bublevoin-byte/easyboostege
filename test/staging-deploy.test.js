@@ -2037,9 +2037,9 @@ test('staging v4 helper digest authority rejects a mixed same-protocol bundle be
     arguments: arguments_.slice(1),
     bash: gitBash,
     controlKey: `staging-deadline-test:mixed-helper:${arguments_[0]}:${JSON.stringify(arguments_.slice(1))}`,
-    recoverySeconds: 600,
+    recoverySeconds: STAGING_TEST_RECOVERY_SECONDS,
     script: arguments_[0],
-    transactionSeconds: 1_800,
+    transactionSeconds: STAGING_TEST_TRANSACTION_SECONDS,
   })).toString('base64url');
   const result = spawnSync(process.execPath, [deadlineHarness, configuration], {
     encoding: 'utf8', env: environment,

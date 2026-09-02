@@ -55,6 +55,25 @@ async function copyBundleSource(destination) {
   )));
 }
 
+async function makeDirectoriesOwnerWritable(directory) {
+  const identity = await fs.lstat(directory).catch((error) => {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!identity?.isDirectory() || identity.isSymbolicLink()) return;
+  await fs.chmod(directory, 0o700);
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+      await makeDirectoriesOwnerWritable(path.join(directory, entry.name));
+    }
+  }
+}
+
+async function removeFixture(root) {
+  if (process.platform !== 'win32') await makeDirectoriesOwnerWritable(root);
+  await fs.rm(root, { recursive: true, force: true });
+}
+
 async function prepareCopiedNodeInstaller(root) {
   const nodeDirectory = path.join(root, 'node-authority');
   const nodeExecutable = path.join(nodeDirectory, process.platform === 'win32' ? 'node.exe' : 'node');
@@ -79,6 +98,27 @@ function runCopiedNodeInstaller(authority, sourceDirectory, installRoot, linkRoo
     authority.harness, sourceDirectory, installRoot, linkRoot, allowedPrefix,
   ], { encoding: 'utf8' });
 }
+
+const originalProcessExecPath = process.execPath;
+const originalProcessPath = process.env.PATH;
+let hermeticNodeRoot = '';
+
+test.before(async () => {
+  if (process.platform === 'win32') return;
+  hermeticNodeRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-test-node-'));
+  const hermeticNode = path.join(hermeticNodeRoot, 'node');
+  await fs.copyFile(originalProcessExecPath, hermeticNode);
+  await fs.chmod(hermeticNode, 0o755);
+  process.execPath = hermeticNode;
+  process.env.PATH = `${hermeticNodeRoot}${path.delimiter}${originalProcessPath ?? ''}`;
+});
+
+test.after(async () => {
+  process.execPath = originalProcessExecPath;
+  if (originalProcessPath === undefined) delete process.env.PATH;
+  else process.env.PATH = originalProcessPath;
+  if (hermeticNodeRoot) await removeFixture(hermeticNodeRoot);
+});
 
 test('helper installer serializes root production and non-root hermetic installations', async () => {
   const installer = await fs.readFile(helperInstallerScript, 'utf8');
@@ -289,7 +329,7 @@ test('v4 helper installation atomically advances one digest pointer to exact cur
       assert.match(staleInvocation.stderr, /bundle.*(?:digest|requested)/iu);
     }
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -321,7 +361,7 @@ test('maintenance lock is create-once canonical state and is never replaced on r
       'an invalid existing maintenance lock must never be replaced');
     assert.equal(await fs.readFile(lock, 'utf8'), 'non-canonical-maintenance-lock');
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -417,7 +457,7 @@ test('v4 helper installation durably publishes one complete generation before cu
     assert.equal(publicationIndexes.at(-1), Math.max(...publicationIndexes),
       'current must be the final published install artifact');
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -473,7 +513,7 @@ test('custom helper roots durably publish every newly created ancestor before it
       }
     }
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -505,7 +545,7 @@ test('unrelated metadata drift on a shared ancestor does not impersonate directo
         expectedDigest: installed.bundleDigest,
       });
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -549,7 +589,7 @@ test('default directory fsync accepts benign metadata drift on the same open dir
         expectedDigest: installed.bundleDigest,
       });
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -591,7 +631,7 @@ test('default directory fsync rejects a path replacement after syncing the opene
     assert.equal(replaced, true, 'the regression must replace the exact synced path');
     await assert.rejects(fs.access(path.join(installRoot, 'generations')), { code: 'ENOENT' });
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -662,7 +702,7 @@ test('custom helper roots explicitly establish and durably sync 0755 after restr
         `${directory} mode must be durable before its parent entry is published`);
       }
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -713,7 +753,7 @@ test('fresh helper installation succeeds in a real child process with umask 077'
       expectedDigest: digest,
     });
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -749,7 +789,7 @@ test('custom helper root publication rejects directory identity replacement duri
     await assert.rejects(fs.access(path.join(installRoot, 'generations')), { code: 'ENOENT' },
       'installation must stop before publishing descendants under a replaced directory');
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -869,7 +909,7 @@ test('recover verifies and executes an explicit historical generation after curr
       await assert.rejects(fs.access(marker), { code: 'ENOENT' },
         'a changed historical generation must never execute');
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -927,7 +967,7 @@ test('explicit historical recovery ignores missing malformed or unrelated curren
         assert.equal(await fs.readFile(marker, 'utf8'), 'A', label);
       }
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -996,7 +1036,7 @@ test('launcher verifies target bytes without executing untrusted generation code
         'historical recovery must not import or execute the untrusted current generation');
       assert.equal(await fs.readFile(recoveryMarker, 'utf8'), 'executed');
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1088,7 +1128,7 @@ test('privileged entrypoints ignore BASH_ENV hostile PATH and Node preload injec
         await assert.rejects(fs.access(marker), { code: 'ENOENT' }, marker);
       }
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1117,7 +1157,7 @@ test('installer rejects writable pinned Node binaries and writable non-sticky an
         `${writableAncestor.stdout}\n${writableAncestor.stderr}`);
       assert.match(writableAncestor.stderr, /Node executable ancestor.*unsafe owner or mode/iu);
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1208,7 +1248,7 @@ test('private Node authority publication retains and adopts a typed partial befo
       assert.equal(await fs.readFile(path.join(parentFailureInstall, 'current'), 'utf8'),
         `${retry.bundleDigest}\n`, 'an invalid retained runtime must not advance current');
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1259,7 +1299,7 @@ test('durable file creation stays bound to its no-follow FileHandle across a pat
     assert.equal((await fs.stat(original)).size, 0,
       'the opened original must be rejected before descriptor-bound writes start');
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -1315,7 +1355,7 @@ test('publication rename success never cleans reused old names and removes empty
           `${directory} must not retain empty publication containers after routine success`);
       }
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1362,7 +1402,7 @@ test('publication rename failure preserves its private original and an unrelated
       assert.equal(await fs.readFile(path.join(installRoot, 'current'), 'utf8'),
         `${installed.bundleDigest}\n`);
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1414,7 +1454,7 @@ test('simultaneous local installers serialize private authority and quarantine a
       assert.equal(authorityNames.filter((name) => /quarantine/u.test(name)).length, 0);
     } finally {
       releaseFirst?.();
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1477,7 +1517,7 @@ test('private Node retry quarantines a crash-truncated executable and republishe
       );
       assert.ok((await fs.stat(retainedExecutable)).size < (await fs.stat(process.execPath)).size);
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1549,7 +1589,7 @@ test('private Node quarantine never chmods or removes a successor swapped at rot
       assert.equal(removedTargets.includes(retainedAuthority.quarantine), false);
       assert.equal(removedTargets.includes(path.join(retainedAuthority.quarantine, 'successor')), false);
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1577,7 +1617,7 @@ test('private Node quarantine quota blocks a new digest allocation before mutati
     assert.equal(names.some((name) => /^[a-f0-9]{64}$/u.test(name)), false,
       'quota exhaustion must fail before allocating the deterministic digest directory');
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -1733,7 +1773,7 @@ test('launcher revalidates pinned Node ancestors identity and digest before ever
       assert.notEqual(replacedBinary.status, 0, `${replacedBinary.stdout}\n${replacedBinary.stderr}`);
       await assert.rejects(fs.access(marker), { code: 'ENOENT' });
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -1801,7 +1841,7 @@ test('current schema pins a real supervisor to shell to nested Node chain', asyn
       nodeOptions: null,
     });
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -1907,7 +1947,7 @@ test('current launcher keeps one private Node through transaction wrapper bash a
         `${role} must execute through the same private content-addressed Node runtime`);
       }
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -2007,7 +2047,7 @@ test('Linux launcher exports a live fd8 flock proof for the exact canonical main
       assert.equal(rejected.status, 75, `${rejected.stdout}\n${rejected.stderr}`);
       await assert.rejects(fs.access(marker), { code: 'ENOENT' });
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -2073,7 +2113,7 @@ test('descriptor-bound final Node survives pathname replacement after its last a
       assert.equal(invocation.status, 0, `${invocation.stdout}\n${invocation.stderr}`);
       assert.equal(await fs.readFile(marker, 'utf8'), 'executed');
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -2139,7 +2179,7 @@ test('authenticated generation carries an exact local ESM boundary under a Commo
       await assert.rejects(fs.access(marker), { code: 'ENOENT' },
         'a changed ESM boundary must fail before generation code executes');
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -2230,7 +2270,7 @@ test('upgraded launcher verifies and recovers an exact retained pre-ESM v4 gener
       assert.equal(recovery.status, 0, `${recovery.stdout}\n${recovery.stderr}`);
       assert.equal(await fs.readFile(marker, 'utf8'), 'nested');
     } finally {
-      await fs.rm(root, { recursive: true, force: true });
+      await removeFixture(root);
     }
   });
 
@@ -2298,7 +2338,7 @@ test('v4 helper installation rejects sync failures before current advances', asy
     assert.equal(await fs.readFile(path.join(installRoot, 'current'), 'utf8'),
       `${generationB.bundleDigest}\n`);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -2347,7 +2387,7 @@ test('v4 bundle pointer swap failure preserves the prior generation and tamperin
       assert.match(invocation.stderr, /pointer/iu);
     }
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
@@ -2386,7 +2426,7 @@ test('partial, mixed or linked helper generations fail closed without changing c
         /source directory chain.*no-follow/iu);
     }
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await removeFixture(root);
   }
 });
 
