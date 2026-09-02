@@ -56,8 +56,7 @@ function lifecycleFailure(primaryError, cleanupError, message) {
 
 function deadline(milliseconds, value) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => { resolve(value); }, milliseconds);
-    timer.unref?.();
+    setTimeout(() => { resolve(value); }, milliseconds);
   });
 }
 
