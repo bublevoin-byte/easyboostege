@@ -444,6 +444,8 @@ stable_promotion_attempted=1
 run_bounded "$COMMAND_SECONDS" docker image tag "$release_image" "$STABLE_IMAGE"
 verify_stable_image "$candidate_image_id"
 
+prepare_release_tree_for_copy "$release_dir"
+run_tree_verify "$frozen_archive" "$release_dir"
 tree_mutated=1
 consume_reservation "$live_reservation_file" "$candidate_expanded" || exit 68
 clear_release_tree

@@ -381,6 +381,49 @@ export async function verifyReleaseTree({ archivePath, directory, limits = ARCHI
   return { aggregateBytes: parsed.aggregateBytes, files: parsed.entries.length, sha256: parsed.sha256 };
 }
 
+function directoryIdentity(stat) {
+  return `${stat.dev}:${stat.ino}`;
+}
+
+export async function prepareReleaseTreeForCopy({ directory }) {
+  const root = path.resolve(directory);
+  let directories = 0;
+  let files = 0;
+
+  function visit(current, name) {
+    let before;
+    try {
+      before = fs.lstatSync(current, { bigint: true });
+    } catch {
+      throw archiveError(`${name}: copy source entry is missing or unreadable`);
+    }
+    if (!before.isDirectory() || before.isSymbolicLink()) {
+      throw archiveError(`${name}: copy source directory is unsafe`);
+    }
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const childName = name ? `${name}/${entry.name}` : entry.name;
+      const child = path.join(current, entry.name);
+      const stat = fs.lstatSync(child, { bigint: true });
+      if (stat.isSymbolicLink()) {
+        throw archiveError(`${childName}: copy source symlink is forbidden`);
+      }
+      if (stat.isDirectory()) visit(child, childName);
+      else if (stat.isFile()) files += 1;
+      else throw archiveError(`${childName}: unsupported copy source entry`);
+    }
+    fs.chmodSync(current, 0o700);
+    const after = fs.lstatSync(current, { bigint: true });
+    if (!after.isDirectory() || after.isSymbolicLink()
+        || directoryIdentity(after) !== directoryIdentity(before)) {
+      throw archiveError(`${name}: copy source directory changed during mode preparation`);
+    }
+    directories += 1;
+  }
+
+  visit(root, '.');
+  return { directories, files };
+}
+
 function splitTarPath(file) {
   if (Buffer.byteLength(file, 'utf8') <= 100) return { name: file, prefix: '' };
   for (const match of [...file.matchAll(/\//gu)].reverse()) {
@@ -477,7 +520,11 @@ async function runCli() {
     await verifyReleaseTree({ archivePath: path.resolve(args[0]), directory: path.resolve(args[1]) });
     return;
   }
-  throw new Error('Usage: staging-release-archive.js protocol | create-git ROOT OUTPUT | inspect ARCHIVE | extract ARCHIVE DEST | verify-tree ARCHIVE DIRECTORY');
+  if (command === 'prepare-copy' && args.length === 1) {
+    await prepareReleaseTreeForCopy({ directory: path.resolve(args[0]) });
+    return;
+  }
+  throw new Error('Usage: staging-release-archive.js protocol | create-git ROOT OUTPUT | inspect ARCHIVE | extract ARCHIVE DEST | verify-tree ARCHIVE DIRECTORY | prepare-copy DIRECTORY');
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';

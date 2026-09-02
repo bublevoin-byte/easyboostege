@@ -762,6 +762,10 @@ run_tree_verify() {
   run_bounded "$ARCHIVE_INSPECT_SECONDS" node "$archive_tool" verify-tree "$1" "$2"
 }
 
+prepare_release_tree_for_copy() {
+  run_bounded "$ARCHIVE_INSPECT_SECONDS" node "$archive_tool" prepare-copy "$1"
+}
+
 release_archive_path() { printf '%s/release-%s.tar.gz\n' "$release_store" "$1"; }
 
 verify_release_pair() {

@@ -11,6 +11,7 @@ import {
   ARCHIVE_LIMITS,
   createReleaseArchive,
   extractReleaseArchive,
+  prepareReleaseTreeForCopy,
   validateReleaseArchive,
   verifyReleaseTree,
 } from '../scripts/staging-release-archive.js';
@@ -113,6 +114,34 @@ test('canonical staging archive creation, extraction and exact tree verification
       /undeclared\.txt.*undeclared/u,
     );
   } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('copy preparation restores only directory writability after release freezing', async (context) => {
+  if (process.platform === 'win32') {
+    context.skip('Windows does not expose the POSIX directory modes used by staging');
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-copy-mode-'));
+  try {
+    const nested = path.join(root, 'nested');
+    const file = path.join(nested, 'immutable.txt');
+    await fs.mkdir(nested);
+    await fs.writeFile(file, 'immutable\n', { mode: 0o400 });
+    await fs.chmod(nested, 0o500);
+    await fs.chmod(root, 0o500);
+
+    const result = await prepareReleaseTreeForCopy({ directory: root });
+
+    assert.deepEqual(result, { directories: 2, files: 1 });
+    assert.equal((await fs.stat(root)).mode & 0o777, 0o700);
+    assert.equal((await fs.stat(nested)).mode & 0o777, 0o700);
+    assert.equal((await fs.stat(file)).mode & 0o777, 0o400,
+      'copy preparation must preserve immutable file modes');
+  } finally {
+    await fs.chmod(root, 0o700).catch(() => {});
+    await fs.chmod(path.join(root, 'nested'), 0o700).catch(() => {});
     await fs.rm(root, { recursive: true, force: true });
   }
 });
