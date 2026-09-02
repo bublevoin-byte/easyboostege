@@ -867,7 +867,7 @@ test('every partial release-pair publication removes exact temp and final paths 
         `release-${fixture.previous.sha}.tar.gz`,
         `release-${fixture.previous.sha}.tar.gz.sha256`,
       ], `${flag} must leave only the exact predecessor pair`);
-      await assert.rejects(fs.access(path.join(fixture.appDir, '.staging-recovery-required')),
+      await assert.rejects(() => fs.access(path.join(fixture.appDir, '.staging-recovery-required')),
         { code: 'ENOENT' }, `${flag}: ${result.stdout}\n${result.stderr}\n${
           await fs.readFile(fixture.commandLog, 'utf8')}`);
       assert.match(result.stderr, /verified prior state restored/u, flag);

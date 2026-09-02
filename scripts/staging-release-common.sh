@@ -1313,7 +1313,11 @@ remove_owned_publication_path() {
   if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then removal_status=1; fi
   durable_remove_empty_directory "$quarantine_dir" || directory_status="$?"
   durable_confirm_absence "$candidate" || return 1
-  [ "$move_status" -eq 0 ] && [ "$removal_status" -eq 0 ] && [ "$directory_status" -eq 0 ]
+  if [ "$move_status" -ne 0 ] || [ "$removal_status" -ne 0 ] \
+    || [ "$directory_status" -ne 0 ]; then
+    echo "$role cleanup durability failed (move=$move_status removal=$removal_status directory=$directory_status)" >&2
+    return 1
+  fi
 }
 
 publish_owned_publication_path() {
