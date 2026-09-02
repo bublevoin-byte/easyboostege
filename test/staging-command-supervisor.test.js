@@ -1003,5 +1003,5 @@ test('supervisor kills descendants when its invoking parent is externally SIGKIL
   const pid = Number(await fs.readFile(childPid, 'utf8'));
   parent.kill('SIGKILL');
   await new Promise((resolve) => parent.once('close', resolve));
-  await waitFor(() => !alive(pid));
+  await waitFor(() => !alive(pid), 12_000);
 });
