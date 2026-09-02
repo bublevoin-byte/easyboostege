@@ -500,6 +500,24 @@ async function createFixture() {
   };
 }
 
+async function removeFixture(root) {
+  async function makeDirectoriesOwnerWritable(directory) {
+    let entries;
+    try {
+      await fs.chmod(directory, 0o700);
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return;
+      throw error;
+    }
+    await Promise.all(entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => makeDirectoriesOwnerWritable(path.join(directory, entry.name))));
+  }
+  if (process.platform !== 'win32') await makeDirectoriesOwnerWritable(root);
+  await fs.rm(root, { recursive: true, force: true });
+}
+
 async function makeFirstDeploymentFixture(fixture) {
   for (const entry of await fs.readdir(fixture.appDir)) {
     if (['.env.staging', 'backups', 'rollbacks'].includes(entry)) continue;
@@ -622,7 +640,7 @@ test('staging release owns the shared host-operation guard through mutation and 
     const probe = runBash(['--version']);
     if (!probe) return context.skip('Git Bash is not installed');
     const guarded = await createFixture();
-    context.after(() => fs.rm(guarded.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(guarded.root));
     const success = runDeploy(guarded, { FAKE_REQUIRE_HOST_OPERATION_LOCK: '1' });
     const successLog = await fs.readFile(guarded.commandLog, 'utf8').catch(() => '');
     assert.equal(success.status, 0, `${success.stdout}\n${success.stderr}\n${successLog}`);
@@ -631,7 +649,7 @@ test('staging release owns the shared host-operation guard through mutation and 
       'the exactly-owned host guard must be released after a verified operation');
 
     const contended = await createFixture();
-    context.after(() => fs.rm(contended.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(contended.root));
     const lockDirectory = path.join(contended.root, 'host-operation.lock');
     await fs.mkdir(lockDirectory, { mode: 0o700 });
     await fs.writeFile(path.join(lockDirectory, 'owner'), [
@@ -674,7 +692,7 @@ test('staging deploy builds the verified archive before activation and retains e
   if (!probe) return context.skip('Git Bash is not installed');
   assert.equal(probe.status, 0, probe.stderr);
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
 
   const result = runDeploy(fixture, { EASYBOOST_STAGING_BUILD_CONTEXT: '/untrusted/live-tree' });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);

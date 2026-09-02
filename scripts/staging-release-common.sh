@@ -1154,6 +1154,9 @@ finalize_release_boundaries() {
       record_finalization_failure "$proof_step"
     fi
   fi
+  if [ "$failed" -ne 0 ]; then
+    echo "Staging release finalization failed at: $release_finalization_step" >&2
+  fi
   [ "$failed" -eq 0 ]
 }
 
