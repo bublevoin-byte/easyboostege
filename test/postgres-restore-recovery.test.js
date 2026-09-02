@@ -271,7 +271,11 @@ test('host guard never treats Windows directory fsync EPERM as durable', async (
   let denyDirectorySync = false;
   const fileSystem = fileSystemWith({
     async open(target, ...arguments_) {
-      const handle = await fs.open(target, ...arguments_);
+      const openArguments = target === hostLockDirectory
+          && arguments_[0] === 'r+' && process.platform !== 'win32'
+        ? ['r', ...arguments_.slice(1)]
+        : arguments_;
+      const handle = await fs.open(target, ...openArguments);
       if (target !== hostLockDirectory) return handle;
       return new Proxy(handle, {
         get(handleTarget, property) {

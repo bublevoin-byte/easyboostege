@@ -431,6 +431,9 @@ test('an unreadable live process makes remote token-process evidence UNKNOWN', a
   const environmentRead = String.raw`tr '\000' '\n' < "$environment_file" 2>/dev/null`;
   assert.equal(scripts.probe.includes(environmentRead), true,
     'the production probe must expose its real process-environment read');
+  assert.match(scripts.probe,
+    /probe_uid="\$\(id -u\)"[\s\S]*stat -c '%u' "\/proc\/\$\{process_pid\}"[\s\S]*\[ "\$process_uid" = "\$probe_uid" \] \|\| continue/u,
+    'unreadable processes outside the restore UID cannot make exact same-UID settlement unknowable');
   const unreadableProbe = scripts.probe.replace(environmentRead, 'false');
 
   assert.equal(await runRemoteProbe(unreadableProbe, token),

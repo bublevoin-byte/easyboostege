@@ -2814,7 +2814,7 @@ test('POSIX parent-sync failure preserves the exact atomically published record 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-posix-parent-sync-'));
   const directory = path.join(root, 'owned-session');
   const destination = path.join(directory, 'ready.proof');
-  await fs.mkdir(directory);
+  await fs.mkdir(directory, { mode: 0o700 });
   let destinationSyncs = 0;
   let recoveryAuthority;
   try {
@@ -2851,7 +2851,7 @@ test('POSIX durable publication moves but never deletes a last-window source rep
     const temporary = path.join(root,
       '.owned-session.ready.proof.44444444444444444444444444444444.tmp');
     const displaced = path.join(root, 'displaced-original');
-    await fs.mkdir(directory);
+    await fs.mkdir(directory, { mode: 0o700 });
     const filesystem = Object.create(fsSync);
     filesystem.renameSync = (source, target) => {
       assert.equal(source, temporary);
@@ -3349,8 +3349,10 @@ test('POSIX session disposal retries parent durability without minting a second 
       });
       const firstTombstone = failure.recoveryAuthority.tombstone;
       await fs.access(firstTombstone);
-      assert.throws(() => control.request('SIGTERM'), /ENOENT|disposed/iu,
-        'failed parent durability must not masquerade as a usable live controller');
+      assert.throws(() => control.request('SIGTERM'), (error) => (
+        error?.code === 'POSIX_SESSION_PUBLICATION_CLEANUP_REQUIRED'
+          && error?.recoveryAuthority?.destination === control.specification.termRequestPath
+      ), 'failed parent durability must not masquerade as a usable live controller');
       control.dispose({ force: true });
       assert.equal(syncAttempts, 3, 'retry must repeat the failed parent durability proof');
       assert.deepEqual((await fs.readdir(temporaryDirectory))
