@@ -98,8 +98,10 @@ try {
       `${source} must remain in the lazy production graph`,
     );
   }
-  assert.equal(shell.has(cssPath), false, 'the emitted Writing CSS must join the cache through the online document');
-  assert.equal(workerSource.includes(`'${cssPath}'`), false, 'the emitted Writing CSS must not be mislabeled as install-shell input');
+  /* Vite emits one shared stylesheet for the production document. It contains Writing rules but
+     is not a Writing-only lazy asset: every installed screen needs it before any online visit. */
+  assert.equal(shell.has(cssPath), true, 'the production document stylesheet must be install-offline');
+  assert.equal(workerSource.includes(`'${cssPath}'`), true, 'the shared emitted stylesheet must be in APP_SHELL');
 
   temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'aisy-writing-offline-cache-e2e-'));
   const port = await availablePort();
@@ -189,21 +191,34 @@ try {
   await page.getByRole('button', { name: 'Назад в раздел Практика', exact: true }).press('Enter');
   await page.locator('#aisy-practice.on').waitFor({ state: 'visible' });
 
-  await page.waitForFunction(async (paths) => {
-    const names = await caches.keys();
-    for (const assetPath of paths) {
-      let found = false;
-      for (const cacheName of names) {
-        const cache = await caches.open(cacheName);
-        if (await cache.match(new URL(assetPath, location.origin).href)) {
-          found = true;
-          break;
+  await page.evaluate(() => { window.__aisyWritingCacheProbe = { pending: false, ready: false }; });
+  await page.waitForFunction((paths) => {
+    const state = window.__aisyWritingCacheProbe;
+    if (state.ready) return true;
+    if (!state.pending) {
+      state.pending = true;
+      (async () => {
+        const names = await caches.keys();
+        for (const assetPath of paths) {
+          let found = false;
+          for (const cacheName of names) {
+            const cache = await caches.open(cacheName);
+            if (await cache.match(new URL(assetPath, location.origin).href)) {
+              found = true;
+              break;
+            }
+          }
+          if (!found) return false;
         }
-      }
-      if (!found) return false;
+        return true;
+      })().then((ready) => {
+        state.ready = ready;
+        state.pending = false;
+      }, () => { state.pending = false; });
     }
-    return true;
+    return false;
   }, assetPaths, { timeout: 10_000 });
+  await page.evaluate(() => { delete window.__aisyWritingCacheProbe; });
   const afterOpen = await cacheLocations(page, assetPaths);
   for (const [source, assetPath] of Object.entries(moduleAssets)) {
     assert.ok(afterOpen[assetPath].length > 0, `${source} must join CacheStorage after its first use`);
@@ -258,7 +273,7 @@ try {
   assert.equal(await page.locator('#w_seg37').getAttribute('aria-checked'), 'true');
   assert.equal(await page.evaluate(() => typeof window.EasyBoostWriting?.buildPayload), 'function');
   const paper = await page.evaluate((expectedCssPath) => {
-    const primary = document.getElementById('w_primary_action');
+    const primary = document.getElementById('writing_primary_action');
     const editor = document.getElementById('w_editor');
     return {
       stylesheetLoaded: [...document.styleSheets].some((sheet) => (

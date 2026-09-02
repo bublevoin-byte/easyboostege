@@ -30,6 +30,7 @@ test('production A foundation publishes three token layers and self-hosted typog
   assert.equal(primitives.get('--aisy-primitive-paper-0'), '#fffdf9');
   assert.equal(primitives.get('--aisy-primitive-ink-plum'), '#35263d');
   assert.equal(primitives.get('--aisy-primitive-coral-action'), '#b9433a');
+  assert.equal(primitives.get('--aisy-primitive-font-body'), '16px');
   assert.equal(
     semantic.get('--aisy-color-background'),
     'light-dark(var(--aisy-primitive-paper-1), var(--aisy-primitive-night-canvas))',
@@ -148,4 +149,63 @@ test('production shell keeps one 390px phone and bottom navigation at every view
     'deep routes must not widen the production phone canvas');
   assert.doesNotMatch(composed, /@media\s*\(min-width/u,
     'wide viewports must not mutate the inner portrait-phone composition');
+});
+
+test('mobile shell declares vh fallbacks before dynamic viewport overrides', async () => {
+  const [css, html] = await Promise.all([readPublic('aisy-shell.css'), readPublic('index.html')]);
+  assert.match(css, /height:\s*min\(844px,\s*100vh\);\s*height:\s*min\(844px,\s*100dvh\);\s*block-size:\s*min\(844px,\s*100vh\);\s*block-size:\s*min\(844px,\s*100dvh\);/u);
+  assert.match(css, /@media \(max-width: 430px\)[\s\S]*?#frame\s*\{\s*height:\s*100vh;\s*height:\s*100dvh;\s*block-size:\s*100vh;\s*block-size:\s*100dvh;/u);
+  assert.match(css, /@media \(max-height: 600px\)[\s\S]*?#frame\s*\{\s*height:\s*100vh;\s*height:\s*100dvh;\s*block-size:\s*100vh;\s*block-size:\s*100dvh;/u);
+  assert.match(html, /body\{[^}]*min-height:100vh;min-height:100dvh;/u);
+  assert.ok(html.includes('@media(max-width:430px){body{background:#F5F6F8}#frame{width:100vw;height:100vh;height:100dvh;'));
+  assert.ok(html.includes('.screen{width:100vw;height:100vh;height:100dvh;'));
+  assert.ok(html.includes('@media(orientation:landscape) and (max-height:600px){#frame{height:100vh;height:100dvh;'));
+  assert.ok(html.includes('.screen{height:100vh;height:100dvh}'));
+});
+
+test('production UI custom properties resolve and update notice keeps Paper depth', async () => {
+  const [theme, shell, reading] = await Promise.all([
+    readPublic('aisy-theme.css'),
+    readPublic('aisy-shell.css'),
+    readPublic('reading-listening.css'),
+  ]);
+  const definitions = new Set([...theme.matchAll(/(--aisy-[\w-]+)\s*:/gu)]
+    .map((match) => match[1]));
+  const references = new Set([...`${theme}\n${shell}\n${reading}`.matchAll(/var\((--aisy-[\w-]+)/gu)]
+    .map((match) => match[1]));
+  assert.deepEqual([...references].filter((name) => !definitions.has(name)), [],
+    'every Aisy custom-property reference in the production theme, shell and Reading UI must resolve');
+
+  const primitives = properties(layer(theme, 'aisy-primitives'));
+  const semantic = properties(layer(theme, 'aisy-semantic'));
+  const components = properties(layer(theme, 'aisy-components'));
+  assert.equal(components.get('--aisy-surface-shadow'), 'var(--aisy-depth-sheet)');
+  assert.equal(
+    semantic.get('--aisy-depth-sheet'),
+    'light-dark(var(--aisy-primitive-depth-sheet-light), var(--aisy-primitive-depth-sheet-dark))',
+  );
+  assert.match(primitives.get('--aisy-primitive-depth-sheet-light'), /^10px 12px 30px/u,
+    'light Paper sheet depth must fall down and right');
+  assert.match(primitives.get('--aisy-primitive-depth-sheet-dark'), /^10px 12px 30px/u,
+    'dark Paper sheet depth must fall down and right');
+  assert.match(shell, /\.pwa-update\s*\{[^}]*box-shadow:\s*var\(--aisy-surface-shadow\)/su,
+    'update notice must consume the defined component-level Paper sheet shadow');
+});
+
+test('PWA update supporting copy keeps the locked production body-size floor', async () => {
+  const shell = await readPublic('aisy-shell.css');
+  assert.match(
+    shell,
+    /\.pwa-update__message p\s*\{[^}]*font:\s*600\s+var\(--aisy-font-size-body\)\/1\.45\s+var\(--aisy-font-interface\)/su,
+    'update explanations are body copy and must not fall below the shared 16px token',
+  );
+});
+
+test('PWA Later action keeps the locked 16px body-size floor', async () => {
+  const shell = await readPublic('aisy-shell.css');
+  assert.match(
+    shell,
+    /\.pwa-update__dismiss\s*\{[^}]*font:\s*800\s+var\(--aisy-font-size-body\)\/1\s+var\(--aisy-font-interface\)/su,
+    'Позже is a learner decision, not compact metadata',
+  );
 });

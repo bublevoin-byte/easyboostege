@@ -1,6 +1,37 @@
 const failClosedHttpProvider = 'http://127.0.0.1:9/provider-disabled';
 const failClosedWebSocketProvider = 'ws://127.0.0.1:9/provider-disabled';
 const dynamicIdentifierPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu;
+const inheritedSpawnEnvironmentKeys = Object.freeze([
+  Object.freeze(['PATH', 'Path']), Object.freeze(['PATHEXT']),
+  Object.freeze(['SystemRoot', 'SYSTEMROOT']), Object.freeze(['WINDIR', 'windir']),
+  Object.freeze(['ComSpec', 'COMSPEC']),
+  Object.freeze(['TEMP']), Object.freeze(['TMP']), Object.freeze(['TMPDIR']),
+  Object.freeze(['HOME']), Object.freeze(['USERPROFILE']), Object.freeze(['HOMEDRIVE']),
+  Object.freeze(['HOMEPATH']), Object.freeze(['LOCALAPPDATA']), Object.freeze(['XDG_CACHE_HOME']),
+  Object.freeze(['CHROME_PATH']), Object.freeze(['PLAYWRIGHT_BROWSERS_PATH']),
+]);
+const releaseServerDefaults = Object.freeze({
+  VK_ID_MODE: 'disabled',
+  VK_ID_APP_ID: '',
+  VK_ID_REDIRECT_URI: '',
+  VK_ID_SCOPE: '',
+  TELEGRAM_BOT_TOKEN: '',
+  ADMIN_TELEGRAM_ID: '',
+  MONITORING_TOKEN: '',
+  XAI_API_KEY: '',
+  XAI_API_URL: failClosedHttpProvider,
+  XAI_RULE_SEARCH_URL: failClosedHttpProvider,
+  XAI_VOICE_REALTIME_URL: failClosedWebSocketProvider,
+  GROQ_API_KEY: '',
+  GROQ_API_URL: failClosedHttpProvider,
+  AZURE_SPEECH_KEY: '',
+  AZURE_SPEECH_REGION: '',
+  XAI_ENABLED: 'false',
+  GROQ_ENABLED: 'false',
+  VOICE_TUTOR_ENABLED: 'false',
+  VOICE_TUTOR_RULE_SEARCH_ENABLED: 'false',
+  SPEAKING_PRONUNCIATION_ENABLED: 'false',
+});
 
 function normalizeRequestPath(value) {
   const raw = String(value || '');
@@ -20,26 +51,28 @@ function redactDiagnostic(value) {
 }
 
 export function createReleaseServerEnvironment(applicationEnvironment, inheritedEnvironment = process.env) {
-  return {
-    ...inheritedEnvironment,
-    ...applicationEnvironment,
-    TELEGRAM_BOT_TOKEN: '',
-    ADMIN_TELEGRAM_ID: '',
-    MONITORING_TOKEN: '',
-    XAI_API_KEY: '',
-    XAI_API_URL: failClosedHttpProvider,
-    XAI_RULE_SEARCH_URL: failClosedHttpProvider,
-    XAI_VOICE_REALTIME_URL: failClosedWebSocketProvider,
-    GROQ_API_KEY: '',
-    GROQ_API_URL: failClosedHttpProvider,
-    AZURE_SPEECH_KEY: '',
-    AZURE_SPEECH_REGION: '',
-    XAI_ENABLED: 'false',
-    GROQ_ENABLED: 'false',
-    VOICE_TUTOR_ENABLED: 'false',
-    VOICE_TUTOR_RULE_SEARCH_ENABLED: 'false',
-    SPEAKING_PRONUNCIATION_ENABLED: 'false',
+  const spawnEnvironment = {};
+  const namesByFold = new Map();
+  const assign = (name, value) => {
+    const folded = name.toUpperCase();
+    const previous = namesByFold.get(folded);
+    if (previous !== undefined && previous !== name) delete spawnEnvironment[previous];
+    if (value === undefined) {
+      namesByFold.delete(folded);
+      delete spawnEnvironment[name];
+      return;
+    }
+    spawnEnvironment[name] = value;
+    namesByFold.set(folded, name);
   };
+  for (const aliases of inheritedSpawnEnvironmentKeys) {
+    const inheritedName = aliases.find((name) => inheritedEnvironment[name] !== undefined);
+    if (inheritedName !== undefined) assign(aliases[0], inheritedEnvironment[inheritedName]);
+  }
+  for (const [name, value] of Object.entries(releaseServerDefaults)) assign(name, value);
+  for (const [name, value] of Object.entries(applicationEnvironment ?? {})) assign(name, value);
+  assign('EASYBOOST_DISABLE_DOTENV', 'true');
+  return spawnEnvironment;
 }
 
 export function createReleaseNetworkGuard({ allowedHttpResponses = [] } = {}) {
@@ -129,12 +162,6 @@ export async function prepareReleaseBrowserBoundary(context, {
   await context.route('**/*', (route) => {
     const requestUrl = new URL(route.request().url());
     if (requestUrl.origin === exactApplicationOrigin) return route.continue();
-    if (requestUrl.origin === 'https://fonts.googleapis.com') {
-      return route.fulfill({ status: 200, contentType: 'text/css', body: '' });
-    }
-    if (requestUrl.origin === 'https://fonts.gstatic.com') {
-      return route.fulfill({ status: 200, contentType: 'font/woff2', body: '' });
-    }
     return route.abort('blockedbyclient');
   });
   return {

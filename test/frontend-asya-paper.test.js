@@ -42,11 +42,14 @@ test('Asya remains a lazy contextual launcher outside the five-item learner navi
 test('Asya uses only the bounded plum context accent and semantic light-dark tokens', () => {
   assert.match(styles, /--asya-semantic-accent:\s*var\(--aisy-color-selection\)/u);
   assert.match(styles, /--asya-semantic-accent-soft:\s*var\(--aisy-color-selection-soft\)/u);
+  assert.match(styles, /#voiceTutorSheet,\s*#frame \.voiceTutorTrigger\s*\{[^}]*--asya-semantic-accent:/u,
+    'lazy Voice Tutor triggers must inherit the Asya token scope before its runtime loads');
   assert.match(cssRule('.asya-launcher'), /var\(--asya-semantic-accent\)/u);
   assert.match(cssRule('.asya-assistant__mark'), /var\(--asya-semantic-accent\)/u);
   assert.match(styles, /#frame\[data-speaking-dock-active="true"\]\s*>\s*\.asya-launcher\s*\{[^}]*display:\s*none/u,
     'the launcher never competes with the Speaking deep dock');
-  const voiceTutorTrigger = cssRule('#frame .voiceTutorTrigger');
+  const voiceTutorRules = styles.match(/#frame \.voiceTutorTrigger\s*\{[^}]*\}/gu) || [];
+  const voiceTutorTrigger = voiceTutorRules.find((rule) => /background:/u.test(rule)) || '';
   assert.match(voiceTutorTrigger, /background:\s*var\(--asya-semantic-accent-soft\)/u);
   assert.match(voiceTutorTrigger, /color:\s*var\(--asya-semantic-accent\)/u);
   assert.doesNotMatch(voiceTutorTrigger, /--aisy-button-background/u,

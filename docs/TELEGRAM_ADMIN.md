@@ -1,9 +1,9 @@
 # Администрирование Telegram-бота
 
-1. Хранить `TELEGRAM_BOT_TOKEN` и `TELEGRAM_ADMIN_ID` только в production `.env`; не отправлять их в чат и не добавлять в Git.
+1. Хранить `TELEGRAM_BOT_TOKEN` и `ADMIN_TELEGRAM_ID` только в production `.env`; не отправлять их в чат и не добавлять в Git.
 2. После изменения настроек перезапустить приложение и проверить `/health/ready`.
 3. Проверить вход тестового пользователя: запросить одноразовый код в приложении, подтвердить его через бота и убедиться, что повторное использование кода невозможно.
-4. Административные команды выполнять только из аккаунта с `TELEGRAM_ADMIN_ID`. При смене администратора сначала обновить переменную, затем перезапустить приложение и проверить отказ старому аккаунту.
+4. Административные команды выполнять только из аккаунта с `ADMIN_TELEGRAM_ID`. При смене администратора сначала обновить переменную, затем перезапустить приложение и проверить отказ старому аккаунту.
 5. При компрометации токена перевыпустить его через BotFather, заменить значение на сервере, перезапустить приложение и проверить логи без публикации токена.
 6. При сбое сохранить время события и безопасный `requestId`, затем проверить статус процесса бота и журналы сервиса. Пользовательские cookie, пароли и токены в обращение не включать.
 
@@ -23,17 +23,27 @@ ADMIN_TELEGRAM_ID=<Telegram ID тестового администратора �
 ```
 
 Токен вводится только непосредственно на VPS и не публикуется в чате, GitHub
-Actions или командной истории. После изменения пересоберите только staging app и
-проверьте, что бот определился:
+Actions или командной истории. Изменение code/image выполняется только SHA-256-verified
+`immutable-archive-v4` workflow через
+root-owned `easyboost-staging-deploy`; raw staging build запрещён. После изменения только
+`.env.staging` используйте только установленный root-owned restart helper. Он разделяет lock с
+deploy/rollback/import/restore, проверяет неизменный active marker и точный stable image, запускает
+только app без зависимостей и возвращает успех лишь после `/health/ready`:
+
+Общий host-operation guard всегда использует
+`EASYBOOST_HOST_OPERATION_LOCK_DIR=/var/lib/easyboost/locks/host-operation.lock`. Bootstrap создаёт
+только parent `/var/lib/easyboost/locks` как `root:root` с mode `0750`; сам
+`host-operation.lock` заранее создавать нельзя. Все меняющие host staging/production entrypoint
+запускаются через `sudo`/root, чтобы один непривилегированный владелец parent не мог подменить
+чужой lock.
 
 ```bash
-cd /opt/easyboost-staging
-docker compose --env-file .env.staging -p easyboost-staging \
-  -f compose.staging.yml up -d --build app
-docker compose --env-file .env.staging -p easyboost-staging \
-  -f compose.staging.yml logs --tail=50 app
-curl --fail https://staging.useboost.ru/health/ready
+sudo /usr/local/sbin/easyboost-staging-restart "$(sudo cat /usr/local/lib/easyboost-staging-release/current)"
 ```
+
+Если readiness не подтверждён, helper сохраняет
+`/opt/easyboost-staging/.staging-recovery-required`; не удаляйте marker и не повторяйте raw-команды —
+сначала разберите защищённые журналы на VPS и восстановите рабочую конфигурацию.
 
 Затем на локальной машине:
 

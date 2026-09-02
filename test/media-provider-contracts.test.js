@@ -44,6 +44,12 @@ function requestStt(port, contentType = 'audio/webm') {
   });
 }
 
+function assertNoStore(response, branch) {
+  assert.equal(response.headers['cache-control'], 'no-store, max-age=0', `${branch} cache-control`);
+  assert.equal(response.headers.pragma, 'no-cache', `${branch} pragma`);
+  assert.equal(response.headers.expires, '0', `${branch} expires`);
+}
+
 async function withMediaServer(provider, run) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-media-contract-'));
   const previousFetch = globalThis.fetch;
@@ -307,9 +313,10 @@ test('TTS accepts and caches a bounded audio/mpeg primary response', async () =>
       const response = await requestMedia(port, '/api/v1/tts?text=valid-primary-contract');
       assert.equal(response.status, 200);
       assert.equal(response.headers['content-type'], 'audio/mpeg');
+      assertNoStore(response, attempt === 0 ? 'generated TTS response' : 'disk-cache TTS response');
       assert.deepEqual(response.body, primaryAudio);
     }
-    assert.equal(primaryCalls, 1);
+    assert.equal(primaryCalls, 1, 'the second successful HTTP response must come from the server disk cache');
   });
 });
 

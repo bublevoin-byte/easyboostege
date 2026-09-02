@@ -278,7 +278,7 @@ try{
   assert.equal(await page.evaluate(()=>document.querySelector('#scr8.on main[data-aisy-shell-focus]')?.contains(document.activeElement)),true,'editor route owns focus after navigation');
   assert.equal(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches),true);
   assert.equal(await page.locator('#scr8 .writing-route').evaluate(node=>getComputedStyle(node).backgroundColor)!=='rgba(0, 0, 0, 0)',true);
-  await assertMatrix(page,'scr8','w8_area','w_primary_action','Writing editor');
+  await assertMatrix(page,'scr8','w8_area','writing_primary_action','Writing editor');
   await page.setViewportSize({width:320,height:720});
   await page.locator('#w_editor').focus();
   assert.equal(await page.locator('#w_editor').evaluate(node=>Number.parseFloat(getComputedStyle(node).outlineWidth)>=3),true,'textarea keeps a visible keyboard focus ring');
@@ -354,11 +354,11 @@ try{
   const longSuccess=deferredResponse(fulfilledJson(successBody({verdict:'Изолированный браузерный разбор готов',long:true})));
   evaluationPlans.push(longSuccess);
   const baseline=await page.evaluate(()=>({works:window.S.works?.length||0,essays:window.S.essays||0}));
-  await page.evaluate(()=>{document.getElementById('w_primary_action').click();window.checkWriting()});
+  await page.evaluate(()=>{document.getElementById('writing_primary_action').click();window.checkWriting()});
   await longSuccess.ready;await page.locator('#scr13.on').waitFor({state:'visible'});
   assert.equal(await page.evaluate(()=>document.querySelector('#scr13.on main[data-aisy-shell-focus]')===document.activeElement),true,'waiting route receives managed focus');
   assert.equal(evaluationRequests.length,1,'double submit must produce one paid evaluation request');
-  assert.equal(await page.locator('#w_primary_action').isDisabled(),true);
+  assert.equal(await page.locator('#writing_primary_action').isDisabled(),true);
   assert.equal(await page.locator('#scr13 .writing-route').getAttribute('data-phase'),'dispatched');
   assert.equal(await page.locator('#scr13 .writing-route').getAttribute('aria-busy'),'false','dispatch releases the waiting route announcement boundary');
   assert.equal(await page.locator('#w_waiting_content').getAttribute('aria-busy'),'false','dispatch releases the live status for truthful updates');
@@ -434,7 +434,7 @@ try{
   await page.locator('#scr8.on #w_editor').waitFor({state:'visible'});
   assert.equal(await page.locator('#w_editor').inputValue(),answer,'explicit edit keeps exact submitted text');
   evaluationPlans.push({handle:route=>route.fulfill(fulfilledJson({error:{code:'RATE_LIMITED',message:'Слишком много запросов.'}},{status:429}))});
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.locator('#rv_error_state:not([hidden])').waitFor({state:'visible',timeout:8_000});
   assert.match(await page.locator('#rv_error_title').innerText(),/Слишком много запросов/u);
   assert.equal(await page.locator('#rv_saved_notice').isHidden(),true,'a failed review never claims that a score was saved');
@@ -462,7 +462,7 @@ try{
   await page.locator('#w_editor').fill(quotaDraft);
   await page.getByText('Не удалось сохранить черновик на этом устройстве — не закрывайте страницу',{exact:true}).waitFor({state:'visible'});
   assert.equal(await page.locator('#w_editor').inputValue(),quotaDraft,'storage failure preserves the live editor text');
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Не удалось безопасно начать проверку',{exact:true}).waitFor({state:'visible'});
   assert.equal(evaluationRequests.length,beforeStorageFailure,'retry-storage quota failure must stop before provider API');
   assert.equal(await page.locator('#rv_result').isHidden(),true);
@@ -476,7 +476,7 @@ try{
     code:'WRITING_EVALUATION_SETTLEMENT_UNKNOWN',message:'Provider result is ambiguous.',
   }},{status:503});
   evaluationPlans.push({handle:route=>route.fulfill(settlementUnknown())});
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Результат ещё не подтверждён',{exact:true}).waitFor({state:'visible',timeout:8_000});
   const ambiguousProviderRequest=evaluationRequests.at(-1);
   assert.equal(await page.getByRole('button',{name:'Проверить статус',exact:true}).count(),1);
@@ -528,7 +528,7 @@ try{
 
   const malformedReview=()=>fulfilledJson({review:{overall_got:11,overall_max:14,criteria:null},provider:'test',attemptId:705});
   evaluationPlans.push({handle:route=>route.fulfill(malformedReview())});
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Результат ещё не подтверждён',{exact:true}).waitFor({state:'visible'});
   const malformedRequest=evaluationRequests.at(-1);
   assert.equal(await page.getByRole('button',{name:'Проверить заново',exact:true}).count(),0,
@@ -542,7 +542,7 @@ try{
   await page.getByRole('button',{name:'Исправить',exact:true}).press('Enter');
 
   evaluationPlans.push({handle:route=>route.abort('failed')});
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Нет связи для проверки',{exact:true}).waitFor({state:'visible',timeout:8_000});
   const ambiguousRequest=evaluationRequests.at(-1);
   assert.ok(ambiguousRequest.headers['idempotency-key']);
@@ -554,7 +554,7 @@ try{
   const afterReloadDraft=await page.evaluate(()=>({taskType:window.S.writingTaskType,index:window.S.wIdx38,drafts:window.S.drafts,editor:document.getElementById('w_editor').value,key:document.getElementById('w_editor').dataset.draftKey}));
   assert.equal(await page.locator('#w_editor').inputValue(),answer,`process restart keeps the exact ambiguous payload draft: ${JSON.stringify({beforeReloadDraft,afterReloadDraft})}`);
   evaluationPlans.push({handle:route=>route.fulfill(fulfilledJson(successBody({verdict:'Потерянный ответ восстановлен',attemptId:702})))});
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Потерянный ответ восстановлен',{exact:true}).waitFor({state:'visible',timeout:8_000});
   const recoveredRequest=evaluationRequests.at(-1);
   assert.equal(recoveredRequest.headers['idempotency-key'],ambiguousRequest.headers['idempotency-key'],'ambiguous retry reuses the exact persisted key after reload');
@@ -562,14 +562,14 @@ try{
 
   await page.getByRole('button',{name:'Исправить',exact:true}).press('Enter');
   evaluationPlans.push({handle:route=>route.fulfill(fulfilledJson(successBody({verdict:'Тот же серверный attempt replayed',attemptId:702})))});
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Тот же серверный attempt replayed',{exact:true}).waitFor({state:'visible',timeout:8_000});
   assert.deepEqual(await page.evaluate(()=>({works:window.S.works?.length||0,essays:window.S.essays||0})),{works:baseline.works+4,essays:baseline.essays+4},'attemptId replay cannot duplicate works or essays');
   await page.getByRole('button',{name:'Исправить',exact:true}).press('Enter');
 
   const staleSuccess=deferredResponse(fulfilledJson(successBody({verdict:'Поздний ответ не должен появиться',attemptId:704})));
   evaluationPlans.push(staleSuccess);
-  await page.locator('#w_primary_action').press('Enter');await staleSuccess.ready;
+  await page.locator('#writing_primary_action').press('Enter');await staleSuccess.ready;
   const staleViewRequest=evaluationRequests.at(-1);
   await page.getByRole('button',{name:'Назад в раздел Практика',exact:true}).press('Enter');
   await page.locator('#aisy-practice.on').waitFor({state:'visible'});staleSuccess.release();await page.waitForTimeout(250);
@@ -577,7 +577,7 @@ try{
   assert.deepEqual(await page.evaluate(()=>({works:window.S.works?.length||0,essays:window.S.essays||0})),{works:baseline.works+4,essays:baseline.essays+4});
   await page.reload({waitUntil:'networkidle'});await page.locator('#scr1.on').waitFor({state:'visible',timeout:8_000});await openWriting(page);
   evaluationPlans.push({handle:route=>route.fulfill(fulfilledJson(successBody({verdict:'Поздний серверный ответ восстановлен',attemptId:704})))});
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Поздний серверный ответ восстановлен',{exact:true}).waitFor({state:'visible'});
   assert.equal(evaluationRequests.at(-1).headers['idempotency-key'],staleViewRequest.headers['idempotency-key'],'late-view success keeps its key until explicit replay is applied after reload');
   assert.deepEqual(await page.evaluate(()=>({works:window.S.works?.length||0,essays:window.S.essays||0})),{works:baseline.works+5,essays:baseline.essays+5});
@@ -600,8 +600,8 @@ try{
   evaluationPlans.push({handle:route=>route.fulfill(settlementUnknown())});
   siblingPlans.push({handle:route=>route.fulfill(settlementUnknown())});
   await Promise.all([
-    page.locator('#w_primary_action').press('Enter'),
-    sibling.locator('#w_primary_action').press('Enter'),
+    page.locator('#writing_primary_action').press('Enter'),
+    sibling.locator('#writing_primary_action').press('Enter'),
   ]);
   await Promise.all([
     page.getByText('Результат ещё не подтверждён',{exact:true}).waitFor({state:'visible'}),
@@ -677,7 +677,7 @@ try{
     localStorage.setItem(storageKey,JSON.stringify({records}));
   },evaluationRequests.at(-1).body);
   const beforeCapacity=evaluationRequests.length;
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Есть незавершённые проверки',{exact:true}).waitFor({state:'visible'});
   assert.equal(evaluationRequests.length,beforeCapacity,'a full envelope store fails closed before provider dispatch');
   evaluationPlans.push({handle:route=>route.fulfill(fulfilledJson(successBody({verdict:'Пятая работа проверена после явного освобождения места',attemptId:707})))});
@@ -705,7 +705,7 @@ try{
   }),capacityRecordKeys,'leaving before the retirement lock is acquired cannot delete a recovery record');
   assert.equal(await page.locator('#scr8.on, #scr12.on, #scr13.on').count(),0,'late retirement cannot reopen Writing');
   await openWriting(page);assert.equal(await page.locator('#w_editor').inputValue(),capacityAnswer);
-  await page.locator('#w_primary_action').press('Enter');
+  await page.locator('#writing_primary_action').press('Enter');
   await page.getByText('Есть незавершённые проверки',{exact:true}).waitFor({state:'visible'});
   assert.equal(evaluationRequests.length,beforeCapacity);
   assert.equal(await page.getByRole('button',{name:'Освободить место',exact:true}).isEnabled(),true,
@@ -745,7 +745,7 @@ try{
   });
   await race.page.route('**/api/v1/ai/evaluate-writing',async route=>{ownerAEvaluations++;await lateEvaluation.handle(route)});
   await race.page.goto(baseUrl,{waitUntil:'networkidle'});await race.page.locator('#scr1.on').waitFor({state:'visible'});await openWriting(race.page);await lateTask.ready;
-  await race.page.locator('#w_editor').fill(answer);await race.page.locator('#w_primary_action').press('Enter');await lateEvaluation.ready;
+  await race.page.locator('#w_editor').fill(answer);await race.page.locator('#writing_primary_action').press('Enter');await lateEvaluation.ready;
   await race.page.evaluate(()=>{
     const ring=document.getElementById('rv_ring');ring.value=11;ring.max=14;
     const scope=document.getElementById('rv_scope_notice');scope.hidden=false;scope.textContent='Owner A private scope';

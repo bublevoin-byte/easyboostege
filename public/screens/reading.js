@@ -3,7 +3,7 @@ import {registerRouteHook} from '../router.js';
 import '../modules/reading.js';
 import {prepareVoiceTutorContextResult,registerVoiceTutorContextResult} from '../voice-tutor-loader.js';
 import {
-  EGE_WORDS,S,apiGet,apiIsAuthorityFailure,apiResponseOwner,currentOwnerBinding,invalidateLearningAuthority,lastWord,lastWordContext,readingModule,rEsc,rSync,rWordsHtml,
+  EGE_WORDS,S,apiGet,apiIsAuthorityFailure,apiResponseOwner,closeReadingWordPopover,currentOwnerBinding,invalidateLearningAuthority,readingDictionarySelection,readingModule,rEsc,rSync,rWordsHtml,
   registerAuthorityReset,registerScreenGenerator,save,setTxt,srsRecordVocabularyOutcome,toast,verifyLearningAccessForLaunch,wBase,wSync,
 } from '../app.js';
 import {createLearningActivityEvidence,prepareLearningActivityRecording,recordLearningActivityEvidence} from '../learning-activity-recorder.js';
@@ -558,24 +558,27 @@ function rExamStart(){return startFullAttempt()}
 
 /* Existing word-saving seam: context remains owner data and never enters the Reading catalog. */
 function r_add(status){
-  if(!lastWord||!['learn','know'].includes(status)||!S)return;
-  const word=normalizeVocabularyWord(lastWord),id=personalVocabularyCardId(word);if(!id)return;
+  const selected=readingDictionarySelection(),authority=currentOwnerBinding();
+  if(!selected||!authority||selected.owner!==authority.username||selected.ownerGeneration!==authority.generation||!['learn','know'].includes(status)||!S)return;
+  const lookupState=document.getElementById('r_pop')?.dataset.lookupState;
+  if(!['online','builtin'].includes(lookupState))return;
+  const word=normalizeVocabularyWord(selected.word),id=personalVocabularyCardId(word);if(!id)return;
   const previousStatus=S.wstatus&&S.wstatus[word];let translation=(document.getElementById('r_tr')?.textContent||'').replace(' · офлайн-словарь','').trim();
-  if(!translation||translation.includes('перевод')||translation.includes('офлайн, слова нет')||translation.length>240)translation='';
+  if(!translation||translation.length>240)translation='';
   const pronunciation=(document.getElementById('r_ipa')?.textContent||'').trim();
   const known=EGE_WORDS.find((item)=>wBase(item.w)===word&&(item.provenance==='core'||(!item.provenance&&Number(item.t)!==0)));
-  const contextText=lastWordContext||String(document.getElementById('r_card')?.textContent||'').trim().slice(0,600);
+  const contextText=selected.context||String(document.getElementById('r_card')?.textContent||'').trim().slice(0,600);
   const activeSets=training?.set?[training.set]:(full?.attempt?.section?.sets?KINDS.map((kind)=>full.attempt.section.sets[kind]):[]);
   const context=readingModule.sourceContextFromSets(activeSets,contextText);if(!context)return;
   S.personalWords=upsertReadingVocabularyCard(S.personalWords||[],{word,translation:translation||null,pronunciation:pronunciation||known?.ipa||null,partOfSpeech:known?.p||null,level:known?.level||null,context});S.personalWordTombstones=(Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[]).filter((value)=>value!==id);S.wstatus=S.wstatus||{};S.wstatus[word]=previousStatus==='know'?'know':status;
   if(status==='know'&&previousStatus!=='know')srsRecordVocabularyOutcome(word,{mode:'russian_reveal',outcome:'knew',now:Date.now()});
-  toast(status==='know'?'Отмечено как знакомое · самооценка':'Личная карточка добавлена в «Слова»');save();const pop=document.getElementById('r_pop');if(pop)pop.style.display='none';wSync();
+  toast(status==='know'?'Отмечено как знакомое · самооценка':'Личная карточка добавлена в «Слова»');save();closeReadingWordPopover();wSync();
 }
 
 registerRouteHook((id)=>{
   const frame=document.getElementById('frame');
   if(id==='scr7')initReading();else{
-    readingViewGeneration++;reportRequestId++;launchPending=null;closeSubmitDialog(false);frame?.classList.remove('reading-expanded');pauseFull();setDock();setNetworkState();
+    readingViewGeneration++;reportRequestId++;launchPending=null;closeReadingWordPopover(false);closeSubmitDialog(false);frame?.classList.remove('reading-expanded');pauseFull();setDock();setNetworkState();
   }
 });
 registerScreenGenerator('scr7',()=>initReading(true));

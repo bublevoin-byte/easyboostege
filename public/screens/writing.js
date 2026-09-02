@@ -275,7 +275,7 @@ function openWritingConfirmation({title,copy,confirmLabel}){
   });
 }
 function setSubmitting(value){
-  const button=byId('w_primary_action');
+  const button=byId('writing_primary_action');
   if(!button)return;
   button.disabled=Boolean(value)||!wrCur();
   if(value)button.setAttribute('aria-busy','true');else button.removeAttribute('aria-busy');
@@ -333,7 +333,7 @@ function bindWritingControls(){
   byId('w_seg37')?.addEventListener('keydown',radioKey);
   byId('w_seg38')?.addEventListener('keydown',radioKey);
   byId('w_editor')?.addEventListener('input',saveDraft);
-  byId('w_primary_action')?.addEventListener('click',checkWriting);
+  byId('writing_primary_action')?.addEventListener('click',checkWriting);
 }
 function bindReviewControls(){
   if(REVIEW_BOUND)return;REVIEW_BOUND=true;

@@ -18,12 +18,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: staging
-    timeout-minutes: 15
+    # 2500s remote transaction + 60s KILL settlement + archive/upload/SSH margin.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Archive helpers use Node built-ins and install no packages, so an npm cache has no useful payload.
+          node-version: 22
       - name: Create immutable release archive
         run: |
-          git archive --format=tar.gz --output=easyboost-staging-release.tar.gz "$GITHUB_SHA"
+          node scripts/staging-release-archive.js create-git . easyboost-staging-release.tar.gz
+          node scripts/staging-release-archive.js inspect easyboost-staging-release.tar.gz
+          node scripts/staging-helper-bundle.js digest scripts > easyboost-staging-helper.sha256
           sha256sum easyboost-staging-release.tar.gz | tee easyboost-staging-release.sha256
       - name: Configure pinned SSH host
         env:
@@ -42,8 +49,10 @@ jobs:
           test -n "$STAGING_HOST"
           test -n "$STAGING_USER"
           release_sha="$(cut -d' ' -f1 easyboost-staging-release.sha256)"
+          helper_sha="$(tr -d '\r\n' < easyboost-staging-helper.sha256)"
+          printf '%s' "$helper_sha" | grep -Eq '^[0-9a-f]{64}$'
           scp -i ~/.ssh/staging \
             easyboost-staging-release.tar.gz \
             "$STAGING_USER@$STAGING_HOST:/tmp/"
           ssh -i ~/.ssh/staging "$STAGING_USER@$STAGING_HOST" \
-            "sudo /usr/local/sbin/easyboost-staging-deploy /tmp/easyboost-staging-release.tar.gz '$release_sha'"
+            "sudo timeout --signal=TERM --kill-after=60s 2500s /usr/local/sbin/easyboost-staging-deploy /tmp/easyboost-staging-release.tar.gz '$release_sha' immutable-archive-v4 '$helper_sha'"

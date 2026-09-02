@@ -41,6 +41,7 @@ async function speakingMetrics(page) {
     const primaryRect = rect(primary);
     const primaryStyle = getComputedStyle(primary);
     const affordanceStyle = getComputedStyle(primary, '::after');
+    const chevronStyle = getComputedStyle(primary, '::before');
     const visibleControls = [...screen.querySelectorAll('button'), shellBack]
       .filter((control) => control && !control.hidden && control.getClientRects().length)
       .map((control) => {
@@ -91,6 +92,12 @@ async function speakingMetrics(page) {
         affordanceContent: affordanceStyle.content,
         affordanceWidth: affordanceStyle.width,
         affordanceHeight: affordanceStyle.height,
+        chevronContent: chevronStyle.content,
+        chevronWidth: chevronStyle.width,
+        chevronHeight: chevronStyle.height,
+        chevronBorderTopWidth: chevronStyle.borderTopWidth,
+        chevronBorderRightWidth: chevronStyle.borderRightWidth,
+        chevronTransform: chevronStyle.transform,
       },
       primaryCount: dock.querySelectorAll('.speaking-action--primary:not([hidden])').length,
       contentActionCount: content.querySelectorAll('.speaking-action').length,
@@ -165,7 +172,20 @@ function assertSpeakingLayout(metrics, viewport) {
     `${viewport.label}: CTA affordance height`);
   assert.equal(metrics.primary.background, 'rgb(185, 67, 58)',
     `${viewport.label}: CTA must use approved dark coral`);
-  assert.match(metrics.primary.affordanceContent, /→/u, `${viewport.label}: CTA affordance arrow`);
+  assert.equal(metrics.primary.affordanceContent, '\"\"',
+    `${viewport.label}: CTA affordance circle must remain decorative`);
+  assert.equal(metrics.primary.chevronContent, '\"\"',
+    `${viewport.label}: CTA chevron must remain decorative`);
+  assert.equal(Math.round(Number.parseFloat(metrics.primary.chevronWidth)), 10,
+    `${viewport.label}: CTA chevron width`);
+  assert.equal(Math.round(Number.parseFloat(metrics.primary.chevronHeight)), 10,
+    `${viewport.label}: CTA chevron height`);
+  assert.equal(Math.round(Number.parseFloat(metrics.primary.chevronBorderTopWidth)), 2,
+    `${viewport.label}: CTA chevron top stroke`);
+  assert.equal(Math.round(Number.parseFloat(metrics.primary.chevronBorderRightWidth)), 2,
+    `${viewport.label}: CTA chevron right stroke`);
+  assert.match(metrics.primary.chevronTransform, /^matrix\(0\.7071\d*, 0\.7071\d*, -0\.7071\d*, 0\.7071\d*, 0, 0\)$/u,
+    `${viewport.label}: CTA chevron rotation`);
   assert.deepEqual(metrics.visibleControls.filter((control) => control.width < 44 || control.height < 44), [],
     `${viewport.label}: touch target below 44px`);
   assert.equal(metrics.reducedMotion, true, `${viewport.label}: reduced-motion emulation was lost`);

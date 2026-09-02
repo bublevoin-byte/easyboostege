@@ -1,8 +1,11 @@
 #frame {
+  position: relative;
   inline-size: min(100vw, var(--aisy-phone-inline-size));
   max-inline-size: var(--aisy-phone-inline-size);
   height: min(844px, 100vh);
+  height: min(844px, 100dvh);
   block-size: min(844px, 100vh);
+  block-size: min(844px, 100dvh);
   margin-inline: auto;
   background: var(--aisy-phone-background);
   box-shadow: var(--aisy-phone-shadow);
@@ -16,7 +19,7 @@
 /* The legacy inline shell declares a fixed physical height. Mirror its narrow-screen
    override with a logical size too, so viewport rotations/resizes cannot revive 844px. */
 @media (max-width: 430px) {
-  #frame { height: 100vh; block-size: 100vh; }
+  #frame { height: 100vh; height: 100dvh; block-size: 100vh; block-size: 100dvh; }
 }
 
 .aisy-visually-hidden {
@@ -37,7 +40,9 @@
 @media (max-height: 600px) {
   #frame {
     height: 100vh;
+    height: 100dvh;
     block-size: 100vh;
+    block-size: 100dvh;
     border-radius: 0;
   }
 }
@@ -180,6 +185,66 @@ body.aisy-shell-deep #frame > .screen.on {
   text-align: center;
   cursor: pointer;
   touch-action: manipulation;
+}
+
+.pwa-update[hidden] { display: none !important; }
+
+.pwa-update {
+  position: absolute;
+  inset-block-start: max(12px, env(safe-area-inset-top));
+  inset-inline-start: max(12px, env(safe-area-inset-left));
+  z-index: 290;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--aisy-space-3);
+  inline-size: min(366px, calc(100% - max(12px, env(safe-area-inset-left))
+    - max(12px, env(safe-area-inset-right))));
+  margin-inline: 0;
+  padding: var(--aisy-space-4);
+  color: var(--aisy-color-text);
+  box-shadow: var(--aisy-surface-shadow);
+}
+
+.pwa-update__message {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--aisy-space-3);
+}
+
+.pwa-update__message strong {
+  display: block;
+  font: 800 16px/1.3 var(--aisy-font-interface);
+}
+
+.pwa-update__message p {
+  margin: var(--aisy-space-1) 0 0;
+  color: var(--aisy-color-text-muted);
+  font: 600 var(--aisy-font-size-body)/1.45 var(--aisy-font-interface);
+}
+
+.pwa-update__dismiss {
+  min-inline-size: var(--aisy-touch-target);
+  min-block-size: var(--aisy-touch-target);
+  border: 1px solid var(--aisy-control-border);
+  border-radius: var(--aisy-control-radius);
+  background: var(--aisy-control-background);
+  color: var(--aisy-control-foreground);
+  padding-inline: var(--aisy-space-3);
+  font: 800 var(--aisy-font-size-body)/1 var(--aisy-font-interface);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.pwa-update__dismiss:hover,
+.pwa-update__dismiss:active {
+  background: var(--aisy-control-hover-background);
+  color: var(--aisy-color-text);
+}
+
+.pwa-update .aisy-button {
+  width: 100%;
+  min-height: var(--aisy-touch-target);
 }
 
 @media (max-width: 359px) {

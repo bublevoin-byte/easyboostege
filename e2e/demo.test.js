@@ -410,7 +410,7 @@ async function runE2E() {
     await launchRaceContext.close();
 
     const authenticatedHarness=await createActiveSubscriptionPage(browser,{
-      baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({serviceWorkers:'block'}),
+      baseUrl,username:'e2euser',jwtSecret,contextOptions:contextOptions({serviceWorkers:'allow'}),
     });
     const authenticatedContext=authenticatedHarness.context;
     const authenticatedPage=authenticatedHarness.page;
@@ -490,6 +490,27 @@ async function runE2E() {
     });
     await authenticatedPage.goto(baseUrl, { waitUntil: 'networkidle' });
     await authenticatedPage.locator('#scr1.on').waitFor({ state: 'visible', timeout: 5_000 });
+    try {
+      await authenticatedPage.waitForFunction(
+        () => Boolean(navigator.serviceWorker?.controller),
+        null,
+        { timeout: 15_000 },
+      );
+    } catch (error) {
+      const diagnostic = await authenticatedPage.evaluate(() => ({
+        pageUrl: location.href,
+        visibilityState: document.visibilityState,
+        serviceWorkerAvailable: 'serviceWorker' in navigator,
+        controllerScriptUrl: navigator.serviceWorker?.controller?.scriptURL || null,
+      })).catch((diagnosticError) => ({
+        pageUrl: authenticatedPage.url(),
+        diagnosticError: diagnosticError.message,
+      }));
+      throw new Error(
+        `Service worker did not control the authenticated offline-continuity page within 15000 ms. Browser diagnostics: ${JSON.stringify(diagnostic)}`,
+        { cause: error },
+      );
+    }
     assert.equal(await authenticatedPage.locator('#home_adaptive_plan').isHidden(), true);
     assert.equal(await authenticatedPage.locator('#profile_adaptive_plan').isHidden(), true);
     console.log('e2e: authenticated session restored');

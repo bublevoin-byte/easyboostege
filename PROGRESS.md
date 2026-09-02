@@ -4,7 +4,7 @@
 Тикеты: [.scratch/aisy-production-ui-a/issues/](.scratch/aisy-production-ui-a/issues/)
 Ветка: `prototype/aisy-today-visual-v1`
 
-Overall status: `in-progress` — Tickets 01–05 готовы; Ticket 06 готов к реализации.
+Overall status: `done` — production UI и локальный PWA/release gate Tickets 01–11 закрыты; deployment не выполнялся.
 
 | № | Что даёт | Статус |
 |---|---|---|
@@ -13,8 +13,123 @@ Overall status: `in-progress` — Tickets 01–05 готовы; Ticket 06 гот
 | 03 | Strict access и production Today | done |
 | 04 | Practice hub и полный Words-контур | done |
 | 05 | Grammar catalog, adaptive practice, runner, review и задания 19–24 | done |
-| 06–10 | Reading/Listening, Writing, Speaking, ЕГЭ, Прогресс и Профиль | ready-for-agent |
-| 11 | PWA/release evidence | blocked by 02–10 |
+| 06–10 | Reading/Listening, Writing, Speaking, ЕГЭ, Прогресс и Профиль | done |
+| 11 | PWA/release evidence | done |
+
+Ticket 11 закрыт на reviewed source freeze
+`379956516483fb5d734a90a5b0e29e1f94e4988d1400b9bdf2f0087f88f4ce9c` (`175` файлов / `9 545 896`
+байт): свежие Product/UI `160/160` и Engineering/Release `67/67` зелёные. Единственный финальный
+`npm run test:release:aisy` завершён с code 0: `3130 total / 3055 pass / 0 fail / 75` skips; current artifact
+`d518f4a54e7b03beb357a69f7dc6380cd31befc5a11634c1ddd0df216021e290`; `26` уникальных Chromium
+сценариев; first-load JS `90.0 KB / 150 KB`, LCP `108 ms`, CLS `0.000`, INP `64 ms`. Browser proof
+подтвердил phone `390×844` и центрированный `390 px` portrait-frame на `1440×1000` без overflow, side rail
+и console errors; локальный test server остановлен. Точное
+consent-bound PWA-обновление, `/health` и legacy `/?login_code=` privacy boundaries проходят обязательный
+affected-контур `118/118`; staging verifier до Docker отклоняет все пять опубликованных credential sentinel,
+а независимый read-only review этого блока вернул `ZERO_FINDINGS`. Backup/verify/import теперь требуют
+canonical `EASYBOOST_PRODUCTION_APP_IMAGE_ID`; cron читает root-owned authority, release gate доказывает exact
+PostgreSQL `.Image`. Cycles 23–24 добавили исполняемый fail-fast release gate, атомарное root-owned cron
+authority и recoverable ownership для guarded dry/live import: случайный label связывает allocation до вызова
+Compose, post-outcome inventory доказывает immutable container ID, replacement не затрагивается, `--rm` вместе
+с finite `sleep 3600` отменяет inherited restart policy, а recovery/cleanup failures сохраняют primary-first evidence.
+Cycle 26 исправил update notice на paper secondary (`20/20`, bounded review `ZERO_FINDINGS`), сохранил
+query/import → rollback → disconnect ошибки primary-first (`16 pass / 1` environment skip, bounded review
+`ZERO_FINDINGS`) и закрыл fail-fast/DB-authority/restore/verify lifecycle. Failure-injection прошёл
+RED `0/5` → GREEN `5/5`, дополнительный standalone restore authority — `0/2` → `2/2`, финальный
+production-image suite после полного operator-fence coverage — `41/41`. Первый Cycle 26 candidate snapshot
+отклонён из-за неполного staging fail-fast inventory; TDD `0/3` → `3/3` закрыл gap, теперь `32/32`
+процедур имеют строгую границу, а независимый bounded re-review вернул `ZERO_FINDINGS`.
+Cycle 27 whole-candidate freeze `ed02fc8ec9fd1bde263d18716979decd534861443f240e1e51f2c7b8ca2fe0a7`
+отклонён с восемью уникальными findings. Cycle 28 закрыл fail-closed release-E2E provider env (`31/31`),
+guarded import/predecessor (`9/9`), phase-exact staging finalizer (`1/1`), canonical bootstrap/helper roots
+(`5 pass / 2` POSIX skips), app-only release start, exact PostgreSQL authority + complete schema/latest migration,
+bounded restore readiness/error ordering и актуальную PWA handoff semantics. Production-image suite прошёл
+`52/52`; совместный root contour — `80 total / 78 pass / 0 fail / 2` POSIX skips, затем staging finalizer
+`1/1`. Cycle 28 v4 helper digest was —
+`be433b650a4b86003b7db117d184a82e21ddfde667e07b2816b1765a8768b5f2`.
+Cycle 29 freeze `22843e5bb23b09bc1e292a3ed14e02a409e240f3f4171d9e1968f0cb042d5ce0`
+также отклонён: import CLI принимал typo как live, performance child обходил sanitizer, а runbooks не имели
+полного bounded readiness/stop contract. Cycle 30 закрыл exact argv grammar (`23 pass / 1` PG skip),
+performance fail-closed env (`12/12`) и семь app lifecycle + два imports с exact PostgreSQL proof,
+`pg_isready -t 2`, bounded app readiness и primary-preserving stop (`56/56`). Совместный root contour —
+`92 total / 91 pass / 0 fail / 1` PG skip.
+Cycle 31 freeze `c5d677e32ed6eb5bfcc58ae3a3f68d9c4e4165ed38a1192e061cdca8d8b55c8a`
+отклонён из-за denylist release environment и service-wide candidate cleanup. Cycle 32 заменил env на explicit
+OS/tooling allowlist с hostile real-config regression (`13/13`) и связал cleanup с distinct immutable candidate
+ID/Compose labels, сохраняя previous healthy app и primary status (`57/57`). Совместный root contour —
+`94 total / 93 pass / 0 fail / 1` PG skip.
+Cycle 33 freeze `eb3c391d60fbe8317813e6e75efb377fe729ca894eaa48b990e6744eaecdfaf6`
+отклонён с семью findings вокруг PostgreSQL authority, source TOCTOU, mutable restore, unbounded children,
+Compose secret output, previous stopped state и unverifiable cleanup. Cycle 34 связал dry-run SHA с
+descriptor-stable bytes внутри one-off до DB, доказал exact PostgreSQL identity/readiness и ограничил каждый
+Docker child; два focused-review HIGH (readiness stdout и post-copy digest) прошли RED→GREEN. Import —
+`38 total / 37 pass / 0 fail / 1` PG skip. Backup/restore/verify получили exact immutable lifecycle, shared lock,
+previous-state restoration, `config --quiet`, bounded TERM→KILL/reap и primary-first cleanup; production/runbook
+suite — `60/60`, focused review clean. Совместный root contour с predecessor —
+`120 total / 119 pass / 0 fail / 1` PG skip.
+Cycle 35 freeze `e5c09b18610b1e0efebe579834a7f9f0d42437fb7083e6b270ddb8099d85d877`
+сохранён PRE=POST обоими аудитами, но отклонён с девятью findings: mutable PostgreSQL target, archive
+TOCTOU, неполный cross-tool lock, backup overwrite/capture/cleanup gaps, unbounded release children, remote-font
+exemption и escaped staging descendants. Cycle 36 перевёл DB операции на exact immutable `docker exec`,
+descriptor-frozen SHA bytes, shared bounded lock, atomic no-replace publication, TOC cap и primary-first cleanup;
+последующий review также закрыл short-write/nlink/partial-lock races. DB/runbook — `70/70`. Release children
+получили hard deadline, output/stream bounds, process-group TERM→KILL/reap; external Google Fonts abort,
+hermetic closure и inventory обновлены (`28/28`). Staging descendants больше не переживают successful leader;
+suite — `9 total / 5 pass / 0 fail / 4` POSIX skips. Current helper digest —
+`12fcdd846ab64cb2cc974c9b240666793dd7776e7e9ab7b56fb1955c80944294`. Совместный root contour —
+`145 total / 140 pass / 0 fail / 5` environment/POSIX skips.
+Cycle 37 freeze `c621eb4a6499d97a8552b71a837100e401ce3f83515c9d367539f2b83decac08`
+(`79` tracked + `64` explicit, `143/143` present, `6 990 923` bytes, staged `0`) сохранён PRE=POST,
+но отклонён с шестью findings: mutable PostgreSQL endpoint и отсутствующий общий import lock, неполная frozen
+archive identity, unbounded/error-blind backup capture, light-only inline palette Reading dialog и undefined
+update-notice shadow token. Cycle 38 связал import с тем же canonical DB lock и повторным exact ID/network/IP/
+readiness proof непосредственно перед one-off (`44 total / 43 pass / 1` environment skip); DB runners получили
+полную nanosecond archive identity, hard capture bounds и stream/error cleanup (`74/74`). Reading word popover и
+update notice используют semantic Paper light/dark/system tokens; UI contours — `38/38`, `40/40`, `10/10`.
+Параллельный pre-freeze contour также закрыл collision test-only import locks и прошёл
+`176 total / 171 pass / 0 fail / 5` skips; production/predecessor closure — `82/82`;
+  candidate manifest — `66` sorted entries. Это исторический Cycle 38 checkpoint; current Cycle 65 evidence
+  приведено ниже. Artifact/E2E/performance evidence остаётся недоступным до единственного финального wrapper.
+
+Cycle 39 freeze `b583f8935dde2811d15e854214eb6dcd1dbc6709c3ae951f7c1b279e259184d3`
+(`82` tracked + `66` explicit, `148/148` present, `7 083 282` bytes, staged `0`) был сохранён PRE=POST,
+но отклонён обоими аудитами: remote restore settlement, mutable PostgreSQL image authority, недоказанные
+RPO/off-host/rehearsal claims, два нарушения 16 px floor и технический dictionary error copy. Cycle 40 закрыл
+эти seams: learner-safe UI прошёл `95/95`, deep restore supervisor/lock/production contour — `90/90`, staging
+exact-image-ID rollback — `22/22`, current full deploy suite — `59 total / 58 pass / 1` Windows skip. Отдельная
+post-deploy shell теперь доказывает ровно один running PostgreSQL container и его immutable ID/labels/state
+до Compose. Import isolation сохраняет реальный retained marker (`43 pass / 1` PG skip), production/runbook —
+`81/81`; весь Cycle40 integration contour — `337 total / 331 pass / 0 fail / 6` environment/POSIX skips.
+Current helper digest —
+`8aea12c08855032be4539f3c0f5bc81e353e8469c3e96aa923244072e65d8a8e`; manifest — `68` sorted entries.
+Root lint/check (`544` JavaScript; `165` handlers / `106` names) и diff-check зелёные. Первый full unit поймал
+одну metadata-оговорку; после focused RED→GREEN точный rerun прошёл `2475 total / 2414 pass / 0 fail / 61`
+environment/POSIX skips. Новый exact freeze, два свежих whole-candidate аудита и единственный full wrapper
+остаются pending. Build/browser,
+real Docker/DB, provider/network, deployment, stage и commit в Cycle 40 не выполнялись.
+
+Historical Cycle 66 pre-closeout checkpoint (superseded by the final closeout above): focused supervisor
+`118 total / 116 pass / 0 fail / 2` skips; recovery `397 total / 393 pass / 0 fail / 4` skips;
+staging `71 total / 70 pass / 0 fail / 1` skip; PWA/frontend `35 total / 34 pass / 0 fail / 1` skip.
+`lint`/`check`/diff are green (`565` JavaScript files, `165` inline handlers / `106` names); final pre-freeze
+`npm test` — `3125 total / 3050 pass / 0 fail / 75` platform/environment skips. Candidate inventory is
+`83` tracked changes + `92` sorted unique explicit entries = `175` union files, with no missing, staged or
+protected prototype/render paths. The retained 66-byte DB recovery marker remains byte-identical. Exact freeze,
+Первый freeze `6a57a9e6f375e520074f2aaeb3cef86fe83968272c7e0f0ee846cff01be1371f`
+сохранён PRE=POST обоими аудитами, но инженерный аудит отклонил его: CI budget был короче измеренного unit-run,
+staging не фиксировал Node 22, Windows Job residue не имел restart-safe recovery, а production import мог
+отпустить guards при незакрытом Docker child. Remediation увеличила CI budget до 120 минут, добавила staging
+Node 22, перевела import на durable local-child hold и ввела token/identity-bound Windows Job retirement с
+fail-closed late-race handling. Последующая remediation добавила санитизированный supervisor→DB→remote import
+recovery и one-batch Windows cleanup с общим 30-second budget, writer denial и sealed birth/volume/file-index/SHA
+identity. Root combined recovery contour — `306 total / 302 pass / 0 fail / 4` platform skips; stable reviews —
+`ZERO_FINDINGS`. Cycle 66 дополнительно связал Linux release runner и predecessor lane с одним generic
+protocol-v2 fd8/flock scope, exact allowlist control roots, same-slot retirement replay и startup sweep.
+Manifest содержит `92` sorted explicit entries; `83` tracked changes дают `175` union-файлов.
+Текущий inventory — `51` Job directory (`10` proven, `41` unproven) плюс `191` root retirement file
+(`189` proof, `2` pending); ничего не удалялось. Этот pre-closeout checkpoint не является текущим verdict;
+актуальные freeze, audits, wrapper, artifact и browser evidence приведены в начале раздела. Deployment, push,
+live VK/provider и production mutation не выполнялись.
 
 Ticket 05: Grammar полностью перенесена в Direction A: recommendation-first catalog всех 20 тем,
 topic/mixed/targeted practice, resume, четыре типа заданий, явные selection → submit → Next, review/result и
@@ -2357,14 +2472,14 @@ SHA-256 набора до и после.
 
 Прогон закончен: восемь тикетов выполнены, один закрыт как wontfix по решению владельца.
 
-Тикет 10 добавлен сверх исходных девяти и закрыт: образ собирает frontend отдельной стадией, а
-`dist/` исключён из контекста сборки. Содержимое образа определяется теперь репозиторием и ничем
-больше — проверено на живом Docker сборкой при удалённом и при намеренно испорченном локальном
-`dist/`, и запущенным контейнером с PostgreSQL.
+Исторический результат тикета 10: frontend впервые стал собираться отдельной Docker-стадией и локальный
+`dist/` перестал определять application-source closure. Это не означало побитную воспроизводимость всего
+image: base-image tags и registry state оставались внешними.
 
-Попутно это починило staging. `scripts/staging-deploy.sh` разворачивает `git archive`, где `dist/`
-отсутствует по `.gitignore`, и запускает `docker compose up -d --build`. До тикета 10 staging
-гарантированно работал из `public/` без бандла; теперь собирает сам, тем же `Dockerfile`.
+Историческая staging-процедура тикета 10 через `git archive` и `docker compose up -d --build` полностью
+superseded Ticket 11. Raw staging build теперь запрещён literal sentinel; единственный поддерживаемый
+путь — root-owned checksum-verified `immutable-archive-v4` helper bundle с bounded archive и
+`up --pull never --no-build`.
 
 ## Что получилось по числам
 

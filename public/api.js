@@ -81,7 +81,7 @@
   }
 
   async function get(path, options = {}) {
-    const response = await request(baseUrl + path, { ...options, credentials: 'same-origin' });
+    const response = await request(baseUrl + path, { ...options, cache: 'no-store', credentials: 'same-origin' });
     return parseResponse(response);
   }
 
@@ -121,7 +121,7 @@
   }
 
   async function getBlob(path, options = {}) {
-    const response = await request(baseUrl + path, { ...options, credentials: 'same-origin' });
+    const response = await request(baseUrl + path, { ...options, cache: 'no-store', credentials: 'same-origin' });
     if (!response.ok) await parseResponse(response);
     const blob = await response.blob();
     if (!blob.size) throw new ApiError('Сервер вернул пустой файл', { status: response.status });

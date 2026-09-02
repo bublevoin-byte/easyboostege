@@ -1,14 +1,14 @@
 ﻿<!DOCTYPE html>
-<html lang="ru"><head>
+<html lang="ru" data-aisy-app-shell="v1"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#fff9f3">
-<link rel="manifest" href="/manifest.json"><link rel="icon" href="/pwa-icon.svg" type="image/svg+xml">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Aisy"><meta name="theme-color" content="#fff9f3">
+<link rel="manifest" href="/manifest.json"><link rel="icon" href="/pwa-icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png">
 <title>Aisy ЕГЭ — Английский · Aisy.space</title>
 <script src="/theme-prepaint.js"></script>
 <style>
 *{box-sizing:border-box}html,body{margin:0;padding:0}
-body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;align-items:center;justify-content:center;min-height:100vh;-webkit-font-smoothing:antialiased}
+body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;align-items:center;justify-content:center;min-height:100vh;min-height:100dvh;-webkit-font-smoothing:antialiased}
 :where(button,a,input,textarea,[contenteditable="true"]):focus-visible{outline:3px solid #175cd3!important;outline-offset:3px!important}
 :where(button,a,input,textarea){min-height:44px}
 #frame{width:390px;height:844px;position:relative;overflow:hidden;background:#F5F6F8;box-shadow:0 24px 70px rgba(0,0,0,.22);border-radius:38px}
@@ -33,8 +33,8 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
 #navmenu.open{display:block}
 #navmenu button{display:block;width:100%;text-align:left;border:none;background:none;padding:9px 11px;border-radius:9px;font:600 13px Manrope,sans-serif;color:#2B2B2B;cursor:pointer}
 #navmenu button:hover{background:#F5F6F8}
-@media(max-width:430px){body{background:#F5F6F8}#frame{width:100vw;height:100dvh;border-radius:0;padding-bottom:env(safe-area-inset-bottom)}.screen{width:100vw;height:100dvh;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}}
-@media(orientation:landscape) and (max-height:600px){#frame{height:100dvh;border-radius:0}.screen{height:100dvh}}
+@media(max-width:430px){body{background:#F5F6F8}#frame{width:100vw;height:100vh;height:100dvh;border-radius:0;padding-bottom:env(safe-area-inset-bottom)}.screen{width:100vw;height:100vh;height:100dvh;padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}}
+@media(orientation:landscape) and (max-height:600px){#frame{height:100vh;height:100dvh;border-radius:0}.screen{height:100vh;height:100dvh}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
 #learnSheet{position:fixed;inset:0;z-index:200;display:none}
@@ -451,7 +451,7 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
       </div>
     </div>
     <div id="writing_action_dock" class="learning-action-dock writing-action-dock">
-      <button type="button" id="w_primary_action" class="aisy-button writing-primary">Проверить с ИИ</button>
+      <button type="button" id="writing_primary_action" class="aisy-button writing-primary">Проверить с ИИ</button>
     </div>
   </main>
 </div>
@@ -918,20 +918,31 @@ body{font-family:Manrope,system-ui,sans-serif;background:#e9ebef;display:flex;al
   
 </div>
 <!-- word popover (floating) -->
-    <div id="r_pop" style="position:absolute;left:22px;right:22px;bottom:110px;z-index:60;background:#fff;border-radius:20px;border:1px solid #F0EAE2;padding:16px 18px;box-shadow:0 18px 40px rgba(60,45,30,.22),inset 0 2px 0 rgba(255,255,255,.9);display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div style="display:flex;align-items:baseline;gap:10px;"><span id="r_word" style="font-family:Nunito,Manrope,sans-serif;font-weight:800;font-size:19px;color:#2B2B2B;">word</span><span id="r_ipa" style="font-weight:500;font-size:13px;color:#6A6E75;"></span></div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <button type="button" class="clk iconbtn" aria-label="Озвучить слово" onclick="wSpeak(lastWord)" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#FFF4DE;"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E8730A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
-          <button type="button" class="clk iconbtn" aria-label="Закрыть перевод" onclick="document.getElementById('r_pop').style.display='none'" style="cursor:pointer;display:grid;place-items:center;width:32px;height:32px;border-radius:11px;background:#F1F2F4;"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8A8F98" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <dialog id="r_pop" class="reading-word-popover" role="dialog" aria-modal="true" aria-labelledby="r_word" aria-describedby="r_tr" tabindex="-1">
+      <div class="reading-word-popover__header">
+        <div class="reading-word-popover__term"><span id="r_word" class="reading-word-popover__word">word</span><span id="r_ipa" class="reading-word-popover__ipa"></span></div>
+        <div class="reading-word-popover__controls">
+          <button type="button" class="clk iconbtn reading-word-popover__icon reading-word-popover__icon--speak" aria-label="Озвучить слово" onclick="wSpeak(lastWord)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg></button>
+          <button id="r_pop_close" type="button" class="clk iconbtn reading-word-popover__icon reading-word-popover__icon--close" aria-label="Закрыть перевод" onclick="closeReadingWordPopover()"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
         </div>
       </div>
-      <div id="r_tr" style="margin-top:6px;font-weight:600;font-size:14px;color:#5b5f66;">перевод…</div>
-      <div style="margin-top:12px;display:flex;gap:10px;">
-        <button class="sq" style="flex:1;height:44px;border:1.5px solid #F2683F;background:#fff;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#B54E2F;cursor:pointer;" onclick="r_add('learn')">+ Учить</button>
-        <button class="sq" style="flex:1;height:44px;border:none;background:#EAF7F0;border-radius:14px;font-family:Manrope,sans-serif;font-weight:700;font-size:13px;color:#1D7F4A;cursor:pointer;" onclick="r_add('know')">✓ Знаю</button>
+      <div id="r_tr" class="reading-word-popover__translation" role="status" aria-live="polite" aria-atomic="true">перевод…</div>
+      <div class="reading-word-popover__actions">
+        <button type="button" class="sq reading-word-popover__action reading-word-popover__action--learn" onclick="r_add('learn')">+ Учить</button>
+        <button type="button" class="sq reading-word-popover__action reading-word-popover__action--known" onclick="r_add('know')">✓ Знаю</button>
       </div>
+    </dialog>
+
+<section id="pwa_update" class="pwa-update aisy-surface" role="status" aria-live="polite" aria-atomic="true" aria-labelledby="pwa_update_title" aria-describedby="pwa_update_copy" hidden>
+  <div class="pwa-update__message">
+    <div>
+      <strong id="pwa_update_title">Новая версия готова</strong>
+      <p id="pwa_update_copy">Текущее задание не прервётся. Завершите шаг и обновите приложение.</p>
     </div>
+    <button id="pwa_update_dismiss" class="pwa-update__dismiss" type="button">Позже</button>
+  </div>
+  <button id="pwa_update_apply" class="aisy-button aisy-button--secondary" type="button">Обновить после задания</button>
+</section>
 </div>
 
 

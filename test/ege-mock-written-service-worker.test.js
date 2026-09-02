@@ -1,14 +1,34 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { webcrypto } from 'node:crypto';
 import fs from 'node:fs/promises';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 
 const source = await fs.readFile(new URL('../public/service-worker.js', import.meta.url), 'utf8');
 const buildSource = await fs.readFile(new URL('../scripts/build-frontend.js', import.meta.url), 'utf8');
-const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const immediateLocks = { request(_name, operation) { return operation(); } };
+const workerOrigin = 'https://easyboost.test';
+
+class WorkerRequest {
+  constructor(input, options = {}) {
+    const source = input && typeof input === 'object' ? input : {};
+    Object.assign(this, source);
+    this.url = new URL(source.url || String(input), workerOrigin).href;
+    this.method = source.method || 'GET';
+    this.headers = source.headers || new Headers();
+    this.cache = options.cache ?? source.cache;
+  }
+
+  toString() { return this.url; }
+}
+
+function workerUrl(input) {
+  return new URL(typeof input === 'string' ? input : input.url, workerOrigin);
+}
+
+function workerClients() {
+  return { async claim() {}, async matchAll() { return []; } };
+}
 
 test('service worker serves EGE playback only from the requested fingerprint and digest cache', async () => {
   const listeners = new Map();
@@ -55,10 +75,10 @@ test('service worker serves EGE playback only from the requested fingerprint and
   const self = {
     location: { origin: 'https://easyboost.test' }, navigator: { locks: immediateLocks },
     addEventListener(type, listener) { listeners.set(type, listener); },
-    async skipWaiting() {}, clients: { async claim() {} },
+    async skipWaiting() {}, clients: workerClients(),
   };
   vm.runInNewContext(source, {
-    self, caches, Headers, URL, Promise, Response,
+    self, caches, crypto: webcrypto, Headers, URL, Promise, Request: WorkerRequest, Response,
     async fetch() { networkCalls += 1; return new Response('network-corrupt'); },
   });
   let responsePromise;
@@ -114,10 +134,10 @@ test('exact form manifest survives shell activation and restores offline or afte
   const self = {
     location: { origin: 'https://easyboost.test' },
     addEventListener(type, listener) { listeners.set(type, listener); },
-    async skipWaiting() {}, clients: { async claim() {} },
+    async skipWaiting() {}, clients: workerClients(),
   };
   vm.runInNewContext(source, {
-    self, caches, Headers, URL, Promise, Response,
+    self, caches, Headers, URL, Promise, Request: WorkerRequest, Response,
     async fetch() {
       if (network === 'offline') throw new Error('offline');
       if (network === 'transient') return new Response('temporary', { status: 503 });
@@ -146,113 +166,13 @@ test('frontend build pins the exact emitted form module path into the service wo
   assert.match(buildSource, /modules\['ege-mock-form-1-v1\.js'\]/u);
   assert.match(buildSource, /builtEgeMockFormPath/u);
   assert.match(buildSource, /EGE_MOCK_FORM_PATH/u);
+  assert.match(buildSource,
+    /const builtEgeMockExecPaths = \[\.\.\.new Set\([\s\S]*?\)\]\.sort\(\);/u,
+    'the emitted EGE executable identity must be stable across module-graph iteration orders');
   assert.match(buildSource, /assets\[builtEgeMockFormPath\.slice\(1\)\]/u);
-});
-
-test('built output preserves the derived oral and written EGE closure and neutral dependencies', {
-  timeout: 120_000,
-}, async () => {
-  const built = spawnSync(process.execPath, ['scripts/build-frontend.js'], {
-    cwd: projectDirectory, encoding: 'utf8', timeout: 110_000,
-  });
-  assert.equal(built.status, 0, built.stderr || built.stdout);
-  const manifest = JSON.parse(await fs.readFile(
-    new URL('../dist/public/asset-manifest.json', import.meta.url), 'utf8',
-  ));
-  const egeModules = [
-    'screens/ege-mock.js', 'ege-mock-writing-assessment-ui.js', 'ege-mock-written-assets.js',
-    'ege-mock-written-runner.js', 'ege-writing-text.js', 'ege-mock-oral-media.js',
-    'ege-mock-oral-runner.js', 'ege-mock-oral-contract.js',
-    'modules/listening.js', 'modules/reading.js', 'reading-catalog-contract.js',
-    'reading-pilot-v1.js',
-    'speaking-local-recording.js', 'speaking-pronunciation-audio.js',
-  ];
-  assert.equal(egeModules.length, 14);
-  const sourceClosure = [
-    ...egeModules, '../shared/ege-mock-oral-contract.js', '../shared/ege-writing-text.js',
-    '../shared/ege-writing-text-sanitizer.js', '../shared/semantic-json.js',
-  ];
-  assert.equal(sourceClosure.every((name) => typeof manifest.modules[name] === 'string'), true);
-  const expectedPaths = [...new Set(sourceClosure.map((name) => `/${manifest.modules[name]}`))].sort();
-  const builtWorker = await fs.readFile(
-    new URL('../dist/public/service-worker.js', import.meta.url), 'utf8',
-  );
-  const builtHtml = await fs.readFile(new URL('../dist/public/index.html', import.meta.url), 'utf8');
-  const builtShell = JSON.parse(
-    builtWorker.match(/const APP_SHELL=(\[[^\]]*\]);/u)[1].replaceAll("'", '"'),
-  );
-  const linkedStyles = [...builtHtml.matchAll(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/gu)]
-    .map((match) => match[1]);
-  assert.ok(linkedStyles.length > 0, 'the production document must link its emitted stylesheet');
-  assert.equal(linkedStyles.every((pathname) => builtShell.includes(pathname)), true,
-    'every stylesheet requested by production index.html must survive an offline shell reload');
-  const listeners = new Map();
-  const stores = new Map();
-  let online = true;
-  const caches = {
-    async open(name) {
-      const store = stores.get(name) || new Map(); stores.set(name, store);
-      return {
-        async addAll(paths) {
-          for (const pathname of paths) {
-            store.set(`https://easyboost.test${pathname}`, new Response(`built:${pathname}`));
-          }
-        },
-        async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
-        async match(key) { return store.get(typeof key === 'string' ? key : key.url)?.clone(); },
-        async keys() { return [...store.keys()].map((url) => ({ url })); },
-      };
-    },
-    async keys() { return [...stores.keys()]; },
-    async delete(name) { return stores.delete(name); },
-    async match() { return undefined; },
-  };
-  const self = {
-    location: { origin: 'https://easyboost.test' },
-    registration: { active: { scriptURL: 'previous-worker.js' } },
-    navigator: { locks: immediateLocks },
-    addEventListener(type, listener) { listeners.set(type, listener); },
-    async skipWaiting() {}, clients: { async claim() {} },
-  };
-  vm.runInNewContext(builtWorker, {
-    self, caches, Headers, URL, Promise, Response,
-    async fetch(request) {
-      if (!online) throw new Error('offline');
-      const pathname = new URL(typeof request === 'string' ? request : request.url).pathname;
-      return new Response(`built:${pathname}`);
-    },
-  });
-  let install;
-  listeners.get('install')({ waitUntil(value) { install = value; } });
-  await install;
-  const executableStore = [...stores.entries()]
-    .find(([name]) => name.startsWith('easyboost-ege-mock-exec-v1-'))?.[1];
-  const cachedPaths = [...(executableStore?.keys() || [])]
-    .map((url) => new URL(url).pathname).sort();
-  assert.deepEqual(cachedPaths, expectedPaths);
-  const generationStore = [...stores.entries()]
-    .find(([name]) => name.startsWith('easyboost-ege-mock-install-v1-'))?.[1];
-  const generations = [...(generationStore?.keys() || [])]
-    .map((url) => new URL(url, 'https://easyboost.test').pathname);
-  assert.deepEqual(generations, ['/__easyboost/ege-mock-install-mode-v3/1-update']);
-
-  let activation;
-  listeners.get('activate')({ waitUntil(value) { activation = value; } });
-  await activation;
-  online = false;
-  for (const pathname of expectedPaths) {
-    let responsePromise;
-    listeners.get('fetch')({
-      request: { method: 'GET', mode: 'cors', url: `https://easyboost.test${pathname}` },
-      respondWith(value) { responsePromise = value; }, waitUntil() {},
-    });
-    assert.equal(await (await responsePromise).text(), `built:${pathname}`);
-  }
-  assert.deepEqual(
-    [...(generationStore?.keys() || [])]
-      .map((url) => new URL(url, 'https://easyboost.test').pathname),
-    ['/__easyboost/ege-mock-install-mode-v3/1-update'],
-  );
+  assert.match(buildSource,
+    /for \(const pathname of builtEgeMockExecPaths\) \{[\s\S]*assets\[pathname\.slice\(1\)\][\s\S]*\}/u,
+  'the one candidate build must fail if any derived EGE executable is absent from its final assets');
 });
 
 test('an update preserves an opened lazy EGE executable before activation and restores it offline', async () => {
@@ -265,7 +185,7 @@ test('an update preserves an opened lazy EGE executable before activation and re
       stores.set(name, store);
       return {
         async addAll(paths) {
-          for (const path of paths) store.set(`https://easyboost.test${path}`, await fetch(`https://easyboost.test${path}`));
+          for (const path of paths) store.set(workerUrl(path).href, await fetch(path));
         },
         async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
         async match(key) { return store.get(typeof key === 'string' ? key : key.url)?.clone(); },
@@ -286,14 +206,14 @@ test('an update preserves an opened lazy EGE executable before activation and re
   async function fetch(request) {
     if (!online) throw new Error('offline');
     const url = typeof request === 'string' ? request : request.url;
-    return new Response(`new:${new URL(url).pathname}`);
+    return new Response(`new:${workerUrl(url).pathname}`);
   }
   const self = {
     location: { origin: 'https://easyboost.test' }, navigator: { locks: immediateLocks },
     addEventListener(type, listener) { listeners.set(type, listener); },
-    async skipWaiting() {}, clients: { async claim() {} },
+    async skipWaiting() {}, clients: workerClients(),
   };
-  vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Response, fetch });
+  vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Request: WorkerRequest, Response, fetch });
 
   let install;
   listeners.get('install')({ waitUntil(value) { install = value; } });
@@ -326,7 +246,7 @@ test('a source-mode update refreshes a complete stable-path executable cache bef
       const store = stores.get(name) || new Map(); stores.set(name, store);
       return {
         async addAll(requestedPaths) {
-          for (const path of requestedPaths) store.set(`https://easyboost.test${path}`, await fetch(`https://easyboost.test${path}`));
+          for (const path of requestedPaths) store.set(workerUrl(path).href, await fetch(path));
         },
         async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
         async match(key) { return store.get(typeof key === 'string' ? key : key.url)?.clone(); },
@@ -339,16 +259,16 @@ test('a source-mode update refreshes a complete stable-path executable cache bef
   };
   async function fetch(request) {
     if (!online) throw new Error('offline');
-    return new Response(`${version}:${new URL(typeof request === 'string' ? request : request.url).pathname}`);
+    return new Response(`${version}:${workerUrl(request).pathname}`);
   }
   function evaluateWorker(active) {
     const listeners = new Map();
     const self = {
       location: { origin: 'https://easyboost.test' }, registration: { active }, navigator: { locks: immediateLocks },
       addEventListener(type, listener) { listeners.set(type, listener); },
-      async skipWaiting() {}, clients: { async claim() {} },
+      async skipWaiting() {}, clients: workerClients(),
     };
-    vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Response, fetch });
+    vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Request: WorkerRequest, Response, fetch });
     return listeners;
   }
 
@@ -412,7 +332,8 @@ test('a clean first activation stays lazy when registration.active becomes the c
             return;
           }
           for (const resourcePath of paths) {
-            store.set(`https://easyboost.test${resourcePath}`, new Response(`shell:${resourcePath}`));
+            store.set(workerUrl(resourcePath).href,
+              new Response(`shell:${workerUrl(resourcePath).pathname}`));
           }
         },
         async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
@@ -434,10 +355,10 @@ test('a clean first activation stays lazy when registration.active becomes the c
   const self = {
     location: { origin: 'https://easyboost.test' }, registration: { active: null }, navigator: { locks: immediateLocks },
     addEventListener(type, listener) { installListeners.set(type, listener); },
-    async skipWaiting() {}, clients: { async claim() {} },
+    async skipWaiting() {}, clients: workerClients(),
   };
   vm.runInNewContext(source, {
-    self, caches, Headers, URL, Promise, Response,
+    self, caches, Headers, URL, Promise, Request: WorkerRequest, Response,
     async fetch() { throw new Error('a clean install must not fetch lazy EGE code'); },
   });
   let install; installListeners.get('install')({ waitUntil(value) { install = value; } }); await install;
@@ -446,10 +367,10 @@ test('a clean first activation stays lazy when registration.active becomes the c
   const activatingSelf = {
     location: { origin: 'https://easyboost.test' }, registration: { active: { scriptURL: 'current-worker.js' } },
     addEventListener(type, listener) { activationListeners.set(type, listener); },
-    async skipWaiting() {}, clients: { async claim() {} },
+    async skipWaiting() {}, clients: workerClients(),
   };
   vm.runInNewContext(source, {
-    self: activatingSelf, caches, Headers, URL, Promise, Response,
+    self: activatingSelf, caches, Headers, URL, Promise, Request: WorkerRequest, Response,
     async fetch() { throw new Error('a clean activation must survive worker-global teardown without fetching EGE'); },
   });
   let activation; activationListeners.get('activate')({ waitUntil(value) { activation = value; } }); await activation;
@@ -480,7 +401,7 @@ test('an update replaces a retained clean install decision before preserving its
         async addAll(paths) {
           if (!name.startsWith('easyboost-ege-mock-exec-v1-')) return;
           for (const path of paths) {
-            store.set(`https://easyboost.test${path}`, await fetch(`https://easyboost.test${path}`));
+            store.set(workerUrl(path).href, await fetch(path));
           }
         },
         async put(key, value) {
@@ -497,16 +418,16 @@ test('an update replaces a retained clean install decision before preserving its
   };
   async function fetch(request) {
     if (!online) throw new Error('offline');
-    return new Response(`new:${new URL(typeof request === 'string' ? request : request.url).pathname}`);
+    return new Response(`new:${workerUrl(request).pathname}`);
   }
   function evaluateWorker(active) {
     const listeners = new Map();
     const self = {
       location: { origin: 'https://easyboost.test' }, registration: { active }, navigator: { locks: immediateLocks },
       addEventListener(type, listener) { listeners.set(type, listener); },
-      async skipWaiting() {}, clients: { async claim() {} },
+      async skipWaiting() {}, clients: workerClients(),
     };
-    vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Response, fetch });
+    vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Request: WorkerRequest, Response, fetch });
     return listeners;
   }
 
@@ -542,7 +463,7 @@ test('a clean reinstall replaces a retained update decision before deciding to s
         async addAll(paths) {
           if (!name.startsWith('easyboost-ege-mock-exec-v1-')) return;
           executableFetches += paths.length;
-          for (const path of paths) store.set(`https://easyboost.test${path}`, new Response(`new:${path}`));
+          for (const path of paths) store.set(workerUrl(path).href, new Response(`new:${workerUrl(path).pathname}`));
         },
         async put(key, value) {
           if (phase === 'clean' && name.startsWith('easyboost-ege-mock-install-v1-')) await cleanMarkerGate;
@@ -561,11 +482,11 @@ test('a clean reinstall replaces a retained update decision before deciding to s
     const self = {
       location: { origin: 'https://easyboost.test' }, registration: { active }, navigator: { locks: immediateLocks },
       addEventListener(type, listener) { listeners.set(type, listener); },
-      async skipWaiting() {}, clients: { async claim() {} },
+      async skipWaiting() {}, clients: workerClients(),
     };
     vm.runInNewContext(source, {
-      self, caches, Headers, URL, Promise, Response,
-      async fetch(request) { return new Response(`new:${new URL(typeof request === 'string' ? request : request.url).pathname}`); },
+      self, caches, Headers, URL, Promise, Request: WorkerRequest, Response,
+      async fetch(request) { return new Response(`new:${workerUrl(request).pathname}`); },
     });
     return listeners;
   }
@@ -605,7 +526,7 @@ test('durable install generations survive equal timestamps, rollback and a delay
           async addAll(paths) {
             if (!name.startsWith('easyboost-ege-mock-exec-v1-')) return;
             executableFetches += paths.length;
-            for (const path of paths) store.set(`https://easyboost.test${path}`, new Response(`new:${path}`));
+            for (const path of paths) store.set(workerUrl(path).href, new Response(`new:${workerUrl(path).pathname}`));
           },
           async put(key, value) {
             const normalizedKey = typeof key === 'string' ? key : key.url;
@@ -625,11 +546,11 @@ test('durable install generations survive equal timestamps, rollback and a delay
       const self = {
         location: { origin: 'https://easyboost.test' }, registration: { active }, navigator: { locks },
         addEventListener(type, listener) { listeners.set(type, listener); },
-        async skipWaiting() {}, clients: { async claim() {} },
+        async skipWaiting() {}, clients: workerClients(),
       };
       vm.runInNewContext(source, {
-        self, caches, Headers, URL, Promise, Response, Date: { now() { return revision; } },
-        async fetch(request) { return new Response(`new:${new URL(typeof request === 'string' ? request : request.url).pathname}`); },
+        self, caches, Headers, URL, Promise, Request: WorkerRequest, Response, Date: { now() { return revision; } },
+        async fetch(request) { return new Response(`new:${workerUrl(request).pathname}`); },
       });
       return listeners;
     }
@@ -668,7 +589,7 @@ test('activation closes the late-open race before deleting the old lazy EGE exec
     async open(name) {
       const store = stores.get(name) || new Map(); stores.set(name, store);
       return {
-        async addAll(paths) { for (const path of paths) store.set(`https://easyboost.test${path}`, await fetch(`https://easyboost.test${path}`)); },
+        async addAll(paths) { for (const path of paths) store.set(workerUrl(path).href, await fetch(path)); },
         async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
         async match(key) { return store.get(typeof key === 'string' ? key : key.url)?.clone(); },
         async keys() { return [...store.keys()].map((url) => ({ url })); },
@@ -681,11 +602,11 @@ test('activation closes the late-open race before deleting the old lazy EGE exec
   let online = true;
   async function fetch(request) {
     if (!online) throw new Error('offline');
-    return new Response(`new:${new URL(typeof request === 'string' ? request : request.url).pathname}`);
+    return new Response(`new:${workerUrl(request).pathname}`);
   }
   const self = { location: { origin: 'https://easyboost.test' }, registration: { active: { scriptURL: 'old-worker.js' } }, navigator: { locks: immediateLocks }, addEventListener(type, listener) { listeners.set(type, listener); },
-    async skipWaiting() {}, clients: { async claim() {} } };
-  vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Response, fetch });
+    async skipWaiting() {}, clients: workerClients() };
+  vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Request: WorkerRequest, Response, fetch });
   let install; listeners.get('install')({ waitUntil(value) { install = value; } }); await install;
   oldStore.set(oldScreen, new Response('late-old-runner'));
   let activation; listeners.get('activate')({ waitUntil(value) { activation = value; } }); await activation;
@@ -703,7 +624,7 @@ test('an updating worker preloads the exact executable before an open races insi
     async open(name) {
       const store = stores.get(name) || new Map(); stores.set(name, store);
       return {
-        async addAll(paths) { for (const path of paths) store.set(`https://easyboost.test${path}`, await fetch(`https://easyboost.test${path}`)); },
+        async addAll(paths) { for (const path of paths) store.set(workerUrl(path).href, await fetch(path)); },
         async put(key, value) { store.set(typeof key === 'string' ? key : key.url, value); },
         async match(key) { return store.get(typeof key === 'string' ? key : key.url)?.clone(); },
         async keys() { return [...store.keys()].map((url) => ({ url })); },
@@ -723,14 +644,14 @@ test('an updating worker preloads the exact executable before an open races insi
     async match() { return undefined; },
   };
   async function fetch(request) {
-    return new Response(`new:${new URL(typeof request === 'string' ? request : request.url).pathname}`);
+    return new Response(`new:${workerUrl(request).pathname}`);
   }
   const self = {
     location: { origin: 'https://easyboost.test' }, registration: { active: { scriptURL: 'old-worker.js' } }, navigator: { locks: immediateLocks },
     addEventListener(type, listener) { listeners.set(type, listener); }, async skipWaiting() {},
-    clients: { async claim() {} },
+    clients: workerClients(),
   };
-  vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Response, fetch, queueMicrotask });
+  vm.runInNewContext(source, { self, caches, Headers, URL, Promise, Request: WorkerRequest, Response, fetch, queueMicrotask });
   let install; listeners.get('install')({ waitUntil(value) { install = value; } }); await install;
   activationStarted = true;
   let activation; listeners.get('activate')({ waitUntil(value) { activation = value; } }); await activation;

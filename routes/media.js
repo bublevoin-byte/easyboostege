@@ -67,11 +67,17 @@ export function createMediaRoutes({ authentication, access, provider = {}, ttsDi
   const GROK_VOICE = { 'en-GB-SoniaNeural': 'eve', 'en-GB-RyanNeural': 'rex', 'en-GB-LibbyNeural': 'ara', 'en-GB-ThomasNeural': 'leo' };
   let _ttsMod = null;
 
+  function setTtsNoStore(res) {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+
   function ttsSend(res, buf, file) {
     try { fs.writeFileSync(file, buf); } catch (e) {}
     try { pruneAudioCache(TTS_DIR, { maxAgeMs: config.ai.ttsCacheMaxAgeMs, maxBytes: config.ai.ttsCacheMaxBytes }); } catch (e) {}
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Cache-Control', 'private, max-age=604800');
+    setTtsNoStore(res);
     res.end(buf);
   }
   async function grokTts(text, voice) {
@@ -111,7 +117,7 @@ export function createMediaRoutes({ authentication, access, provider = {}, ttsDi
     const file = path.join(TTS_DIR, key + '.mp3');
     if (fs.existsSync(file)) {
       res.setHeader('Content-Type', 'audio/mpeg');
-      res.setHeader('Cache-Control', 'private, max-age=604800');
+      setTtsNoStore(res);
       return res.sendFile(file);
     }
     if (useGrok) {

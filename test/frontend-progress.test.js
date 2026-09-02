@@ -215,6 +215,21 @@ test('offline continuity E2E resolves the generation-bound current owner marker'
   assert.doesNotMatch(demo, /loadLocal\(localStorage\.getItem\('eb_current'\)\)/u);
 });
 
+test('offline continuity E2E bounds service-worker control with browser diagnostics', async () => {
+  const demo = await fs.readFile(new URL('../e2e/demo.test.js', import.meta.url), 'utf8');
+
+  assert.match(demo, /authenticatedPage\.waitForFunction\(\s*\(\) => Boolean\(navigator\.serviceWorker\?\.controller\),\s*null,\s*\{ timeout: 15_000 \},?\s*\)/u,
+    'Playwright must own the finite service-worker control deadline');
+  assert.match(demo, /Service worker did not control the authenticated offline-continuity page within 15000 ms/u,
+    'the release log must identify the bounded wait that failed');
+  assert.match(demo, /controllerScriptUrl/u);
+  assert.match(demo, /visibilityState/u);
+  assert.doesNotMatch(demo, /await navigator\.serviceWorker\.ready/u,
+    'page.evaluate must not hide an unbounded ready promise from Playwright');
+  assert.doesNotMatch(demo, /navigator\.serviceWorker\.addEventListener\('controllerchange'/u,
+    'page.evaluate must not hide an unbounded controllerchange listener from Playwright');
+});
+
 test('browser evidence tracers share one server and Chromium harness', async () => {
   const [progressTracer, readingTracer, vocabularyTracer] = await Promise.all([
     fs.readFile(new URL('../e2e/learning-progress.test.js', import.meta.url), 'utf8'),

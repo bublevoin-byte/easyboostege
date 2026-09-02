@@ -4,11 +4,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { createReleaseServerEnvironment } from './aisy-learner-release-safety.js';
 import { createActiveSubscriptionPage } from './browser-server-harness.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
@@ -27,15 +29,17 @@ const LAZY_SCREENS = [
   'screens/listening.js', 'screens/reading.js',
   'screens/writing.js', 'screens/speaking.js', 'screens/ege-mock.js',
 ];
-// А эти обязаны приехать сразу: раздел 6.1 ТЗ обещает словарные карточки, интервальное повторение,
-// встроенные грамматические тесты и просмотр сохранённого прогресса без сети. Ученик может уйти в
-// офлайн, ни разу их не открыв. Проверяются оба списка, чтобы ни один не съехал молча в свою сторону.
-const SHELL_SCREENS = ['screens/words.js', 'screens/grammar.js', 'modules/exam.js'];
+// Эти небольшие общие модули обязаны приехать сразу. Тяжёлый Grammar renderer/catalog остаётся
+// доступным на первом offline-переходе через install-cache service worker, но не разбирается на
+// каждой первой загрузке. Проверяются оба списка, чтобы offline closure и initial graph не
+// подменяли друг друга.
+const SHELL_SCREENS = ['screens/words.js', 'modules/grammar.js', 'modules/exam.js'];
 // These capabilities remain reachable and offline-honest, but their implementation is below the
 // first learner screen. Keeping this list executable prevents a later static import from silently
 // making Practice, EGE, Asya or the heavy subject domains part of every session.
 const LAZY_FIRST_LOAD_MODULES = [
   'asya-assistant.js', 'voice-tutor.js', 'realtime-transport.js',
+  'screens/grammar.js', 'grammar-catalog.js', 'grammar-catalog-content.js',
   'screens/practice.js', 'modules/practice.js',
   'screens/ege-hub.js', 'modules/ege-hub.js',
   'modules/reading.js', 'modules/listening.js', 'modules/writing.js',
@@ -109,6 +113,21 @@ async function stopProcess(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
+async function gzipTransfer(url) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { headers: { 'Accept-Encoding': 'gzip' } }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode,
+        encoding: String(response.headers['content-encoding'] || 'identity').toLowerCase(),
+        bytes: Buffer.concat(chunks).length,
+      }));
+    });
+    request.on('error', reject);
+  });
+}
+
 async function chromeExecutable() {
   const candidates = [
     process.env.CHROME_PATH,
@@ -175,16 +194,29 @@ async function measureFirstLoad(browser, baseUrl) {
     // запоздавший запрос чанка попал в замер, а не остался за его границей.
     await page.waitForTimeout(1_000);
 
-    // encodedBodySize — это байты по сети, со сжатием, а не размер файла на диске. Считаются
-    // только свои скрипты: у сторонних источников это поле закрыто и всегда равно нулю.
+    // Resource Timing нужен для точного состава и decoded size. Вес бюджета снимается отдельными
+    // запросами каждого реально загруженного JS с Accept-Encoding: gzip: Chromium по умолчанию
+    // предпочитает Brotli, поэтому encodedBodySize нельзя называть gzip.
     const scripts = await page.evaluate((origin) => performance.getEntriesByType('resource')
       .filter((entry) => entry.name.startsWith(origin) && entry.name.endsWith('.js'))
-      .map((entry) => ({ encoded: entry.encodedBodySize || 0, decoded: entry.decodedBodySize || 0 })), baseUrl);
+      .map((entry) => ({ pathname: new URL(entry.name).pathname, decoded: entry.decodedBodySize || 0 })), baseUrl);
+    const transfers = await Promise.all([...requestedScripts].sort().map(async (pathname) => ({
+      pathname, ...(await gzipTransfer(`${baseUrl}${pathname}`)),
+    })));
+    assert.deepEqual(transfers.filter((transfer) => transfer.status !== 200), [],
+      `gzip first-load probe received a non-success response: ${JSON.stringify(transfers)}`);
+    assert.deepEqual(transfers.filter((transfer) => !['gzip', 'identity'].includes(transfer.encoding)), [],
+      `gzip first-load probe received another encoding: ${JSON.stringify(transfers)}`);
+    assert.deepEqual(transfers.filter((transfer) => transfer.encoding === 'identity').map((transfer) => transfer.pathname),
+      ['/theme-prepaint.js'], 'only the sub-threshold classic prepaint script may remain identity encoded');
+    assert.ok(transfers.some((transfer) => transfer.encoding === 'gzip'),
+      'the initial module entry was not served with the requested gzip encoding');
     return {
-      bytes: scripts.reduce((total, script) => total + script.encoded, 0),
+      bytes: transfers.reduce((total, transfer) => total + transfer.bytes, 0),
       unpackedBytes: scripts.reduce((total, script) => total + script.decoded, 0),
       files: scripts.length,
       requestedScripts,
+      transfers,
     };
   } finally {
     await context.close();
@@ -339,20 +371,15 @@ async function run() {
     const output = [];
     child = spawn(process.execPath, [serverPath], {
       cwd: projectDirectory,
-      env: {
-        ...process.env,
+      env: createReleaseServerEnvironment({
         NODE_ENV: 'test',
         PORT: String(port),
         APP_URL: baseUrl,
         DATABASE_PROVIDER: 'file',
         DATA_FILE: dataFile,
         JWT_SECRET: jwtSecret,
-        TELEGRAM_BOT_TOKEN: '',
-        ADMIN_TELEGRAM_ID: '',
-        XAI_API_KEY: '',
-        GROQ_API_KEY: '',
         ADAPTIVE_LEARNING_ENABLED: 'true',
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     child.stdout.on('data', (chunk) => output.push(chunk.toString()));
@@ -370,8 +397,8 @@ async function run() {
     const screensAtStart = [...LAZY_SCREENS, ...SHELL_SCREENS, ...LAZY_FIRST_LOAD_MODULES]
       .filter((screen) => firstLoad.requestedScripts.has(screenFiles.get(screen)));
 
-    report('JavaScript первой загрузки', firstLoad.bytes / 1024, BUDGET.firstLoadKb, ' КБ', 1);
-    console.log(`performance: первая загрузка — ${firstLoad.files} файлов, ${(firstLoad.unpackedBytes / 1024).toFixed(0)} КБ без сжатия, источник: ${built ? 'сборка dist/public' : 'исходники public'}, экраны/модули: ${screensAtStart.join(', ') || 'ни одного'}`);
+    report('JavaScript первой загрузки (gzip-request transfer)', firstLoad.bytes / 1024, BUDGET.firstLoadKb, ' КБ', 1);
+    console.log(`performance: первая загрузка — ${firstLoad.files} файлов, ${(firstLoad.unpackedBytes / 1024).toFixed(0)} КБ без сжатия, gzip-request: ${firstLoad.transfers.map((item) => `${item.pathname}=${item.bytes}B ${item.encoding}`).join(', ')}, источник: ${built ? 'сборка dist/public' : 'исходники public'}, экраны/модули: ${screensAtStart.join(', ') || 'ни одного'}`);
     assert.deepEqual(
       [...LAZY_SCREENS, ...LAZY_FIRST_LOAD_MODULES].filter((screen) => screensAtStart.includes(screen)), [],
       'при первой загрузке запрошен ленивый экран/модуль',

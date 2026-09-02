@@ -3,10 +3,15 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 
 test('one full EGE acceptance contour is wired into the default gates', async () => {
-  const packageSource = await fs.readFile(new URL('../package.json', import.meta.url), 'utf8');
+  const [packageSource, releaseRunner] = await Promise.all([
+    fs.readFile(new URL('../package.json', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../scripts/run-aisy-release-e2e.js', import.meta.url), 'utf8'),
+  ]);
   const packageJson = JSON.parse(packageSource);
 
-  assert.match(packageJson.scripts['test:e2e'], /node e2e\/ege-mock-release\.test\.js/u);
+  assert.match(packageJson.scripts['test:e2e'], /test:e2e:aisy:built/u);
+  assert.match(packageJson.scripts['test:e2e:aisy:built'], /run-aisy-release-e2e\.js/u);
+  assert.match(releaseRunner, /e2e\/ege-mock-release\.test\.js/u);
   assert.match(packageJson.scripts['test:e2e:ege-mock'], /node e2e\/ege-mock-release\.test\.js/u);
 });
 

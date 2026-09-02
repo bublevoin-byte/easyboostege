@@ -27,17 +27,19 @@ import {installAsyaLauncher} from './asya-launcher.js';
 import './learning.js';
 import './modules/words.js';
 import './modules/grammar.js';
+import './modules/exam.js';
 import './modules/profile.js';
 import * as app from './app.js';
 import * as voiceTutor from './voice-tutor-loader.js';
 /*
- * Сегодня, Слова и Грамматика нужны до первого перехода. Practice, ЕГЭ, Прогресс и Профиль
+ * Сегодня и Слова нужны до первого перехода. Grammar, Practice, ЕГЭ, Прогресс и Профиль
  * загружаются по маршруту, но входят в проверяемый install-closure service worker: это сохраняет
  * первое офлайн-открытие после установки PWA, не заставляя каждую сессию разбирать их JavaScript.
- * Глубокие предметные экраны и exact-пробник остаются runtime-cached только после явного открытия.
+ * Общий Grammar/Exam domain остаётся eager для синхронизации и старых exam hooks; тяжёлый каталог
+ * и screen renderer живут в отдельном заранее закэшированном чанке. Остальные глубокие предметные
+ * экраны и exact-пробник попадают в runtime-cache только после явного открытия.
  */
 import * as wordsScreen from './screens/words.js';
-import * as grammarScreen from './screens/grammar.js';
 import * as todayScreen from './screens/today.js';
 import './privacy-loader.js';
 import * as tts from './tts.js';
@@ -52,7 +54,6 @@ exposeGlobals(tts);
 exposeGlobals(app);
 exposeGlobals(voiceTutor);
 exposeGlobals(wordsScreen);
-exposeGlobals(grammarScreen);
 exposeGlobals(todayScreen);
 
 installLearnerShell({

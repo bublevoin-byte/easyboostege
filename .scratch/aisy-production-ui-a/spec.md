@@ -170,9 +170,62 @@ OAuth-токены не попадают в localStorage и не становя�
 - Release gate: `npm run lint`, `npm run check`, `npm test`, production frontend build, Aisy E2E, adaptive/EGE
   relevant E2E, performance budget и secret scans. `dist/public` пересобирается после финального source-check.
 
+## Release-safety scope amendment — 2026-08-29
+
+Аудит Ticket 11 обнаружил небезопасную границу между release evidence, production handoff и восстановлением:
+clean checkout зависел от ignored build output, immutable helper archive не закрывал весь process/recovery
+lifecycle, а first-deploy cleanup мог объявить пустое состояние при оставшихся exact Compose objects. Поэтому
+в scope Ticket 11 узко добавлены проверяемые build/context authority, immutable staging helper archive,
+bounded command supervision и exact first-deploy recovery. Это не новый операторский продукт и не общий
+редизайн staging.
+
+Исходное поручение `/autopilot` и последующие команды `продолжай` разрешают автономно продолжать уже
+запущенную реализацию. Они не являются отдельно высказанным visual/product решением, одобрением staging redesign или отдельным разрешением deployment.
+Поправка не разрешает deploy или staging/production mutation, live provider/registry/network calls, передачу
+secrets и более широкий redesign operator tooling; для каждого такого действия по-прежнему нужно отдельное
+явное разрешение владельца.
+
+### Cycle 42 release-safety contract clarification — in-progress
+
+- Cycle 41 whole-candidate audits отклонили superseded candidate с `16` уникальными findings. Отдельный hash
+  для него в checkpoint не заявляется, и он не является authority; build/browser и release wrapper не запускались.
+- Production app lifecycle и guarded import используют один root-owned host-operation guard. Import также
+  удерживает database-operation lock, требует отсутствия app и до передачи source в container подтверждает
+  exact owner image, SHA-256 binding и append-only protocol. Неоднозначное завершение обязано доказать отсутствие
+  tagged remote activity либо сохранить оба lock/guard с типизированным recovery evidence.
+- Замена app image является одной guarded atomic операцией `replace`: exact previous-image authority, удаление
+  старой allocation, exact new image, bounded readiness и cleanup proof проходят под одним guard без промежуточного
+  окна для import. Production Docker stages принимают только immutable Node base digest.
+- Windows child lifecycle контролируется Job Object supervisor, а staging restart — отдельным guarded helper.
+  Текущий focused evidence: import+lock `63 total / 62 pass / 0 fail / 1` PostgreSQL skip; независимый import
+  contour `77 total / 76 pass / 0 fail / 1` PostgreSQL skip + `ZERO_FINDINGS`; restore/lifecycle `20/20`;
+  production-image/runbook `81/81`; candidate manifest — `73` sorted unique entries.
+- Это не финальный release verdict. Ticket остаётся `in-progress`; mandatory full gates, новый exact freeze,
+  два fresh whole-candidate `ZERO_FINDINGS` и единственный final wrapper остаются pending. Build/browser,
+  deployment и live infrastructure mutation не заявляются.
+
+### Cycle 43 restart-safe recovery contract clarification — in-progress
+
+- Database- и host-operation guards являются самостоятельными crash-restart protocols, а не временными
+  mutex-файлами. Их authority публикуется durable no-replace, привязана к exact path/identity/bytes и может
+  завершаться только через public typed API; raw `rm`/`rmdir` retained authority запрещены.
+- DB protocol различает ACTIVE, RETAINED v3 и held absence lease. Recovery частичного temp/claim допускается
+  только после exact authority proof; ACTIVE temp живого owner PID не изменяется. Routine retirement cleanup
+  bounded и не ослабляет ambiguous fail-closed boundary.
+- Host protocol предоставляет held absence lease и restartable completion. Retained app/import/restore recovery
+  использует exact recorded Compose/container/image authority и bounded settlement proof. Для совместного
+  DB+host recovery порядок фиксирован: завершить DB authority → удерживать exact DB absence lease → завершить
+  host authority → снять DB lease.
+- Production recovery entrypoints фиксированы как `production:app:recover`, `production:import:recover` и
+  `production:restore:recover`. Они не выполняют deployment и не заменяют owner-only production rehearsal;
+  их наличие не является разрешением на Docker/DB/network mutation в текущем ticket run.
+- Focused independent reviews Cycle 43 и mandatory local lint/check/full-unit gate зелёные, но это не два
+  требуемых whole-candidate release review. Новый exact freeze, whole-candidate `ZERO_FINDINGS` ×2 и
+  единственный final wrapper остаются обязательными до смены Ticket 11 на `done`.
+
 ## Out of Scope
 
-- Admin UI, operator console, teacher/parent products и редизайн staging-инструментов.
+- Admin UI, operator console, teacher/parent products и редизайн staging-инструментов за пределами этого bounded release-safety seam.
 - Изменение learning logic, scoring, content banks, adaptive rules, production duration ranges или EGE format.
 - Выбор/подключение платёжного провайдера, checkout, auto-renewal и публичный Free/demo режим.
 - Live создание приложения в кабинете VK ID, передача реальных секретов и production deployment.

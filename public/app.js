@@ -119,7 +119,8 @@ S=currentUser?store.loadLocal(currentUser,ADOPTED_OWNER_GENERATION):null;
 /* ===== READING ===== */
 /* Последнее слово, по которому кликнули в тексте: его показывает всплывающая карточка перевода
    и озвучивает кнопка из разметки, поэтому имя живёт в оболочке, а не в чанке чтения. */
-let lastWord="",lastWordContext="";
+let lastWord="",lastWordContext="",readingWordPopoverTrigger=null;
+let readingDictionaryRequestSequence=0,readingDictionaryRequest=null;
 
 /* ===== ROBUSTNESS + OFFLINE FALLBACKS ===== */
 const DICT={
@@ -133,13 +134,40 @@ const DICT={
  experience_:{}
 };
 /* translate: AI first, else offline dictionary */
-async function trWord(w,encodedContext=''){lastWord=w;try{lastWordContext=decodeURIComponent(encodedContext||'')}catch(_){lastWordContext=''};const pop=document.getElementById('r_pop');
-  document.getElementById('r_word').textContent=w;document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='перевод…';pop.style.display='block';
-  try{const d=await generateAiContent('dictionary_lookup',{word:w});
-    document.getElementById('r_ipa').textContent=d.ipa||'';document.getElementById('r_tr').textContent=d.tr}
-  catch(e){const off=DICT[w];
-    if(off){document.getElementById('r_ipa').textContent=off.ipa||'';document.getElementById('r_tr').textContent=off.tr+'  · офлайн-словарь'}
-    else{document.getElementById('r_ipa').textContent='';document.getElementById('r_tr').textContent='ИИ офлайн, слова нет в мини-словаре. Включи VPN/ключ.'}}}
+function readingDictionaryRequestCurrent(request){const authority=currentOwnerBinding();return Boolean(request&&readingDictionaryRequest===request&&authority&&request.authority.username===authority.username&&request.authority.generation===authority.generation)}
+function invalidateReadingDictionaryLookup(){readingDictionaryRequestSequence+=1;readingDictionaryRequest=null}
+function readingDictionarySelection(){const request=readingDictionaryRequest,pop=document.getElementById('r_pop');if(!readingDictionaryRequestCurrent(request)||!pop||!['online','builtin'].includes(pop.dataset.lookupState))return null;return Object.freeze({word:request.word,context:request.context,owner:request.authority.username,ownerGeneration:request.authority.generation})}
+function closeReadingWordPopover(restoreFocus=true){const pop=document.getElementById('r_pop'),trigger=readingWordPopoverTrigger;invalidateReadingDictionaryLookup();if(pop){if(pop.open&&typeof pop.close==='function')pop.close();else pop.hidden=true}readingWordPopoverTrigger=null;if(restoreFocus&&trigger&&trigger.isConnected)trigger.focus()}
+function readingWordPopoverFocusableControls(pop){return [...pop.querySelectorAll('button:not([disabled])')].filter((control)=>!control.hidden&&control.getAttribute('aria-hidden')!=='true'&&control.getClientRects().length>0)}
+function trapReadingWordPopoverTab(event){if(event.key!=='Tab'||event.altKey||event.ctrlKey||event.metaKey)return;const pop=event.currentTarget,controls=readingWordPopoverFocusableControls(pop);if(!controls.length){event.preventDefault();pop.focus();return}const activeIndex=controls.indexOf(document.activeElement);if(event.shiftKey&&(document.activeElement===pop||activeIndex<=0)){event.preventDefault();controls.at(-1).focus()}else if(!event.shiftKey&&(document.activeElement===pop||activeIndex<0||activeIndex===controls.length-1)){event.preventDefault();controls[0].focus()}}
+function wireReadingWordPopover(){const pop=document.getElementById('r_pop');if(!pop||pop.dataset.focusWired)return;pop.dataset.focusWired='true';pop.addEventListener('cancel',function(event){event.preventDefault();closeReadingWordPopover()});pop.addEventListener('keydown',trapReadingWordPopoverTab)}
+function setReadingDictionaryState(request,state,ipa,translation){if(!readingDictionaryRequestCurrent(request))return false;const pop=document.getElementById('r_pop');if(!pop)return false;pop.dataset.lookupState=state;pop.dataset.lookupSequence=String(request.sequence);const canSave=state==='online'||state==='builtin';pop.querySelectorAll('.reading-word-popover__action').forEach(button=>{button.disabled=!canSave});document.getElementById('r_ipa').textContent=ipa||'';document.getElementById('r_tr').textContent=translation;return true}
+function dictionaryLookupMessage(error){const common=apiMessage(error,'dictionary'),status=Number(error&&error.status)||0,code=String(error&&error.code||'REQUEST_FAILED');
+  if(code==='SESSION_REVOKED'||status===401)return 'Сессия истекла. Войдите снова.';
+  if(code==='PRIVACY_CONSENT_REQUIRED')return common;
+  if(code==='SUBSCRIPTION_REQUIRED'||status===403)return 'Для онлайн-перевода нужен активный доступ.';
+  if(code==='RATE_LIMITED'||status===429)return 'Лимит запросов исчерпан. Попробуйте позже.';
+  if(code==='AI_BUDGET_EXHAUSTED')return 'Дневной лимит онлайн-переводов исчерпан. Попробуйте завтра.';
+  if(code==='AI_NOT_CONFIGURED')return 'Онлайн-перевод пока не настроен. Попробуйте позже.';
+  if(code==='AI_RESPONSE_INVALID')return 'Не удалось получить корректный перевод. Попробуйте ещё раз.';
+  if(code==='AI_PROVIDER_UNAVAILABLE')return 'Онлайн-перевод временно недоступен. Попробуйте позже.';
+  if(code==='VALIDATION_ERROR'||status===400)return 'Не удалось распознать слово для перевода. Выберите другое слово.';
+  if(code==='NETWORK_ERROR'||status===0)return 'Нет подключения к интернету. Проверьте сеть и повторите попытку.';
+  if(status>=500)return 'Сервис онлайн-перевода временно недоступен. Попробуйте позже.';
+  return 'Не удалось получить перевод. Попробуйте ещё раз.'}
+async function trWord(w,encodedContext=''){const authority=currentOwnerBinding(),word=String(w||'').trim();if(!authority||!word)return;let context='';try{context=decodeURIComponent(encodedContext||'')}catch(_){context=''}const request=Object.freeze({sequence:++readingDictionaryRequestSequence,word:word,context:context,authority:authority});readingDictionaryRequest=request;lastWord=request.word;lastWordContext=request.context;const pop=document.getElementById('r_pop');if(!pop){invalidateReadingDictionaryLookup();return}wireReadingWordPopover();const active=document.activeElement;if(active&&active!==document.body&&(!pop.contains||!pop.contains(active)))readingWordPopoverTrigger=active;
+  document.getElementById('r_word').textContent=request.word;setReadingDictionaryState(request,'loading','','перевод…');pop.hidden=false;if(typeof pop.showModal==='function'&&!pop.open)pop.showModal();pop.focus({preventScroll:true});
+  try{const d=await generateAiContent('dictionary_lookup',{word:request.word},{'X-EasyBoost-Expected-Owner':request.authority.username});if(!readingDictionaryRequestCurrent(request))return;
+    if(apiResponseOwner(d)!==request.authority.username){closeReadingWordPopover(false);await invalidateLearningAuthority({owner:request.authority.username,ownerGeneration:request.authority.generation});return}
+    setReadingDictionaryState(request,'online',d.ipa||'',d.tr)}
+  catch(e){if(apiIsAuthorityFailure(e)){
+      if(readingDictionaryRequestCurrent(request))closeReadingWordPopover(false);
+      await invalidateLearningAuthority({owner:request.authority.username,ownerGeneration:request.authority.generation});return}
+    if(!readingDictionaryRequestCurrent(request))return;
+    const off=DICT[request.word];
+    if(off&&apiCanUseOfflineFallback(e))setReadingDictionaryState(request,'builtin',off.ipa||'',off.tr+'  · офлайн-словарь');
+    else setReadingDictionaryState(request,'error','',dictionaryLookupMessage(e))}}
+registerAuthorityReset(function(authority){const request=readingDictionaryRequest;if(request&&authority?.owner===request.authority.username&&authority?.ownerGeneration===request.authority.generation)closeReadingWordPopover(false)});
 
 
 
@@ -1163,7 +1191,7 @@ configureTts({
  */
 export {
   lastWord,lastWordContext,
-  closeLearn,learnGo,logout,lToggleSlow,openLearn,pwCheck,rSync,save,startApp,
+  closeLearn,closeReadingWordPopover,learnGo,logout,lToggleSlow,openLearn,pwCheck,rSync,save,startApp,
   trWord,
 };
 
@@ -1179,7 +1207,7 @@ export {SRV,registerProfileHook,registerStartHook,toast};
  */
 export {
   EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
-  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentDisplayName,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,exitOfflineEgeMockContinuation,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,recheckLearningAccess,registerAuthorityReset,
+  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentDisplayName,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,exitOfflineEgeMockContinuation,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,readingDictionarySelection,recheckLearningAccess,registerAuthorityReset,
   grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
   rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
   speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,

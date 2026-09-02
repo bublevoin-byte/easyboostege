@@ -2,7 +2,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['node_modules/**', 'dist/**', 'backups/**', 'tts-cache/**'],
+    ignores: ['node_modules/**', 'dist/**', 'backups/**', 'tts-cache/**', 'pwa-compat/**'],
   },
   {
     files: ['**/*.js'],

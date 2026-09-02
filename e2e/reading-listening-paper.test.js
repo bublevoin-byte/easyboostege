@@ -56,7 +56,7 @@ async function paperMetrics(page,screenId,prefix){
       .map(control=>{const bounds=rect(control);return{label:control.getAttribute('aria-label')||control.textContent.trim(),width:bounds.width,height:bounds.height}});
     return{
       viewport:{width:innerWidth,height:innerHeight},documentWidth:document.documentElement.scrollWidth,documentHeight:document.documentElement.scrollHeight,
-      frame:{width:frameRect.width,height:frameRect.height},screen:{width:screenRect.width,height:screenRect.height,scrollWidth:screen.scrollWidth,clientWidth:screen.clientWidth,bottom:screenRect.bottom},
+      frame:{width:frameRect.width,height:frameRect.height,computedHeight:getComputedStyle(frame).height,computedBlockSize:getComputedStyle(frame).blockSize},screen:{width:screenRect.width,height:screenRect.height,scrollWidth:screen.scrollWidth,clientWidth:screen.clientWidth,bottom:screenRect.bottom},
       route:{width:routeRect.width,height:routeRect.height,rows:getComputedStyle(route).gridTemplateRows},
       area:{height:areaRect.height,bottom:areaRect.bottom,scrollHeight:area.scrollHeight},
       dock:{top:dockRect.top,bottom:dockRect.bottom,height:dockRect.height},
@@ -74,6 +74,10 @@ function assertPaperLayout(metrics,label){
   assert.ok(metrics.documentWidth<=metrics.viewport.width,`${label}: document overflow ${JSON.stringify(metrics)}`);
   assert.ok(metrics.documentHeight<=metrics.viewport.height,`${label}: document is taller than the viewport ${JSON.stringify(metrics)}`);
   assert.ok(metrics.frame.width<=390.5,`${label}: learner UI widened beyond phone canvas`);
+  const expectedFrameHeight=Math.min(844,metrics.viewport.height);
+  assert.equal(Math.round(metrics.frame.height),expectedFrameHeight,`${label}: frame must consume the current dynamic viewport height up to the 844px phone cap`);
+  assert.equal(Math.round(Number.parseFloat(metrics.frame.computedHeight)),expectedFrameHeight,`${label}: computed height must resolve the final dvh override`);
+  assert.equal(Math.round(Number.parseFloat(metrics.frame.computedBlockSize)),expectedFrameHeight,`${label}: computed block-size must resolve the final dvh override`);
   assert.ok(metrics.screen.scrollWidth<=metrics.screen.clientWidth+1,`${label}: screen overflow`);
   assert.ok(metrics.route.height>0&&metrics.area.height>0,`${label}: paper grid collapsed`);
   assert.ok(metrics.area.bottom<=metrics.dock.top+1,`${label}: dock occludes content ${JSON.stringify({viewport:metrics.viewport,screen:metrics.screen,route:metrics.route,area:metrics.area,dock:metrics.dock})}`);
@@ -195,10 +199,61 @@ try{
     return{ratio:(Math.max(foreground,background)+.05)/(Math.min(foreground,background)+.05),label:node.getAttribute('aria-label'),state:node.dataset.wordState};
   });
   assert.equal(highlightedWord.state,'learn');assert.match(highlightedWord.label,/в изучении/u);assert.ok(highlightedWord.ratio>=4.5,`dark Reading word highlight contrast ${highlightedWord.ratio}`);
-  await page.evaluate(()=>window.AisyTheme.set('light'));
   await assertResponsiveMatrix(page,'scr7','r','Reading Task 10 task');
   await page.setViewportSize({width:320,height:720});
   assert.equal(await page.locator('#scr7 .reading-text .iconbtn').first().evaluate(node=>{const rect=node.getBoundingClientRect();return rect.width>=44&&rect.height>=44}),true,'Reading word controls expose a genuine 44px minimum tap box');
+  const wordTrigger=page.locator('#scr7 .reading-word').first();
+  await wordTrigger.focus();
+  const triggerWord=await wordTrigger.getAttribute('data-w');
+  await wordTrigger.press('Enter');
+  const wordPopover=page.locator('#r_pop');
+  await wordPopover.waitFor({state:'visible'});
+  const popoverA11y=await wordPopover.evaluate(node=>({
+    tag:node.tagName,open:node.open,role:node.getAttribute('role'),modal:node.getAttribute('aria-modal'),labelledby:node.getAttribute('aria-labelledby'),
+    describedby:node.getAttribute('aria-describedby'),active:document.activeElement?.id,
+    controls:[...node.querySelectorAll('button')].map(control=>{const rect=control.getBoundingClientRect();return{name:control.getAttribute('aria-label')||control.textContent.trim(),width:rect.width,height:rect.height}}),
+  }));
+  assert.deepEqual({tag:popoverA11y.tag,open:popoverA11y.open,role:popoverA11y.role,modal:popoverA11y.modal,labelledby:popoverA11y.labelledby,describedby:popoverA11y.describedby,active:popoverA11y.active},
+    {tag:'DIALOG',open:true,role:'dialog',modal:'true',labelledby:'r_word',describedby:'r_tr',active:'r_pop'},'word lookup must announce and receive focus as one native modal dialog');
+  assert.deepEqual(popoverA11y.controls.filter(control=>control.width<44||control.height<44),[],
+    `word popover controls below 44px: ${JSON.stringify(popoverA11y.controls)}`);
+  const darkPopover=await wordPopover.evaluate(node=>{
+    const resolve=token=>{const probe=document.createElement('span');probe.style.color=`var(${token})`;document.body.append(probe);const value=getComputedStyle(probe).color;probe.remove();return value};
+    const style=getComputedStyle(node),word=getComputedStyle(node.querySelector('#r_word')),
+      speak=getComputedStyle(node.querySelector('.reading-word-popover__icon--speak')),
+      close=getComputedStyle(node.querySelector('.reading-word-popover__icon--close')),
+      learn=getComputedStyle(node.querySelector('.reading-word-popover__action--learn')),
+      known=getComputedStyle(node.querySelector('.reading-word-popover__action--known'));
+    return{
+      rootTheme:document.documentElement.dataset.theme,colorScheme:style.colorScheme,
+      computed:{surface:style.backgroundColor,text:word.color,speakSurface:speak.backgroundColor,speakText:speak.color,
+        closeSurface:close.backgroundColor,closeText:close.color,learnSurface:learn.backgroundColor,learnText:learn.color,
+        knownSurface:known.backgroundColor,knownText:known.color},
+      tokens:{surface:resolve('--aisy-primitive-night-surface-raised'),text:resolve('--aisy-primitive-night-text'),
+        speakSurface:resolve('--aisy-primitive-warning-soft-dark'),speakText:resolve('--aisy-primitive-warning-dark'),
+        closeSurface:resolve('--aisy-primitive-night-surface-muted'),closeText:resolve('--aisy-primitive-night-text-muted'),
+        learnSurface:resolve('--aisy-primitive-night-surface'),learnText:resolve('--aisy-primitive-focus-dark'),
+        knownSurface:resolve('--aisy-primitive-success-soft-dark'),knownText:resolve('--aisy-primitive-success-dark')},
+    };
+  });
+  assert.equal(darkPopover.rootTheme,'dark','opening the word popover must preserve the forced dark preference');
+  assert.match(darkPopover.colorScheme,/dark/u);
+  assert.deepEqual(darkPopover.computed,darkPopover.tokens,
+    `word popover must resolve every surface/text/control pair to warm dark tokens: ${JSON.stringify(darkPopover)}`);
+  await wordTrigger.evaluate(node=>node.focus());
+  assert.equal(await page.evaluate(()=>document.activeElement?.closest('#r_pop')!==null),true,
+    'showModal keeps the Reading route inert while the word dialog is open');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.evaluate(()=>{
+    const controls=[...document.querySelectorAll('#r_pop button:not([disabled])')].filter(control=>control.getClientRects().length>0);
+    return document.activeElement===controls.at(-1);
+  }),true,
+    'reverse Tab from the dialog entry must stay on the last enabled control');
+  await page.keyboard.press('Escape');
+  await wordPopover.waitFor({state:'hidden'});
+  assert.equal(await page.evaluate(word=>document.activeElement?.dataset.w===word,triggerWord),true,
+    'Escape must close the word popover and restore its exact trigger');
+  await page.evaluate(()=>window.AisyTheme.set('light'));
   const submitTraining=page.locator('#r_action_dock [data-reading-action="submit-training"]');
   assert.equal(await submitTraining.isDisabled(),true,'Reading submit stays truly disabled before a complete selection');
   await page.locator('[data-reading-kind="task10"] [data-reading-answer]').first().selectOption('0');

@@ -10,6 +10,7 @@ import {
   availablePort, chromeExecutable, createActiveSubscriptionPage, openEgeHub, openEgeMock,
   stopProcess, waitForReady,
 } from './browser-server-harness.js';
+import { createReleaseServerEnvironment } from './aisy-learner-release-safety.js';
 import { EGE_MOCK_FORM_1_V1_PUBLIC as egeForm } from '../public/ege-mock-form-1-v1.js';
 import { egeMockAssetPlaybackUrl } from '../public/ege-mock-written-assets.js';
 import { AUTOMATIC_ASSESSMENT_WARNING } from '../public/automatic-assessment-contract.js';
@@ -53,12 +54,12 @@ try {
   const output = [];
   child = spawn(process.execPath, [serverPath], {
     cwd: projectDirectory,
-    env: {
-      ...process.env, NODE_ENV: 'test', PORT: String(port), APP_URL: baseUrl,
+    env: createReleaseServerEnvironment({
+      NODE_ENV: 'test', PORT: String(port), APP_URL: baseUrl,
       DATABASE_PROVIDER: 'file', DATA_FILE: dataFile, JWT_SECRET: jwtSecret,
       TELEGRAM_BOT_TOKEN: '', ADMIN_TELEGRAM_ID: '', XAI_ENABLED: 'false',
       VOICE_TUTOR_ENABLED: 'false', ADAPTIVE_LEARNING_ENABLED: 'false',
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (chunk) => output.push(chunk.toString()));

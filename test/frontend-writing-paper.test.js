@@ -33,7 +33,9 @@ test('Writing uses one Paper A route, semantic editor and no legacy local chrome
   assert.match(writing, /id="writing_action_dock" class="learning-action-dock[^"]*"/u);
   assert.equal((markup.match(/id="w_action_dock"/gu)||[]).length, 1,
     'the vocabulary dock keeps its legacy ID without colliding with Writing');
-  assert.match(writing, /id="w_primary_action"[^>]+class="aisy-button/u);
+  assert.match(writing, /id="writing_primary_action"[^>]+class="aisy-button/u);
+  assert.doesNotMatch(writing, /id="w_primary_action"/u,
+    'Writing must not collide with the Vocabulary primary action created at runtime');
   assert.match(review, /id="rv_content"/u);
   assert.match(review, /id="rv_status"[^>]+role="status"[^>]+aria-live="polite"/u);
   assert.match(waiting, /aria-busy="true"/u);

@@ -342,6 +342,9 @@
 .adaptive-plan[hidden],
 .adaptive-paywall[hidden] { display: none !important; }
 
+/* Component layout declarations must never override the platform hidden contract. */
+.adaptive-plan [hidden] { display: none !important; }
+
 .adaptive-entry__icon {
   display: grid;
   inline-size: var(--aisy-touch-target);

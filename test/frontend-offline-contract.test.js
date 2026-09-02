@@ -26,6 +26,9 @@ const screenLoaderSource = await fs.readFile(new URL('../public/screens.js', imp
 const appSource = await fs.readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 const privacySource = await fs.readFile(new URL('../public/privacy.js', import.meta.url), 'utf8');
 const profileSource = await fs.readFile(new URL('../public/screens/profile.js', import.meta.url), 'utf8');
+const dictionaryLookupSource = appSource.match(
+  /const DICT=\{[\s\S]*?\r?\n\};[\s\S]*?async function trWord[\s\S]*?\r?\n\r?\n\r?\n/u,
+)[0];
 const wordFlushSource = appSource.match(
   /async function wFlushServer\(authority\)\{[\s\S]*?\n\}\nfunction wQueueServer/u,
 )[0].replace(/\nfunction wQueueServer$/u, '');
@@ -33,9 +36,10 @@ const wordFlushSource = appSource.match(
 const ORIGIN = 'https://app.easyboost.ru';
 
 function deferred() {
+  let reject;
   let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, reject, resolve };
 }
 
 function createApi({
@@ -49,6 +53,8 @@ function createApi({
         url: String(url),
         method: (options && options.method) || 'GET',
         headers: options?.headers || {},
+        cache: options?.cache,
+        credentials: options?.credentials,
       });
       if (offline) throw new TypeError('Failed to fetch');
       return {
@@ -68,6 +74,85 @@ function createApi({
   return { api: window.EasyBoostApi, attempts };
 }
 
+function createDictionaryLookup({ generate, owner = 'owner-a', ownerGeneration = 0 }) {
+  const { api } = createApi({ offline: false });
+  const actions = [{ disabled: false }, { disabled: false }];
+  const messageContexts = [];
+  const invalidations = [];
+  const authorityResetHooks = new Set();
+  let activeAuthority = owner ? { username: owner, generation: ownerGeneration } : null;
+  const elements = {
+    r_pop: {
+      dataset: { focusWired: 'true' }, hidden: true, open: false,
+      focus() {},
+      showModal() { this.hidden = false; this.open = true; },
+      close() { this.open = false; },
+      querySelectorAll: () => actions,
+    },
+    r_word: { textContent: '' },
+    r_ipa: { textContent: '' },
+    r_tr: { textContent: '' },
+  };
+  const body = {};
+  const document = {
+    body, activeElement: body,
+    getElementById: (id) => elements[id] || null,
+  };
+  const requests = [];
+  const context = vm.createContext({
+    apiCanUseOfflineFallback: api.canUseOfflineFallback,
+    apiIsAuthorityFailure: api.isAuthorityFailure,
+    apiResponseOwner(result) { return result?.responseOwner || ''; },
+    apiMessage(error, messageContext) {
+      messageContexts.push(messageContext);
+      return api.messageFor(error, messageContext);
+    },
+    currentOwnerBinding() {
+      return activeAuthority ? Object.freeze({ ...activeAuthority }) : null;
+    },
+    async invalidateLearningAuthority(authority) {
+      invalidations.push({ ...authority });
+      if (activeAuthority?.username !== authority.owner || activeAuthority?.generation !== authority.ownerGeneration) return false;
+      const previous = activeAuthority;
+      activeAuthority = null;
+      for (const hook of authorityResetHooks) await hook({ owner: previous.username, ownerGeneration: previous.generation });
+      return true;
+    },
+    registerAuthorityReset(hook) {
+      authorityResetHooks.add(hook);
+      return () => authorityResetHooks.delete(hook);
+    },
+    document,
+    generateAiContent(operation, payload, headers) {
+      requests.push({ operation, payload, headers });
+      return generate(operation, payload, headers);
+    },
+  });
+  vm.runInContext(
+    `let lastWord='',lastWordContext='',readingWordPopoverTrigger=null,readingDictionaryRequestSequence=0,readingDictionaryRequest=null;\n${dictionaryLookupSource}\nthis.lookup=trWord;this.closeLookup=closeReadingWordPopover;this.selection=()=>typeof readingDictionarySelection==='function'?readingDictionarySelection():null;`,
+    context,
+  );
+  return {
+    actions, elements, invalidations, messageContexts, requests,
+    close: () => context.closeLookup(),
+    lookup: (word, encodedContext = '') => context.lookup(word, encodedContext),
+    selection: () => {
+      const selection = context.selection();
+      return selection ? { ...selection } : null;
+    },
+    notifyAuthorityReset(authority) {
+      for (const hook of authorityResetHooks) hook(authority);
+    },
+    setOwner(username, generation, { notify = false } = {}) {
+      const previous = activeAuthority;
+      activeAuthority = username ? { username, generation } : null;
+      if (notify && previous) {
+        for (const hook of authorityResetHooks) hook({ owner: previous.username, ownerGeneration: previous.generation });
+      }
+    },
+  };
+}
+
 test('API client binds an adaptive response to the server-confirmed owner header', async () => {
   const { api } = createApi({
     offline: false,
@@ -78,6 +163,14 @@ test('API client binds an adaptive response to the server-confirmed owner header
   assert.equal(api.responseOwner(result), 'Owner_A');
   assert.equal(result.owner, 'payload-cannot-override-header');
   assert.equal(result.profile.revision, 2);
+});
+
+test('personal API GET and blob requests enforce no-store even when a caller asks for stale cache', async () => {
+  const { api, attempts } = createApi({ offline: false, payload: { ok: true } });
+  await api.get('/api/v1/me', { cache: 'force-cache', credentials: 'omit' });
+  await api.getBlob('/api/v1/account/export', { cache: 'force-cache', credentials: 'omit' });
+  assert.deepEqual(attempts.map((attempt) => attempt.cache), ['no-store', 'no-store']);
+  assert.deepEqual(attempts.map((attempt) => attempt.credentials), ['same-origin', 'same-origin']);
 });
 
 test('response-owner metadata is non-enumerable transport state and authority errors cannot use offline fallback', async () => {
@@ -123,6 +216,204 @@ test('generated content forwards owner headers and keeps response-owner metadata
   assert.equal(attempts[0].headers['X-EasyBoost-Expected-Owner'], 'Owner_A');
   assert.equal(api.responseOwner(result), 'Owner_A');
   assert.equal(api.responseServerTime(result), Date.parse('2026-08-13T06:00:00.000Z'));
+});
+
+test('dictionary lookup exposes explicit result states and limits its built-in fallback', async () => {
+  const pending = deferred();
+  const online = createDictionaryLookup({ generate: () => pending.promise });
+  const onlineLookup = online.lookup('many');
+  assert.equal(online.elements.r_pop.dataset.lookupState, 'loading');
+  assert.deepEqual(online.actions.map(({ disabled }) => disabled), [true, true]);
+  pending.resolve({ ipa: '/online/', tr: 'многие онлайн', responseOwner: 'owner-a' });
+  await onlineLookup;
+  assert.equal(online.elements.r_pop.dataset.lookupState, 'online');
+  assert.equal(online.elements.r_tr.textContent, 'многие онлайн');
+  assert.deepEqual(online.actions.map(({ disabled }) => disabled), [false, false]);
+
+  const networkError = Object.assign(new Error('offline'), { code: 'NETWORK_ERROR', status: 0 });
+  const builtIn = createDictionaryLookup({ generate: async () => { throw networkError; } });
+  await builtIn.lookup('many');
+  assert.equal(builtIn.elements.r_pop.dataset.lookupState, 'builtin');
+  assert.match(builtIn.elements.r_tr.textContent, /офлайн-словарь/u);
+  assert.deepEqual(builtIn.actions.map(({ disabled }) => disabled), [false, false]);
+
+  const revoked = createDictionaryLookup({
+    generate: async () => { throw Object.assign(new Error('revoked'), { code: 'SESSION_REVOKED', status: 401 }); },
+  });
+  await revoked.lookup('many');
+  assert.deepEqual(revoked.invalidations, [{ owner: 'owner-a', ownerGeneration: 0 }]);
+  assert.equal(revoked.elements.r_pop.open, false,
+    'an authority failure must close the captured owner dictionary dialog');
+  assert.equal(revoked.selection(), null);
+  assert.doesNotMatch(revoked.elements.r_tr.textContent, /офлайн-словарь/u,
+    'a known mini-dictionary word must not conceal an authority failure');
+  assert.deepEqual(revoked.actions.map(({ disabled }) => disabled), [true, true]);
+
+  const unknownOffline = createDictionaryLookup({ generate: async () => { throw networkError; } });
+  await unknownOffline.lookup('unlisted');
+  assert.equal(unknownOffline.elements.r_pop.dataset.lookupState, 'error');
+  assert.deepEqual(unknownOffline.actions.map(({ disabled }) => disabled), [true, true]);
+});
+
+test('dictionary lookup commits only the latest immutable word for the exact owner', async () => {
+  const many = deferred();
+  const students = deferred();
+  const lookup = createDictionaryLookup({
+    generate: (_operation, payload) => (payload.word === 'many' ? many.promise : students.promise),
+  });
+
+  const first = lookup.lookup('many', encodeURIComponent('Many context.'));
+  const second = lookup.lookup('students', encodeURIComponent('Students context.'));
+  assert.deepEqual(lookup.requests.map(({ payload, headers }) => ({ payload: { ...payload }, headers: { ...headers } })), [
+    { payload: { word: 'many' }, headers: { 'X-EasyBoost-Expected-Owner': 'owner-a' } },
+    { payload: { word: 'students' }, headers: { 'X-EasyBoost-Expected-Owner': 'owner-a' } },
+  ]);
+
+  students.resolve({ ipa: '/students/', tr: 'студенты онлайн', responseOwner: 'owner-a' });
+  await second;
+  assert.equal(lookup.elements.r_word.textContent, 'students');
+  assert.equal(lookup.elements.r_tr.textContent, 'студенты онлайн');
+  assert.deepEqual(lookup.selection(), {
+    word: 'students', context: 'Students context.', owner: 'owner-a', ownerGeneration: 0,
+  });
+
+  many.resolve({ ipa: '/many/', tr: 'многие поздно', responseOwner: 'owner-a' });
+  await first;
+  assert.equal(lookup.elements.r_word.textContent, 'students', 'late A must not replace selected B');
+  assert.equal(lookup.elements.r_tr.textContent, 'студенты онлайн', 'late A must not replace B translation');
+});
+
+test('dictionary lookup drops cross-owner continuations and invalidates a mismatched response owner', async () => {
+  const oldOwner = deferred();
+  const lookup = createDictionaryLookup({ generate: () => oldOwner.promise });
+  const pending = lookup.lookup('many');
+  lookup.setOwner('owner-b', 4, { notify: true });
+  oldOwner.resolve({ ipa: '/many/', tr: 'old owner result', responseOwner: 'owner-a' });
+  await pending;
+  assert.equal(lookup.elements.r_pop.open, false, 'authority reset closes and invalidates the old request');
+  assert.notEqual(lookup.elements.r_pop.dataset.lookupState, 'online');
+  assert.equal(lookup.selection(), null);
+
+  const mismatch = deferred();
+  const current = createDictionaryLookup({ owner: 'owner-b', ownerGeneration: 4, generate: () => mismatch.promise });
+  const mismatchedRequest = current.lookup('students');
+  mismatch.resolve({ ipa: '/students/', tr: 'wrong owner result', responseOwner: 'owner-a' });
+  await mismatchedRequest;
+  assert.deepEqual(current.invalidations, [{ owner: 'owner-b', ownerGeneration: 4 }]);
+  assert.equal(current.elements.r_pop.open, false);
+  assert.notEqual(current.elements.r_pop.dataset.lookupState, 'online');
+  assert.equal(current.selection(), null);
+});
+
+test('a stale authority reset cannot close the current owner dictionary lookup', async () => {
+  const response = deferred();
+  const lookup = createDictionaryLookup({ owner: 'owner-b', ownerGeneration: 4, generate: () => response.promise });
+  const pending = lookup.lookup('students');
+  lookup.notifyAuthorityReset({ owner: 'owner-a', ownerGeneration: 0 });
+  response.resolve({ ipa: '/students/', tr: 'студенты B', responseOwner: 'owner-b' });
+  await pending;
+
+  assert.equal(lookup.elements.r_pop.open, true);
+  assert.equal(lookup.elements.r_pop.dataset.lookupState, 'online');
+  assert.equal(lookup.elements.r_tr.textContent, 'студенты B');
+  assert.deepEqual(lookup.selection(), {
+    word: 'students', context: '', owner: 'owner-b', ownerGeneration: 4,
+  });
+});
+
+test('a replaced dictionary lookup still invalidates its captured authority after a deferred 401',
+  async () => {
+    const many = deferred();
+    const students = deferred();
+    const lookup = createDictionaryLookup({
+      generate: (_operation, payload) => (payload.word === 'many' ? many.promise : students.promise),
+    });
+    const stale = lookup.lookup('many');
+    lookup.close();
+    const replacement = lookup.lookup('students');
+
+    many.reject(Object.assign(new Error('stale owner revoked'), {
+      code: 'SESSION_REVOKED', status: 401,
+    }));
+    await stale;
+    assert.deepEqual(lookup.invalidations, [{ owner: 'owner-a', ownerGeneration: 0 }]);
+    assert.equal(lookup.elements.r_pop.open, false,
+      'revoking the captured incarnation must also close its replacement lookup');
+    assert.equal(lookup.selection(), null);
+    assert.doesNotMatch(lookup.elements.r_tr.textContent, /офлайн-словарь/u);
+
+    students.resolve({ ipa: '/students/', tr: 'stale replacement', responseOwner: 'owner-a' });
+    await replacement;
+    assert.equal(lookup.elements.r_pop.open, false);
+    assert.equal(lookup.selection(), null);
+  });
+
+test('a stale owner authority failure cannot close the replacement owner dictionary lookup',
+  async () => {
+    const ownerA = deferred();
+    const ownerB = deferred();
+    const lookup = createDictionaryLookup({
+      generate: (_operation, payload) => (payload.word === 'many' ? ownerA.promise : ownerB.promise),
+    });
+    const stale = lookup.lookup('many');
+    lookup.setOwner('owner-b', 4, { notify: true });
+    const current = lookup.lookup('students');
+
+    ownerA.reject(Object.assign(new Error('old owner revoked'), {
+      code: 'SESSION_REVOKED', status: 401,
+    }));
+    await stale;
+    assert.deepEqual(lookup.invalidations, [{ owner: 'owner-a', ownerGeneration: 0 }]);
+    assert.equal(lookup.elements.r_pop.open, true,
+      'an exact owner-A invalidation must not close owner B');
+    assert.equal(lookup.elements.r_pop.dataset.lookupState, 'loading');
+    assert.equal(lookup.elements.r_word.textContent, 'students');
+    assert.equal(lookup.selection(), null);
+    assert.doesNotMatch(lookup.elements.r_tr.textContent, /офлайн-словарь/u);
+
+    ownerB.resolve({ ipa: '/students/', tr: 'студенты B', responseOwner: 'owner-b' });
+    await current;
+    assert.equal(lookup.elements.r_pop.open, true);
+    assert.equal(lookup.elements.r_pop.dataset.lookupState, 'online');
+    assert.equal(lookup.elements.r_tr.textContent, 'студенты B');
+    assert.deepEqual(lookup.selection(), {
+      word: 'students', context: '', owner: 'owner-b', ownerGeneration: 4,
+    });
+  });
+
+test('dictionary lookup maps typed failures to bounded learner copy through the API message seam', async () => {
+  const cases = [
+    ['revoked code', { code: 'SESSION_REVOKED', status: 409 }, 'Сессия истекла. Войдите снова.'],
+    ['privacy', { code: 'PRIVACY_CONSENT_REQUIRED', status: 403 }, 'Подтвердите согласие на обработку данных в профиле.'],
+    ['subscription code', { code: 'SUBSCRIPTION_REQUIRED', status: 402 }, 'Для онлайн-перевода нужен активный доступ.'],
+    ['403 status', { code: 'REQUEST_FAILED', status: 403 }, 'Для онлайн-перевода нужен активный доступ.'],
+    ['rate code', { code: 'RATE_LIMITED', status: 400 }, 'Лимит запросов исчерпан. Попробуйте позже.'],
+    ['429 status', { code: 'REQUEST_FAILED', status: 429 }, 'Лимит запросов исчерпан. Попробуйте позже.'],
+    ['budget', { code: 'AI_BUDGET_EXHAUSTED', status: 503 }, 'Дневной лимит онлайн-переводов исчерпан. Попробуйте завтра.'],
+    ['not configured', { code: 'AI_NOT_CONFIGURED', status: 503 }, 'Онлайн-перевод пока не настроен. Попробуйте позже.'],
+    ['invalid response', { code: 'AI_RESPONSE_INVALID', status: 502 }, 'Не удалось получить корректный перевод. Попробуйте ещё раз.'],
+    ['provider unavailable', { code: 'AI_PROVIDER_UNAVAILABLE', status: 503 }, 'Онлайн-перевод временно недоступен. Попробуйте позже.'],
+    ['validation code', { code: 'VALIDATION_ERROR', status: 422 }, 'Не удалось распознать слово для перевода. Выберите другое слово.'],
+    ['400 status', { code: 'REQUEST_FAILED', status: 400 }, 'Не удалось распознать слово для перевода. Выберите другое слово.'],
+    ['network code', { code: 'NETWORK_ERROR', status: 418 }, 'Нет подключения к интернету. Проверьте сеть и повторите попытку.'],
+    ['zero status', { code: 'REQUEST_FAILED', status: 0 }, 'Нет подключения к интернету. Проверьте сеть и повторите попытку.'],
+    ['other 5xx', { code: 'INTERNAL_ERROR', status: 500 }, 'Сервис онлайн-перевода временно недоступен. Попробуйте позже.'],
+    ['unexpected failure', { code: 'REQUEST_FAILED', status: 418 }, 'Не удалось получить перевод. Попробуйте ещё раз.', 'Включи VPN/ключ провайдера.'],
+  ];
+
+  for (const [label, details, expected, rawMessage = 'raw technical failure'] of cases) {
+    const lookup = createDictionaryLookup({
+      generate: async () => { throw Object.assign(new Error(rawMessage), details); },
+    });
+    await lookup.lookup('unlisted');
+    const message = lookup.elements.r_tr.textContent;
+    assert.equal(lookup.elements.r_pop.dataset.lookupState, 'error', label);
+    assert.equal(message, expected, label);
+    assert.ok(message.length <= 120, `${label}: copy must remain bounded`);
+    assert.doesNotMatch(message, /vpn|ключ(?:\s|[.!?,]|$)|провайдер/iu,
+      `${label}: learner copy must not request operator setup`);
+    assert.deepEqual(lookup.messageContexts, ['dictionary'], `${label}: use the shared API message seam`);
+  }
 });
 
 test('debounced word mastery is bound to one exact owner incarnation and response owner', async () => {
@@ -1709,67 +2000,169 @@ test('local prototype previews stay in source and never enter the production bui
   );
 });
 
-function createWorker({ cached = {}, networkFails = true, networkResponses = {} } = {}) {
+function createWorker({
+  cached = {}, cacheBuckets = null, networkFails = true, networkResponses = {},
+  activePredecessor = false, windowClients = [], manualTimers = false,
+  releaseVersion = 'source-v1', sharedStores = null, predecessorCompatibility = null,
+  cacheKeysFailure = null,
+} = {}) {
   const listeners = new Map();
-  const store = new Map(Object.entries(cached));
+  const currentCacheName = `easyboost-static-${releaseVersion}`;
+  const stores = sharedStores || new Map();
+  for (const [name, entries] of Object.entries(cacheBuckets || {})) {
+    stores.set(name, new Map(Object.entries(entries)));
+  }
+  if (!stores.has(currentCacheName)) stores.set(currentCacheName, new Map(Object.entries(cached)));
+  else for (const [key, value] of Object.entries(cached)) stores.get(currentCacheName).set(key, value);
+  const store = stores.get(currentCacheName);
   const keyOf = (request) => (typeof request === 'string' ? request : request.url);
-
-  const cache = {
-    addAll: async () => {},
-    put: async (request, response) => { store.set(keyOf(request), response); },
-    match: async (request) => store.get(keyOf(request)),
+  const matchStore = (target, request) => {
+    const key = keyOf(request);
+    if (target.has(key)) return target.get(key);
+    const url = new URL(key, ORIGIN);
+    return target.get(url.href) || target.get(`${url.pathname}${url.search}`) || target.get(url.pathname);
+  };
+  const cacheFor = (name) => {
+    if (!stores.has(name)) stores.set(name, new Map());
+    const target = stores.get(name);
+    return {
+      addAll: async (requests) => {
+        for (const request of requests) target.set(keyOf(request), new Response('installed'));
+      },
+      put: async (request, response) => { target.set(keyOf(request), response); },
+      match: async (request) => {
+        const value = matchStore(target, request);
+        return value?.clone ? value.clone() : value;
+      },
+      keys: async () => {
+        if (cacheKeysFailure) await cacheKeysFailure({ name });
+        return [...target.keys()].map((key) => ({ url: new URL(key, ORIGIN).href }));
+      },
+    };
   };
   const caches = {
-    open: async () => cache,
-    keys: async () => ['easyboost-static-v17'],
-    delete: async () => true,
-    match: async (request) => store.get(keyOf(request)),
+    open: async (name) => cacheFor(name),
+    keys: async () => [...stores.keys()],
+    delete: async (name) => stores.delete(name),
+    match: async (request) => {
+      for (const target of stores.values()) {
+        const matched = matchStore(target, request);
+        if (matched) return matched;
+      }
+      return undefined;
+    },
   };
+  let skipWaitingCalls = 0;
+  const scheduledTimers = [];
   const self = {
     location: { origin: ORIGIN },
     addEventListener: (type, handler) => listeners.set(type, handler),
-    skipWaiting: async () => {},
-    clients: { claim: async () => {} },
+    skipWaiting: async () => { skipWaitingCalls += 1; },
+    registration: { active: activePredecessor ? {} : null },
+    clients: { claim: async () => {}, matchAll: async () => windowClients },
+    navigator: { locks: { request: async (_name, operation) => operation() } },
     caches,
   };
 
   const networkCalls = [];
+  function defaultNetworkResponse(request) {
+    const url = keyOf(request);
+    const isRoot = new URL(url, ORIGIN).pathname === '/';
+    const body = isRoot ? '<!doctype html><html data-aisy-app-shell="v1"><title>Aisy</title></html>' : 'network';
+    return {
+      ok: true,
+      status: 200,
+      url,
+      headers: new Headers({ 'Content-Type': isRoot ? 'text/html; charset=utf-8' : 'text/plain' }),
+      fromNetwork: true,
+      text: async () => body,
+      clone: () => defaultNetworkResponse(request),
+    };
+  }
   const sandbox = {
     self,
     caches,
     Headers,
+    Request: class WorkerRequest {
+      constructor(input, options = {}) {
+        if (typeof input === 'string') this.url = new URL(input, ORIGIN).href;
+        else Object.assign(this, input);
+        this.cache = options.cache;
+      }
+    },
     URL,
     Promise,
     Response,
+    setTimeout: manualTimers
+      ? (callback) => { scheduledTimers.push(callback); return scheduledTimers.length; }
+      : setTimeout,
+    clearTimeout: manualTimers ? () => {} : clearTimeout,
     async fetch(request) {
       networkCalls.push(keyOf(request));
       if (networkFails) throw new TypeError('Failed to fetch');
       const configured = networkResponses[keyOf(request)];
       if (configured) return configured.clone();
-      return { ok: true, status: 200, clone: () => ({ ok: true, fromNetwork: true }), fromNetwork: true };
+      return defaultNetworkResponse(request);
     },
   };
-  vm.runInNewContext(workerSource, sandbox);
-  return { listeners, store, networkCalls };
+  let evaluatedWorkerSource = workerSource.replace(
+    "const RELEASE_VERSION='source-v1';", `const RELEASE_VERSION='${releaseVersion}';`,
+  );
+  if (predecessorCompatibility) {
+    evaluatedWorkerSource = evaluatedWorkerSource.replace(
+      'const PREDECESSOR_COMPATIBILITY={baseCommit:null,cacheName:null,contentSha256:null,files:[]};',
+      `const PREDECESSOR_COMPATIBILITY=${JSON.stringify(predecessorCompatibility)};`,
+    );
+  }
+  vm.runInNewContext(evaluatedWorkerSource, sandbox);
+  return {
+    listeners, store, stores, networkCalls,
+    runNextTimer() {
+      const callback = scheduledTimers.shift();
+      if (!callback) return false;
+      callback();
+      return true;
+    },
+    get skipWaitingCalls() { return skipWaitingCalls; },
+  };
 }
 
 function dispatchFetch(worker, request) {
   let responded;
   let handled = false;
+  let dispatching = true;
   const waits = [];
+  const lateWaits = [];
   const event = {
     request,
     respondWith: (value) => { handled = true; responded = value; },
-    waitUntil: (value) => { waits.push(Promise.resolve(value)); },
+    waitUntil: (value) => {
+      waits.push(Promise.resolve(value));
+      if (!dispatching) lateWaits.push(value);
+    },
   };
   worker.listeners.get('fetch')(event);
-  return { handled, responded, waits };
+  dispatching = false;
+  return { handled, responded, waits, lateWaits };
 }
 
-test('the service worker never answers an online-only API call from its cache', async () => {
+function dispatchWorkerMessage(worker, data, source) {
+  const waits = [];
+  worker.listeners.get('message')({
+    data,
+    source,
+    waitUntil: (value) => waits.push(Promise.resolve(value)),
+  });
+  return waits;
+}
+
+test('the service worker bypasses private/control paths case-insensitively without overmatching siblings', async () => {
   /* A cache deliberately poisoned with a stale answer for each online-only endpoint. */
   const staleVerdict = { ok: true, status: 200, fromCache: true };
   const apiPaths = [
+    '/api',
+    '/API',
+    '/aPi',
     '/api/v1/ai/evaluate-writing',
     '/api/v1/ai/evaluate-speaking',
     '/api/v1/ai/generate-content',
@@ -1779,6 +2172,12 @@ test('the service worker never answers an online-only API call from its cache', 
     '/api/v1/tg/check?code=123456',
     '/api/v1/progress/modules',
     '/api/v1/me',
+    '/API/v1/me',
+    '/internal',
+    '/INTERNAL',
+    '/InTeRnAl',
+    '/internal/metrics',
+    '/INTERNAL/metrics',
   ];
   const cached = Object.fromEntries(apiPaths.map((path) => [ORIGIN + path, staleVerdict]));
   const worker = createWorker({ cached, networkFails: true });
@@ -1791,6 +2190,372 @@ test('the service worker never answers an online-only API call from its cache', 
       `service worker перехватил ${path}: закэшированный ответ API нельзя выдавать за свежий`,
     );
   }
+
+  for (const path of ['/apix', '/apiary/status', '/internality/status']) {
+    const result = dispatchFetch(createWorker({ networkFails: false }), {
+      method: 'GET', url: ORIGIN + path, mode: 'cors',
+    });
+    assert.equal(result.handled, true, `${path} is public sibling path, not the private route namespace`);
+    assert.equal((await result.responded).fromNetwork, true);
+  }
+});
+
+test('offline fallbacks read only the current Aisy release cache', async () => {
+  const currentRoot = { ok: true, status: 200, generation: 'current-root' };
+  const oldRoot = { ok: true, status: 200, generation: 'old-root' };
+  const foreignRoot = { ok: true, status: 200, generation: 'foreign-root' };
+  const lazyUrl = `${ORIGIN}/assets/writing-current.js`;
+  const currentLazy = { ok: true, status: 200, generation: 'current-lazy' };
+  const oldLazy = { ok: true, status: 200, generation: 'old-lazy' };
+  const worker = createWorker({
+    networkFails: true,
+    cacheBuckets: {
+      'easyboost-static-old-release': { '/': oldRoot, [lazyUrl]: oldLazy },
+      'foreign-pwa-cache': { '/': foreignRoot, [lazyUrl]: foreignRoot },
+      'easyboost-static-source-v1': { '/': currentRoot, [lazyUrl]: currentLazy },
+    },
+  });
+
+  const navigation = dispatchFetch(worker, { method: 'GET', url: `${ORIGIN}/`, mode: 'navigate' });
+  assert.equal(await navigation.responded, currentRoot,
+    'offline root must never boot an old or foreign cached document');
+  const lazy = dispatchFetch(worker, { method: 'GET', url: lazyUrl, mode: 'cors' });
+  assert.equal(await lazy.responded, currentLazy,
+    'generic offline fallback must never execute an old or foreign lazy chunk');
+});
+
+test('PWA consent markers contain only a release token, never the client URL', async () => {
+  const client = {
+    type: 'window', id: 'learner-tab-with-private-query',
+    url: `${ORIGIN}/?login_code=secret-sentinel#private-fragment`,
+    postMessage() {},
+  };
+  const worker = createWorker({ activePredecessor: true, windowClients: [client] });
+  await Promise.all(dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, client));
+  const stateCache = worker.stores.get('easyboost-pwa-client-state-v1-easyboost-static-source-v1');
+  const marker = [...stateCache.entries()].find(([key]) => (
+    new URL(key, ORIGIN).pathname.startsWith('/__easyboost/pwa-consent-v1/')
+  ));
+  assert.ok(marker, 'the exact consenting client must have a state marker');
+  const body = await marker[1].text();
+  assert.equal(body, 'source-v1');
+  assert.doesNotMatch(body, /login_code|secret-sentinel|private-fragment|https?:/u);
+});
+
+test('closing the last nonconsenting task tab automatically completes update quorum', async () => {
+  const messages = [];
+  const consenting = {
+    type: 'window', id: 'consenting-tab', url: `${ORIGIN}/`,
+    postMessage(message) { messages.push(message); },
+  };
+  const openTask = {
+    type: 'window', id: 'open-task-tab', url: `${ORIGIN}/?screen=writing`, postMessage() {},
+  };
+  const clients = [consenting, openTask];
+  const worker = createWorker({
+    activePredecessor: true, windowClients: clients, manualTimers: true,
+  });
+  const waits = dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, consenting);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(worker.skipWaitingCalls, 0, 'an open nonconsenting task tab must keep the worker waiting');
+  assert.deepEqual(messages.map((message) => message.type), ['WAITING_FOR_OTHER_TABS']);
+
+  clients.splice(clients.indexOf(openTask), 1);
+  assert.equal(worker.runNextTimer(), true, 'the waiting worker must schedule a bounded quorum recheck');
+  await Promise.all(waits);
+  assert.equal(worker.skipWaitingCalls, 1,
+    'closing B must activate without a second click from the already-consenting A');
+});
+
+test('passive privacy and offline documents do not deadlock task-tab update consent', async () => {
+  const consenting = { type: 'window', id: 'task-tab', url: `${ORIGIN}/`, postMessage() {} };
+  const passivePrivacy = {
+    type: 'window', id: 'privacy-tab', url: `${ORIGIN}/privacy.html?from=profile#retention`, postMessage() {},
+  };
+  const passiveOffline = {
+    type: 'window', id: 'offline-tab', url: `${ORIGIN}/offline.html`, postMessage() {},
+  };
+  const worker = createWorker({
+    activePredecessor: true,
+    windowClients: [consenting, passivePrivacy, passiveOffline],
+  });
+  await Promise.all(dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, consenting));
+  assert.equal(worker.skipWaitingCalls, 1,
+    'passive documents have no task state and must be excluded from the consent quorum');
+});
+
+test('health, API, internal and static windows never enter learner update quorum', async () => {
+  const learner = { type: 'window', id: 'learner-tab', url: `${ORIGIN}/?screen=writing`, postMessage() {} };
+  const passiveWindows = [
+    { type: 'window', id: 'health-tab', url: `${ORIGIN}/health/live`, postMessage() {} },
+    { type: 'window', id: 'api-tab', url: `${ORIGIN}/api/v1/me`, postMessage() {} },
+    { type: 'window', id: 'internal-tab', url: `${ORIGIN}/internal/metrics`, postMessage() {} },
+    { type: 'window', id: 'static-tab', url: `${ORIGIN}/assets/logo.svg`, postMessage() {} },
+  ];
+  const worker = createWorker({
+    activePredecessor: true,
+    windowClients: [learner, ...passiveWindows],
+  });
+
+  await Promise.all(dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, learner));
+  assert.equal(worker.skipWaitingCalls, 1,
+    'only an actual learner-shell window may block or satisfy update consent');
+});
+
+test('legacy index and an explicit learner-shell deep-link handshake remain quorum participants', async () => {
+  const root = { type: 'window', id: 'root-tab', url: `${ORIGIN}/?screen=writing`, postMessage() {} };
+  const legacyIndex = {
+    type: 'window', id: 'index-tab', url: `${ORIGIN}/index.html?screen=reading`, postMessage() {},
+  };
+  const deepLink = {
+    type: 'window', id: 'deep-tab', url: `${ORIGIN}/learn/writing/37?screen=writing`, postMessage() {},
+  };
+  const worker = createWorker({
+    activePredecessor: true,
+    windowClients: [root, legacyIndex, deepLink],
+    manualTimers: true,
+  });
+
+  await Promise.all(dispatchWorkerMessage(worker, { type: 'REGISTER_LEARNER_SHELL_CLIENT' }, deepLink));
+  const rootWaits = dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, root);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(worker.skipWaitingCalls, 0, 'legacy /index.html must remain a nonconsenting participant');
+
+  const indexWaits = dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, legacyIndex);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(worker.skipWaitingCalls, 0, 'an explicitly handshaken app deep link must remain a participant');
+
+  await Promise.all(dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, deepLink));
+  assert.equal(worker.skipWaitingCalls, 1, 'activation begins only after every admitted learner shell consents');
+  assert.equal(worker.runNextTimer(), true);
+  await Promise.all([...rootWaits, ...indexWaits]);
+});
+
+test('a current candidate can renew the bounded quorum watch without another user click', async () => {
+  const consenting = { type: 'window', id: 'candidate-tab', url: `${ORIGIN}/`, postMessage() {} };
+  const openTask = { type: 'window', id: 'other-task', url: `${ORIGIN}/?screen=reading`, postMessage() {} };
+  const clients = [consenting, openTask];
+  const worker = createWorker({
+    activePredecessor: true, windowClients: clients, manualTimers: true,
+  });
+  const initialWatch = dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, consenting);
+  await new Promise((resolve) => setImmediate(resolve));
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    assert.equal(worker.runNextTimer(), true, `bounded recheck ${attempt + 1} was not scheduled`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await Promise.all(initialWatch);
+  assert.equal(worker.skipWaitingCalls, 0);
+
+  clients.splice(clients.indexOf(openTask), 1);
+  const renewed = dispatchWorkerMessage(worker, { type: 'RECHECK_UPDATE_CONSENT' }, consenting);
+  await Promise.all(renewed);
+  assert.equal(worker.skipWaitingCalls, 1,
+    'candidate heartbeat must renew quorum evaluation after the worker-side watch bound');
+});
+
+test('a heartbeat during an active quorum watch extends coverage past the original bound', async () => {
+  const consenting = { type: 'window', id: 'candidate-tab', url: `${ORIGIN}/`, postMessage() {} };
+  const openTask = { type: 'window', id: 'other-task', url: `${ORIGIN}/?screen=reading`, postMessage() {} };
+  const clients = [consenting, openTask];
+  const worker = createWorker({
+    activePredecessor: true, windowClients: clients, manualTimers: true,
+  });
+  const initialWatch = dispatchWorkerMessage(worker, { type: 'SKIP_WAITING' }, consenting);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  for (let attempt = 0; attempt < 220; attempt += 1) {
+    assert.equal(worker.runNextTimer(), true, `initial recheck ${attempt + 1} was not scheduled`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const heartbeat = dispatchWorkerMessage(worker, { type: 'RECHECK_UPDATE_CONSENT' }, consenting);
+  await new Promise((resolve) => setImmediate(resolve));
+  for (let attempt = 220; attempt < 240; attempt += 1) {
+    assert.equal(worker.runNextTimer(), true, `final initial recheck ${attempt + 1} was not scheduled`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await Promise.all(initialWatch);
+  assert.equal(worker.skipWaitingCalls, 0,
+    'the peer remains open when the original 60-second watch reaches its bound');
+
+  clients.splice(clients.indexOf(openTask), 1);
+  assert.equal(worker.runNextTimer(), true,
+    'the t≈55 heartbeat must queue a fresh bounded watch before the original watch expires');
+  await Promise.all(heartbeat);
+  assert.equal(worker.skipWaitingCalls, 1,
+    'a peer closing just after t=60 must activate before the page heartbeat at t=110');
+});
+
+test('a failed activation does not durably complete the release or suppress same-release consent retry',
+  async () => {
+    const sharedStores = new Map();
+    const predecessorCompatibility = {
+      schemaVersion: 'aisy-pwa-predecessor-compat-v1',
+      baseCommit: 'a'.repeat(40),
+      cacheName: 'easyboost-static-release-a',
+      contentSha256: 'b'.repeat(64),
+      files: [],
+    };
+    sharedStores.set(predecessorCompatibility.cacheName, new Map());
+    const stateName = 'easyboost-pwa-client-state-v1-easyboost-static-release-b';
+    const activationClient = {
+      type: 'window', id: 'activation-client', url: `${ORIGIN}/`, postMessage() {},
+    };
+    const failedWorker = createWorker({
+      activePredecessor: true, releaseVersion: 'release-b', sharedStores,
+      windowClients: [activationClient], networkFails: false, predecessorCompatibility,
+      cacheKeysFailure({ name }) {
+        const planPersisted = [...(sharedStores.get(stateName)?.keys() || [])].some((key) => (
+          new URL(key, ORIGIN).pathname === '/__easyboost/pwa-retirement-plan-v1'
+        ));
+        if (name === 'easyboost-ege-mock-install-v1-easyboost-static-release-b' && planPersisted) {
+          throw new Error('synthetic install-record read failure');
+        }
+      },
+    });
+    let install;
+    failedWorker.listeners.get('install')({ waitUntil(value) { install = value; } });
+    await install;
+    let activation;
+    failedWorker.listeners.get('activate')({ waitUntil(value) { activation = value; } });
+    await assert.rejects(activation, /synthetic install-record read failure/u);
+
+    const state = sharedStores.get(stateName);
+    const statePaths = [...state.keys()].map((key) => new URL(key, ORIGIN).pathname);
+    assert.equal(statePaths.includes('/__easyboost/pwa-retirement-plan-v1'), true,
+      'failure injection must occur after durable predecessor-plan persistence');
+    assert.equal(statePaths.includes('/__easyboost/pwa-activated-v1'), false,
+      'a rejected activation must not publish durable completion');
+
+    const retryClient = { type: 'window', id: 'retry-client', url: `${ORIGIN}/`, postMessage() {} };
+    const retryWorker = createWorker({
+      activePredecessor: true, releaseVersion: 'release-b', sharedStores,
+      windowClients: [retryClient], predecessorCompatibility,
+    });
+    await Promise.all(dispatchWorkerMessage(retryWorker, { type: 'SKIP_WAITING' }, retryClient));
+    assert.equal(retryWorker.skipWaitingCalls, 1,
+      'the explicit same-release consent retry must still request activation');
+  });
+
+test('a durable B retirement authority survives restart and cannot capture C or colliding cache names',
+  async () => {
+    const sharedStores = new Map();
+    const exactPredecessor = 'easyboost-static-release-a';
+    const predecessorCompatibility = {
+      schemaVersion: 'aisy-pwa-predecessor-compat-v1',
+      baseCommit: 'a'.repeat(40),
+      cacheName: exactPredecessor,
+      contentSha256: 'b'.repeat(64),
+      files: [],
+    };
+    const futureCaches = [
+      'easyboost-static-release-c',
+      'easyboost-ege-mock-exec-v1-easyboost-static-release-c-futuregraph',
+      'easyboost-ege-mock-install-v1-easyboost-static-release-c',
+      'easyboost-pwa-client-state-v1-easyboost-static-release-c',
+    ];
+    const outsideAuthority = [
+      'easyboost-static-release-a-prefix-collision',
+      'easyboost-static-unknown-stale',
+      'foreign-sentinel-cache-v1',
+      'easyboost-ege-mock-assets-v1-form@future',
+    ];
+    for (const name of [exactPredecessor, ...futureCaches, ...outsideAuthority]) {
+      sharedStores.set(name, new Map());
+    }
+
+    const bClient = { type: 'window', id: 'b-tab', url: `${ORIGIN}/`, postMessage() {} };
+    const workerB = createWorker({
+      activePredecessor: true, releaseVersion: 'release-b', sharedStores,
+      windowClients: [bClient], networkFails: false, predecessorCompatibility,
+    });
+    let bInstall;
+    workerB.listeners.get('install')({ waitUntil(value) { bInstall = value; } });
+    await bInstall;
+
+    let bActivation;
+    workerB.listeners.get('activate')({ waitUntil(value) { bActivation = value; } });
+    await bActivation;
+    const bStateName = 'easyboost-pwa-client-state-v1-easyboost-static-release-b';
+    const bState = sharedStores.get(bStateName);
+    const retirementPlanResponse = [...bState.entries()].find(([key]) => (
+      new URL(key, ORIGIN).pathname === '/__easyboost/pwa-retirement-plan-v1'
+    ))?.[1];
+    const retirementPlanKey = [...bState.keys()].find((key) => (
+      new URL(key, ORIGIN).pathname === '/__easyboost/pwa-retirement-plan-v1'
+    ));
+    assert.ok(retirementPlanResponse && retirementPlanKey,
+      'B activation must atomically persist its bounded predecessor authority');
+    const retirementPlan = JSON.parse(await retirementPlanResponse.clone().text());
+    assert.deepEqual(retirementPlan, {
+      schemaVersion: 'aisy-pwa-retirement-plan-v2',
+      releaseVersion: 'release-b',
+      predecessor: {
+        schemaVersion: predecessorCompatibility.schemaVersion,
+        baseCommit: predecessorCompatibility.baseCommit,
+        contentSha256: predecessorCompatibility.contentSha256,
+        caches: [exactPredecessor],
+      },
+    }, 'the persisted value must be exact immutable predecessor identity, never a cache-key snapshot');
+
+    const storesBeforeTamper = [...sharedStores.keys()].sort();
+    bState.set(retirementPlanKey, new Response(JSON.stringify({
+      ...retirementPlan,
+      predecessor: { ...retirementPlan.predecessor, caches: [exactPredecessor, futureCaches[0]] },
+      padding: 'x'.repeat(2048),
+    })));
+    const restartedTamperedB = createWorker({
+      activePredecessor: true, releaseVersion: 'release-b', sharedStores,
+      windowClients: [bClient], predecessorCompatibility,
+    });
+    await Promise.all(dispatchWorkerMessage(
+      restartedTamperedB, { type: 'CURRENT_CLIENT_READY' }, bClient,
+    ));
+    assert.deepEqual([...sharedStores.keys()].sort(), storesBeforeTamper,
+      'oversized/tampered authority must fail safe without deleting any cache');
+
+    bState.delete(retirementPlanKey);
+    const restartedMissingB = createWorker({
+      activePredecessor: true, releaseVersion: 'release-b', sharedStores,
+      windowClients: [bClient], predecessorCompatibility,
+    });
+    await Promise.all(dispatchWorkerMessage(
+      restartedMissingB, { type: 'CURRENT_CLIENT_READY' }, bClient,
+    ));
+    assert.equal(sharedStores.has(exactPredecessor), true,
+      'a missing durable authority must never trigger a new dynamic cache scan');
+
+    bState.set(retirementPlanKey, new Response(JSON.stringify(retirementPlan)));
+    const restartedValidB = createWorker({
+      activePredecessor: true, releaseVersion: 'release-b', sharedStores,
+      windowClients: [bClient], predecessorCompatibility,
+    });
+    await Promise.all(dispatchWorkerMessage(
+      restartedValidB, { type: 'CURRENT_CLIENT_READY' }, bClient,
+    ));
+    assert.equal(sharedStores.has(exactPredecessor), false, 'the exact A authority must retire');
+    for (const name of [...futureCaches, ...outsideAuthority]) {
+      assert.equal(sharedStores.has(name), true, `${name} is outside exact A authority`);
+    }
+    const currentB = [...sharedStores.keys()].filter((name) => name.includes('release-b'));
+    assert.ok(currentB.length >= 4, 'B must retain static, release-qualified EGE and client-state caches');
+    for (const name of currentB) assert.equal(sharedStores.has(name), true, `${name} is current B state`);
+  });
+
+test('generic runtime caching refuses an unforeseen no-store response', async () => {
+  const url = `${ORIGIN}/future-private/bootstrap`;
+  const response = new Response('personal payload', {
+    status: 200,
+    headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+  });
+  const worker = createWorker({ networkFails: false, networkResponses: { [url]: response } });
+
+  const request = dispatchFetch(worker, { method: 'GET', url, mode: 'cors' });
+  assert.equal((await request.responded).status, 200);
+  await Promise.all(request.waits);
+  assert.equal(request.lateWaits.length, 0, 'runtime cache lifetime must be registered during fetch dispatch');
+  assert.equal(worker.store.has(url), false,
+    'Cache API defense-in-depth must reject a successful response carrying Cache-Control: no-store');
 });
 
 test('the app shell still comes from the cache offline, so the previous test is not vacuous', async () => {
@@ -1825,12 +2590,27 @@ test('the service-worker closure preserves lazy top-level routes without moving 
   const shell = workerSource.match(/const APP_SHELL=(\[[^\]]*\]);/u)?.[1] || '';
   for (const entry of [
     '/asya-assistant.js', '/privacy.js', '/adaptive-session-runtime.js',
+    '/screens/grammar.js', '/grammar-catalog.js', '/grammar-catalog-content.js',
     '/screens/practice.js', '/screens/ege-hub.js', '/screens/progress.js', '/screens/profile.js',
   ]) assert.ok(shell.includes(`'${entry}'`), `${entry} must be in the measurable offline closure`);
   for (const entry of [
     '/voice-tutor.js', '/realtime-transport.js', '/screens/reading.js', '/screens/listening.js',
     '/screens/writing.js', '/screens/speaking.js', '/screens/ege-mock.js',
   ]) assert.equal(shell.includes(`'${entry}'`), false, `${entry} must stay runtime-cached after explicit use`);
+});
+
+test('stable app-shell paths bypass the browser HTTP cache during install and refresh', () => {
+  assert.match(workerSource,
+    /cache\.addAll\(APP_SHELL\.map\(path=>new Request\(path,\{cache:'reload'\}\)\)\)/u);
+  assert.match(workerSource,
+    /function freshShellRequest\(request,pathname\)\{return APP_SHELL\.includes\(pathname\)\?new Request\(request,\{cache:'reload'\}\):request\}/u);
+  assert.match(workerSource,
+    /cache\.addAll\(EGE_MOCK_EXEC_PATHS\.map\(path=>new Request\(path,\{cache:'reload'\}\)\)\)/u,
+    'update compatibility must bypass stale HTTP entries for candidate EGE executables too');
+  assert.match(workerSource,
+    /async function fetchEgeMockExecutable[\s\S]*?fetch\(new Request\(request,\{cache:'reload'\}\)\)/u);
+  assert.match(workerSource,
+    /async function fetchEgeMockForm[\s\S]*?fetch\(new Request\(request,\{cache:'reload'\}\)\)/u);
 });
 
 test('a loaded listening catalog joins the runtime cache and remains available offline', async () => {
@@ -1879,9 +2659,24 @@ test('a successful navigation refreshes the cached shell for the next offline st
 
   const navigation = dispatchFetch(worker, { method: 'GET', url: `${ORIGIN}/`, mode: 'navigate' });
   assert.equal((await navigation.responded).fromNetwork, true);
-  await new Promise((resolve) => setImmediate(resolve));
+  await Promise.all(navigation.waits);
+  assert.equal(navigation.lateWaits.length, 0, 'root refresh lifetime must be registered during fetch dispatch');
 
   assert.equal(worker.store.get('/').fromNetwork, true, 'следующий офлайн-запуск должен получить свежую разметку');
+});
+
+test('a non-root navigation cannot replace the cached root app shell', async () => {
+  const rootShell = { ok: true, status: 200, rootShell: true };
+  const worker = createWorker({ cached: { '/': rootShell }, networkFails: false });
+
+  const privacy = dispatchFetch(worker, {
+    method: 'GET', url: `${ORIGIN}/privacy.html`, mode: 'navigate',
+  });
+  assert.equal((await privacy.responded).fromNetwork, true);
+  await Promise.all(privacy.waits);
+
+  assert.equal(worker.store.get('/'), rootShell,
+    'privacy/static navigation must not poison the root app-shell cache key');
 });
 
 test('a ranged listening MP3 request caches the full asset and replays ranges offline', async () => {
@@ -1901,8 +2696,8 @@ test('a ranged listening MP3 request caches the full asset and replays ranges of
     method: 'GET', url, mode: 'cors', headers: new Headers({ Range: 'bytes=4-11' }),
   });
   const firstResponse = await first.responded;
-  await new Promise((resolve) => setImmediate(resolve));
   await Promise.all(first.waits);
+  assert.equal(first.lateWaits.length, 0, 'MP3 cache lifetime must be registered during fetch dispatch');
   assert.equal(firstResponse.status, 206);
   assert.deepEqual(Array.from(new Uint8Array(await firstResponse.arrayBuffer())), Array.from(bytes.slice(4, 12)));
   assert.equal(online.store.get(url).status, 200, 'the cache must contain a complete reusable MP3');

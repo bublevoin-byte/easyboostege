@@ -28,13 +28,26 @@
 1. Составить инвентарь только имён: `JWT_SECRET`, `TELEGRAM_BOT_TOKEN`, `XAI_API_KEY`, `GROQ_API_KEY`, `POSTGRES_PASSWORD`, `MONITORING_TOKEN` и ранее опубликованный frontend AI key. Значения не копировать в issue, shell history, CI log и evidence.
 2. Ротировать по одному. Создать новый provider key, не отключая старый; обновить только secret storage нужной среды; перезапустить только app.
 3. Для PostgreSQL в одном окне обновить пароль роли и `DATABASE_URL`; до этого сделать backup. Ни одна команда не должна печатать connection string.
-4. Проверить среду без вывода env:
+4. Взять exact application image ID из owner-approved release-записи и проверить среду без вывода env:
 
    ```bash
-   docker compose -f compose.production.yml up -d app
-   curl --fail http://127.0.0.1:3000/health/live
-   curl --fail http://127.0.0.1:3000/health/ready
-   docker compose -f compose.production.yml logs --tail=100 app
+   set -euo pipefail
+   : "${EASYBOOST_PRODUCTION_APP_IMAGE_ID:?set the owner-approved canonical app image ID}"
+   [[ "$EASYBOOST_PRODUCTION_APP_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+     echo 'Approved application image ID is not canonical' >&2
+     exit 1
+   }
+   export EASYBOOST_PRODUCTION_APP_IMAGE_ID
+   : "${EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID:?set the owner-approved PostgreSQL sha256 image ID}"
+   [[ "$EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+     echo 'PostgreSQL image ID must be a full canonical sha256 identity' >&2
+     exit 1
+   }
+   export EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID
+   sudo install -d -o root -g root -m 0750 /var/lib/easyboost/locks
+   sudo --preserve-env=EASYBOOST_PRODUCTION_APP_IMAGE_ID,EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID \
+     /usr/bin/node scripts/production-app-lifecycle.js restart
+   docker compose --project-name easyboost-production -f compose.production.yml logs --tail=100 app
    npm run security:secrets
    npm run security:history
    ```
@@ -52,7 +65,7 @@
 
 **Owner:** владелец репозитория и staging; GitHub environment reviewer, если настроен.
 
-**Prerequisites:** подписанный audit, чистое дерево, все локальные гейты зелёны, завершена staging-ротация, GitHub staging secrets настроены. Root отдельно проверил исходники deploy и rollback и установил неизменяемые копии `/usr/local/sbin/easyboost-staging-deploy` и `/usr/local/sbin/easyboost-staging-rollback`; release-копии из `/opt/easyboost-staging/scripts/` через `sudo` не запускаются. Владелец явно подтверждает, что push в `production-hardening` автоматически запустит staging deploy workflow.
+**Prerequisites:** подписанный audit, чистое дерево, все локальные гейты зелёны, завершена staging-ротация, GitHub staging secrets настроены. Root из отдельного exact audited checkout выполнил `sudo bash scripts/bootstrap-staging-release-host.sh` (при последующих helper-only upgrade — `sudo bash scripts/install-staging-release-helpers.sh`); installer проверил единую read-only content-addressed generation `immutable-archive-v4` и только затем атомарно заменил общий `current` pointer. Release-копии из `/opt/easyboost-staging/scripts/` через `sudo` не запускаются. Host — Linux с Node.js, Docker Compose, `/usr/bin/python3`, libc с экспортом `renameat2`, kernel/filesystem с рабочим `RENAME_NOREPLACE`, GNU coreutils (`timeout`, `fallocate`, `truncate`, `sha256sum`) и `flock`; installer выполняет fail-closed syscall probe на `/tmp` до установки. `postgres:17-alpine` заранее загружен только как seed, helper фиксирует его canonical SHA256 ID и передаёт Compose именно этот immutable ID, потому что pull запрещён. Владелец явно подтверждает, что push в `production-hardening` автоматически запустит staging deploy workflow.
 
 **Safe steps/commands:**
 
@@ -72,7 +85,33 @@ git push origin production-hardening
 В GitHub Actions проверить CI и `Deploy staging` для точного commit SHA. На staging выполнить:
 
 ```bash
+set -euo pipefail
 cd /opt/easyboost-staging
+mapfile -t staging_postgres_container_ids < <(
+  docker ps --no-trunc \
+    --filter 'label=com.docker.compose.project=easyboost-staging' \
+    --filter 'label=com.docker.compose.service=postgres' \
+    --filter 'label=com.docker.compose.oneoff=False' \
+    --format '{{.ID}}'
+)
+[[ "${#staging_postgres_container_ids[@]}" -eq 1 ]] || {
+  echo 'Expected exactly one running canonical staging PostgreSQL container' >&2
+  exit 1
+}
+staging_postgres_container_id="${staging_postgres_container_ids[0]}"
+staging_postgres_identity="$(docker inspect --format '{{.Id}}|{{.Image}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{index .Config.Labels "com.docker.compose.oneoff"}}|{{.State.Running}}' "$staging_postgres_container_id")"
+IFS='|' read -r staging_postgres_inspected_id EASYBOOST_STAGING_POSTGRES_IMAGE_ID \
+  staging_postgres_project staging_postgres_service staging_postgres_oneoff \
+  staging_postgres_running staging_postgres_extra <<< "$staging_postgres_identity"
+[[ "$staging_postgres_container_id" =~ ^[0-9a-f]{64}$ ]] || exit 1
+[[ "$staging_postgres_inspected_id" = "$staging_postgres_container_id" ]] || exit 1
+[[ "$staging_postgres_project" = "easyboost-staging" ]] || exit 1
+[[ "$staging_postgres_service" = "postgres" ]] || exit 1
+[[ "$staging_postgres_oneoff" = "False" ]] || exit 1
+[[ "$staging_postgres_running" = "true" ]] || exit 1
+[[ -z "$staging_postgres_extra" ]] || exit 1
+[[ "$EASYBOOST_STAGING_POSTGRES_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+export EASYBOOST_STAGING_POSTGRES_IMAGE_ID
 docker compose -f compose.staging.yml --env-file .env.staging ps
 curl --fail http://127.0.0.1:3001/health/ready
 curl --fail https://staging.useboost.ru/health/ready
@@ -83,20 +122,34 @@ cat .release-sha256
 
 **Success:** CI green for exact SHA, deploy job green, local and public staging readiness HTTP 200, archive checksum matches workflow, production containers/routes unchanged.
 
-**Stop/rollback:** dirty tree, SHA mismatch, failed CI, unexpected target or failed readiness stops the gate. Never force-push or rewrite the branch. If staging was changed and readiness failed:
+**Stop/rollback:** dirty tree, SHA mismatch, failed CI, unexpected target or failed readiness stops the gate. Never force-push or rewrite the branch. Сначала зафиксировать отдельные primary/recovery статусы helper, проверить `.release-sha256` и readiness. Если существует `.staging-recovery-required`, новый rollback запрещён: это fail-closed repair condition для ручного восстановления, а не разрешение угадывать target. Только после доказанного active state owner может явно выбрать сохранённый full SHA:
 
 ```bash
-sudo /usr/local/sbin/easyboost-staging-rollback
+set -euo pipefail
+sudo /usr/local/sbin/easyboost-staging-rollback \
+  <full-release-sha256> immutable-archive-v4 \
+  "$(sudo cat /usr/local/lib/easyboost-staging-release/current)"
 curl --fail https://staging.useboost.ru/health/ready
 ```
 
-Root-owned deploy и rollback helpers сначала распаковывают архив в отдельный временный каталог и
-проверяют его, затем полностью заменяют code tree. Из текущего staging-каталога сохраняются только
-`.env.staging`,
-`backups/` и `rollbacks/`; PostgreSQL остаётся в именованном Docker volume вне code tree. Архив,
-который сам содержит любой из этих защищённых runtime-путей, отклоняется до удаления текущего кода.
-Поэтому deploy и rollback всегда устанавливают точное дерево выбранного релиза без примеси файлов
-из другого релиза.
+Root-owned deploy helper принимает только versioned четырёхаргументный protocol
+`RELEASE_ARCHIVE EXPECTED_SHA256 immutable-archive-v4 BUNDLE_SHA256`; обновлённый workflow поэтому не может молча
+продолжить через старую двухаргументную helper-копию. Deploy и rollback копируют выбранный archive в
+private temporary file, сверяют checksum, canonical USTAR/member policy и фиксированные границы
+(256 MiB compressed, 4096 entries, 16 MiB per file, 384 MiB aggregate, 64 MiB disk headroom;
+60/90/600 s inspect/extract/build) и строят release image прямо из этих gzip bytes до изменения active
+tree. Затем stable local image запускается с `up --pull never --no-build`. Из текущего
+staging-каталога сохраняются только `.env.staging`, `backups/` и `rollbacks/`; PostgreSQL остаётся в
+именованном Docker volume вне code tree. Rollback принимает только explicit full SHA и exact
+`rollbacks/releases/release-<sha>.tar.gz` + одно-строчный sidecar; legacy mutable-tree archives fail
+closed. Общий lock охватывает build/tree/recovery. Release store ограничен четырьмя полными парами и
+1 GiB без auto-prune; orphan/temp/symlink и превышение границы останавливают операцию до Docker.
+
+Staging rollback возвращает только code tree, local image и marker. PostgreSQL schema/data никогда
+автоматически не откатываются и не down-migrate: миграции должны быть backward-compatible с сохранённым
+predecessor либо operator заранее готовит и отдельно подтверждает проверенный DB restore. Если checked
+recovery image/tree/marker/running identity/readiness не доказан, `.staging-recovery-required` блокирует
+следующую операцию до ручного восстановления; это не считается успешным rollback.
 
 Rollback evidence is attached, defect is opened, and a new deploy always restarts the seven-day clock.
 
@@ -116,6 +169,7 @@ Environment=STAGING_SOAK_DIR=/var/lib/easyboost-staging-soak/candidate-<SHORT_SH
 Затем:
 
 ```bash
+set -euo pipefail
 sudo systemctl stop easyboost-staging-soak.timer
 sudo systemctl daemon-reload
 sudo systemctl start easyboost-staging-soak.service
@@ -183,6 +237,7 @@ cat /var/lib/easyboost-staging-soak/candidate-<SHORT_SHA>/staging-soak-status.js
 **Safe steps/commands:** в уже настроенном secure monitor environment:
 
 ```bash
+set -euo pipefail
 cd /opt/easyboost-next
 npm run monitor -- --test-alert
 ```
@@ -190,7 +245,13 @@ npm run monitor -- --test-alert
 Подтвердить доставку test-alert. Затем отдельным state file создать безопасный synthetic unavailable/recovery без остановки staging:
 
 ```bash
-MONITORING_URL=http://127.0.0.1:1 MONITORING_STATE_FILE=/var/lib/easyboost-monitor/gate-<SHORT_SHA>.json npm run monitor
+set -euo pipefail
+synthetic_unavailable_status=0
+MONITORING_URL=http://127.0.0.1:1 MONITORING_STATE_FILE=/var/lib/easyboost-monitor/gate-<SHORT_SHA>.json npm run monitor || synthetic_unavailable_status="$?"
+[ "$synthetic_unavailable_status" -eq 1 ] || {
+  echo 'Synthetic unavailable probe must fail with status 1' >&2
+  exit 1
+}
 MONITORING_URL=https://staging.useboost.ru MONITORING_STATE_FILE=/var/lib/easyboost-monitor/gate-<SHORT_SHA>.json npm run monitor
 ```
 
@@ -206,27 +267,113 @@ MONITORING_URL=https://staging.useboost.ru MONITORING_STATE_FILE=/var/lib/easybo
 
 **Owner:** administrator и owner проекта; observer фиксирует RTO/RPO.
 
-**Prerequisites:** новый или явно изолированный второй server, не являющийся production/staging; owner-approved доступ к защищённому release archive и encrypted external backup; отдельный isolated HTTPS hostname; Docker Engine, Compose v2 и `rclone`. До запуска app владелец создаёт отдельный rehearsal-only `/opt/easyboost-next/.env`: isolated `APP_URL`, новые временные `JWT_SECRET` и `POSTGRES_PASSWORD`, отключённые AI-провайдеры, пустой `TELEGRAM_BOT_TOKEN` либо отдельный recovery-бот и отдельные monitoring credentials. Production/staging `.env`, Telegram/AI tokens, JWT, database password и monitoring credentials на второй server не переносятся. Целевые RPO ≤ 24 h, RTO ≤ 4 h.
+**Prerequisites:** новый или явно изолированный второй server, не являющийся production/staging; owner-approved URL Git-репозитория и полный lowercase commit SHA, а также encrypted external backup; отдельный isolated HTTPS hostname; Git, Docker Engine, Compose v2 и `rclone`. До запуска app владелец создаёт отдельный rehearsal-only `/opt/easyboost-next/.env`: isolated `APP_URL`, новые временные `JWT_SECRET` и `POSTGRES_PASSWORD`, отключённые AI-провайдеры, пустой `TELEGRAM_BOT_TOKEN` либо отдельный recovery-бот и отдельные monitoring credentials. Production/staging `.env`, Telegram/AI tokens, JWT, database password и monitoring credentials на второй server не переносятся. Целевые RPO ≤ 24 h, RTO ≤ 4 h.
 
-**Safe steps/commands:** перед любым изменением записать UTC start, hostname/IP, подтвердить пустой target и отсутствие production/staging routes. Использовать последовательность восстановления данных из `docs/DISASTER_RECOVERY.md`, но не его production `.env` и production hostname; перед запуском app ещё раз проверить только имена переменных и убедиться, что активны rehearsal-only credentials:
+**Safe steps/commands:** перед любым изменением записать UTC start, hostname/IP, подтвердить пустой target и отсутствие production/staging routes. Это самостоятельная disaster-recovery rehearsal: staging rollback helper никогда не вызывает эти DB restore-команды. Использовать последовательность восстановления данных из `docs/DISASTER_RECOVERY.md`, но не его production `.env` и production hostname; перед запуском app ещё раз проверить только имена переменных и убедиться, что активны rehearsal-only credentials:
 
 ```bash
+set -euo pipefail
+: "${EASYBOOST_RELEASE_REPOSITORY:?set the owner-approved Git repository URL}"
+: "${EASYBOOST_RELEASE_COMMIT:?set the owner-approved full commit SHA}"
+[[ "$EASYBOOST_RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || exit 1
+git clone --no-checkout "$EASYBOOST_RELEASE_REPOSITORY" /opt/easyboost-next
+cd /opt/easyboost-next
+git fetch --no-tags origin "$EASYBOOST_RELEASE_COMMIT"
+git checkout --detach "$EASYBOOST_RELEASE_COMMIT"
+if git symbolic-ref -q HEAD >/dev/null; then
+  echo 'Release checkout must use detached HEAD' >&2
+  exit 1
+else
+  symbolic_ref_status="$?"
+  [ "$symbolic_ref_status" -eq 1 ] || exit 1
+fi
+[ "$(git rev-parse --verify HEAD)" = "$EASYBOOST_RELEASE_COMMIT" ] || exit 1
+[ -z "$(git status --porcelain=v1 --untracked-files=all)" ] || exit 1
+npm ci
+sudo install -d -o root -g root -m 0750 /var/lib/easyboost/locks
+export EASYBOOST_HOST_OPERATION_LOCK_DIR=/var/lib/easyboost/locks/host-operation.lock
+: "${EASYBOOST_NODE_BASE_IMAGE:?set the owner-reviewed Node base image digest}"
+[[ "$EASYBOOST_NODE_BASE_IMAGE" =~ ^node:22-bookworm-slim@sha256:[0-9a-f]{64}$ ]] || {
+  echo 'Node base image authority must be an exact owner-reviewed digest' >&2
+  exit 1
+}
+export EASYBOOST_NODE_BASE_IMAGE
+npm run production:image:build -- --expected-commit "$EASYBOOST_RELEASE_COMMIT"
+production_app_image_id="$(docker image inspect --format '{{.Id}}' easyboost-production-app:local)"
+[[ "$production_app_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo 'Built application image has no canonical immutable identity' >&2
+  exit 1
+}
+app_preflight_image_id="$(docker image inspect --format '{{.Id}}' easyboost-production-app:local)"
+[ "$app_preflight_image_id" = "$production_app_image_id" ] || {
+  echo 'Application image identity changed before immutable Compose binding' >&2
+  exit 1
+}
+export EASYBOOST_PRODUCTION_APP_IMAGE_ID="$production_app_image_id"
 rclone lsf gdrive:EasyBoost-Backups --files-only | sort | tail -n 5
 rclone copyto gdrive:EasyBoost-Backups/easyboost-<UTC>.dump /opt/easyboost-next/backups/easyboost-restore.dump
-cd /opt/easyboost-next
-docker compose -f compose.production.yml up -d postgres
-docker compose -f compose.production.yml exec -T postgres pg_isready -U easyboost -d easyboost
-docker compose -f compose.production.yml exec -T postgres pg_restore --list < backups/easyboost-restore.dump
-docker compose -f compose.production.yml exec -T postgres pg_restore -U easyboost -d easyboost --no-owner --no-privileges --exit-on-error < backups/easyboost-restore.dump
-docker compose -f compose.production.yml up -d --build app
-curl --fail http://127.0.0.1:3000/health/ready
-docker compose -f compose.production.yml exec -T postgres psql -U easyboost -d easyboost -c 'SELECT COUNT(*) FROM users; SELECT COUNT(*) FROM user_progress; SELECT COUNT(*) FROM schema_migrations;'
-curl --fail https://<ISOLATED_RECOVERY_HOST>/health/ready
+export EASYBOOST_POSTGRES_IMAGE='postgres:17-alpine'
+: "${EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID:?set the owner-approved sha256 image ID}"
+[[ "$EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo 'PostgreSQL image ID must be a full canonical sha256 identity' >&2
+  exit 1
+}
+export EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID
+docker pull "$EASYBOOST_POSTGRES_IMAGE"
+postgres_seed_image_id="$(docker image inspect --format '{{.Id}}' "$EASYBOOST_POSTGRES_IMAGE")"
+[ "$postgres_seed_image_id" = "$EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID" ] || {
+  echo 'Pulled PostgreSQL image does not match the owner-approved identity' >&2
+  exit 1
+}
+postgres_preflight_image_id="$(docker image inspect --format '{{.Id}}' "$EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID")"
+[ "$postgres_preflight_image_id" = "$EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID" ] || {
+  echo 'PostgreSQL image identity changed before Compose start' >&2
+  exit 1
+}
+docker compose --project-name easyboost-production -f compose.production.yml up --pull never -d postgres
+postgres_container_id="$(docker compose --project-name easyboost-production -f compose.production.yml ps -q postgres)"
+[ -n "$postgres_container_id" ] || { echo 'PostgreSQL container is missing' >&2; exit 1; }
+postgres_running_image_id="$(docker inspect --format '{{.Image}}' "$postgres_container_id")"
+[ "$postgres_running_image_id" = "$EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID" ] || {
+  docker compose --project-name easyboost-production -f compose.production.yml stop postgres
+  echo 'Running PostgreSQL container does not use the owner-approved image' >&2
+  exit 1
+}
+postgres_ready=0
+for ((postgres_attempt=1; postgres_attempt<=30; postgres_attempt++)); do
+  if docker compose --project-name easyboost-production -f compose.production.yml exec -T postgres pg_isready -t 2 -U easyboost -d easyboost \
+    >/dev/null 2>&1; then
+    postgres_ready=1
+    break
+  fi
+  [ "$postgres_attempt" -eq 30 ] || sleep 1
+done
+[ "$postgres_ready" -eq 1 ] || {
+  echo 'PostgreSQL did not become ready within 30 attempts' >&2
+  exit 1
+}
+sudo --preserve-env=EASYBOOST_HOST_OPERATION_LOCK_DIR,EASYBOOST_PRODUCTION_APP_IMAGE_ID,EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID \
+  /usr/bin/node scripts/postgres-restore.js \
+  /opt/easyboost-next/backups/easyboost-restore.dump --database-only --confirm-restore
+# Restore физически резервирует exact archive bytes + bounded headroom до mutation. Если structured
+# settlement marker или shared host guard retained, app start/release запрещены до read-only
+# token/PGAPPNAME/process/pg_stat_activity recovery из README_DEPLOY.md.
+export EASYBOOST_APP_READINESS_URL=https://<ISOLATED_RECOVERY_HOST>/health/ready
+sudo --preserve-env=EASYBOOST_HOST_OPERATION_LOCK_DIR,EASYBOOST_APP_READINESS_URL,EASYBOOST_PRODUCTION_APP_IMAGE_ID,EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID \
+  /usr/bin/node scripts/production-app-lifecycle.js start
+docker compose --project-name easyboost-production -f compose.production.yml exec -T postgres psql -U easyboost -d easyboost -c 'SELECT COUNT(*) FROM users; SELECT COUNT(*) FROM user_progress; SELECT COUNT(*) FROM schema_migrations;'
 ```
 
-Проверить release archive SHA-256 до распаковки, возраст backup до restore, миграции, счётчики без вывода строк с PII, изолированный HTTPS и один безопасный test-account login/flow. Telegram login, monitoring cron и test-alert проверять только с отдельными recovery credentials; если их нет, этот gate остаётся незавершённым, а production credentials не копируются. Зафиксировать UTC ready time.
+Exact app/project/image proof, bounded isolated HTTPS readiness и failure isolation выполняются lifecycle
+helper под одной host guard. При недоказанном settlement он сохраняет typed recovery authority и блокирует
+следующий lifecycle/import/release до исполнимого recovery entrypoint.
 
-**Evidence artifact:** target identity, release SHA-256, backup filename/age, полная timeline, exit codes, HTTP 200, обезличенные counts, migrations count, monitor delivery, measured RTO/RPO и observer sign-off. Не сохранять `.env`, backup или user rows в Git/evidence report.
+`EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID` заранее переносится из owner-approved release-записи;
+идентификатор, полученный самим rehearsal pull, не является источником доверия.
+
+Проверить exact checkout HEAD/clean status до сборки, возраст backup до restore, миграции, счётчики без вывода строк с PII, изолированный HTTPS и один безопасный test-account login/flow. Telegram login, monitoring cron и test-alert проверять только с отдельными recovery credentials; если их нет, этот gate остаётся незавершённым, а production credentials не копируются. Зафиксировать UTC ready time.
+
+**Evidence artifact:** target identity, полный release commit SHA, backup filename/age, полная timeline, exit codes, HTTP 200, обезличенные counts, migrations count, monitor delivery, measured RTO/RPO и observer sign-off. Не сохранять `.env`, backup или user rows в Git/evidence report.
 
 **Success:** сервер поднят с нуля, backup восстановлен, counts/migrations согласованы с source evidence, app и isolated HTTPS ready, ключевой flow/cron/alert работают, RPO ≤ 24 h и RTO ≤ 4 h.
 

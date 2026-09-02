@@ -6,9 +6,9 @@
  * переходе на него — и только тогда его имена появляются на window, потому что обработчики,
  * которые их зовут, существуют лишь в разметке, отрисованной этим же экраном.
  *
- * «Слова», «Грамматика» и «Сегодня» остаются в initial graph. Top-level Practice, ЕГЭ, Прогресс и
+ * «Слова» и «Сегодня» остаются в initial graph. Грамматика, top-level Practice, ЕГЭ, Прогресс и
  * Профиль ленивы для страницы, но их static closure заранее кладёт в install-cache service worker.
- * Глубокие предметные экраны приезжают только после явного открытия.
+ * Остальные глубокие предметные экраны приезжают только после явного открытия.
  *
  * Путь чанка написан литералом внутри import() намеренно: так его видит и сборщик, и
  * scripts/check-inline-handlers.js, который разбирает экспорты экранов статически.
@@ -17,6 +17,7 @@ import {exposeGlobals} from './globals.js';
 import {registerScreenSource} from './router.js';
 
 const SCREEN_SOURCES={
+  scr3:function(){return import('./screens/grammar.js')},
   'aisy-practice':function(){return import('./screens/practice.js')},
   'aisy-ege':function(){return import('./screens/ege-hub.js')},
   scr10:function(){return import('./screens/progress.js')},

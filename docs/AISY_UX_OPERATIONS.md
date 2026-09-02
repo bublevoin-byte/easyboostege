@@ -15,31 +15,31 @@ PostgreSQL-контур.
 
 ## Выпускной gate
 
-Кандидат фиксируется только при чистом index и одном неизменном наборе файлов. Команды выполняются
-без deploy и с пустыми provider credentials:
+Кандидат фиксируется только при одном неизменном наборе файлов. Один обязательный локальный gate
+собирает frontend ровно один раз, запускает каждую дорогую Chromium-сцену ровно один раз и не
+выполняет push/deploy или платный provider call:
 
 ```text
-npm run lint
-npm run check
-npm test
-npm run build:frontend
-npm run test:e2e
-npm run test:e2e:adaptive
-npm run test:e2e:ege-mock
-npm run test:e2e:aisy
-npm run test:e2e:performance
-npm run security:secrets
-npm run security:history
-git diff --check
+npm run test:release:aisy
 ```
 
-`npm run test:e2e:aisy` строит frontend, запускает полный Aisy accessibility/offline contour, затем
-один реальный learner Chromium-контур на локальном сервере с file-backed repository. Learner path
-проходит first-start/Сегодня, Практику, ЕГЭ, точный result,
-Прогресс, Профиль и Асю; проверяет настоящий router/API, reload, offline и cross-tab, обе ширины
-320/1440 px, keyboard focus, screen-reader labels, reduced motion, controls не меньше 44 px и
-отсутствие горизонтального overflow. Оба Aisy-контура входят последними в default `npm run test:e2e`.
-Оба Aisy release child получают пустые provider credentials и fail-closed loopback endpoints; online
+Команда последовательно выполняет `npm run lint`, `npm run check`, `npm test`, затем непосредственно
+перед build — `npm run security:secrets` вместе с Docker-context guard, после него
+`npm run build:frontend`, единый список `npm run test:e2e:aisy:built`,
+`npm run test:e2e:performance`, `npm run security:history` и
+`git diff --check`. Обычные `npm run test:e2e`
+и `npm run test:e2e:aisy` используют тот же список и отличаются только назначением; внутри одного
+запуска тесты не дублируются.
+
+Список проходит first-start/Сегодня, Практику, все предметные deep screens, adaptive session, ЕГЭ и
+точный result, Прогресс, Профиль и Асю; проверяет настоящий router/API, reload, offline и cross-tab.
+Accessibility-контур покрывает точные 320/375/768/1440 portrait/landscape × forced light/dark/system
+× normal/reduced motion: canvas не шире 390 px, центрирован, bottom navigation не превращается в rail,
+горизонтального overflow нет, controls не меньше 44 px. Deep Paper-тесты дополнительно проверяют
+ready, empty/error/offline/blocked/review состояния, focus entry/restore, live regions, contrast и
+dialog/dock containment.
+
+Aisy release child получает пустые provider credentials и fail-closed loopback endpoints; online
 resource failure фиксируется по точным context-wide request/response events во всех вкладках, а
 ожидаемая offline-фаза ограничена явно. Catch-all разрешает только application origin, внешние font
 origins отвечает локальными пустыми stubs, а любой иной origin блокирует и фиксирует; из online API
@@ -47,8 +47,8 @@ origins отвечает локальными пустыми stubs, а любо�
 удаляет query values, нормализует dynamic UUID и сохраняет для любого внешнего запроса только origin;
 внешний origin фиксируется даже во время deliberate offline-фазы.
 
-EGE full-attempt gate остаётся отдельным: `npm run test:e2e:ege-mock` проводит одну server-authoritative
-попытку через 42 позиции. Learner contour читает уже завершённый exact result через публичный
+EGE full-attempt сценарии внутри единого списка проводят server-authoritative попытку через 42 позиции.
+Learner contour читает уже завершённый exact result через публичный
 `/api/v1/ege-mocks/attempts/:id/result` и сверяет его с EGE hub и Progress; он не заменяет строгий
 timer/state-machine тест. До этого first-start подтверждает отсутствие EGE baseline; только после
 Сегодня/Практики/offline test останавливает disposable child, готовит completed fixture штатным
@@ -59,14 +59,15 @@ file repository, перезапускает тот же локальный serve
 - JavaScript первой загрузки: не больше **150 КБ gzip**; измеряется до навигации и с отключённым
   service worker в `npm run test:e2e:performance`.
 - LCP не больше 2,5 с, CLS не больше 0,1, INP не больше 200 мс.
-- 320/375/768/1440 px, light/dark, portrait/landscape, reduced motion и offline truth проверяются
-  отдельным accessibility contour; release contour повторяет критические 320/1440 seams.
+- 320/375/768/1440 px, forced light/dark/system, portrait/landscape, normal/reduced motion и offline
+  truth проверяются отдельным accessibility contour; deep Paper-сценарии повторяют критические seams.
 - Lazy EGE/Practice/Progress/Profile/Asya не возвращаются в initial JS. Service-worker install
   closure и runtime closure остаются раздельными.
 
-Последний подтверждённый baseline перед Ticket 09: 144,1 КБ gzip, LCP 120 мс, CLS 0,096,
-INP 136 мс. Это локальная regression baseline, не production SLO; финальный кандидат обязан
-получить собственный свежий замер.
+Cycle 8 performance-наблюдение сохранено только в историческом `docs/PERFORMANCE_BASELINE.md`.
+Текущий финальный `npm run test:release:aisy` прошёл: artifact
+`d518f4a54e7b03beb357a69f7dc6380cd31befc5a11634c1ddd0df216021e290`, 26 уникальных Chromium-сценариев,
+first-load JS 90.0 KB / 150 KB, LCP 108 ms, CLS 0.000, INP 64 ms; бюджеты выше от этого не меняются.
 
 ## Offline, reload и cross-tab
 
@@ -80,6 +81,39 @@ INP 136 мс. Это локальная regression baseline, не production SLO
 новое значение после reload первой вкладки. Ответ API другого owner, устаревшая owner generation или
 непроверенная подписка не считаются восстановлением.
 
+При переходе с exact d367 старый document сначала показывает собственное production-уведомление
+«Доступна новая версия… Обновите страницу». В нём ещё нет Ticket 11 Apply/quorum UI. Обычный online
+reload через прежний network-first controller загружает candidate document, оставляя candidate worker
+waiting и controller прежним; затем пользователь клавиатурой выбирает реальную кнопку
+`#pwa_update_apply`. После первого consent другая exact-d367 вкладка остаётся old и может открыть
+непосещённый old hashed Speaking chunk. Её online reload открывает тот же настоящий candidate UI;
+реальный Apply или закрытие завершает quorum. Тест не создаёт synthetic consent control.
+
+Quorum не определяется broad same-origin списком. Worker допускает только legacy learner-shell
+`/`/`/index.html` и exact window, которое прошло `REGISTER_LEARNER_SHELL_CLIENT` handshake; так
+реальные app deep links участвуют, а `/health`, `/api`, `/internal`, static assets и passive documents
+не могут без учебной оболочки заблокировать consent или delayed ready-prune.
+
+Worker делает не более 240 проверок с шагом 250 мс на один message. Ticket 11 page посылает heartbeat
+через 55 секунд; если предыдущий 60-секундный цикл ещё идёт, worker ставит ровно один следующий цикл
+в очередь. Так закрытие peer после исходной 60-й секунды замечается до следующего page interval,
+без перекрывающихся loops или неограниченного `event.waitUntil`. Old d367 page сама heartbeat не знает,
+но reloaded/consenting Ticket 11 page поддерживает эту проверку; old page без reload остаётся
+nonconsenting до закрытия.
+
+Согласие связано с exact waiting generation. Если ожидающий B уже получил consent этой вкладки, но
+до quorum его заменил C, B timer/message/controller state сбрасываются, а C снова показывает enabled
+«Обновить после задания» и «Позже». Ни поздний ответ B, ни старый retry не отправляют C `SKIP_WAITING`:
+C остаётся waiting до нового явного нажатия видимой кнопки. Reduced motion не ослабляет это правило.
+
+Active B во время activation фиксирует только strict immutable predecessor authority из compatibility
+record: schema, full base commit, content SHA-256 и exact cache name. Durable record ограничен
+schema/count/name и 1024 байтами; missing, oversized или tampered запись даёт `no prune`. Delayed
+ready-prune удаляет только этот exact predecessor cache и не вызывает `caches.keys()`, поэтому уже
+существующие static, EGE executable/install и client-state namespaces C, colliding prefix, foreign и
+unknown caches сохраняются. EGE executable cache также release-qualified и не переиспользуется между
+B/C при одинаковом path graph.
+
 ## Ася, privacy и безопасность
 
 Ася работает только в открытом Aisy.space и только после намеренного действия ученика. Текстовый
@@ -89,8 +123,37 @@ keyboard path не включает микрофон и не делает provid
 Release evidence не содержит username, cookies, JWT, environment values, provider credentials,
 idempotency keys, learner answers, эссе, transcript, caption, audio, request/attempt UUID или raw
 provider payload. Допустимы commit SHA, команды/exit code, количество тестов, размеры сборки,
-Core Web Vitals и literal bounded review outcome. `security:secrets` проверяет рабочий набор,
-`security:history` — историю; ни один из них не заменяет ротацию уже раскрытого секрета.
+Core Web Vitals и literal bounded review outcome. `security:secrets` проверяет tracked files и
+явный bounded inventory Ticket 11 candidate-owned untracked files из
+`scripts/aisy-release-candidate-files.json`. В том же обязательном gate generic Docker-context guard
+обходит каждый не исключённый recursive non-stage `COPY` input, включая gitignored файлы, и падает на
+reachable пути вне этого audited объединения; исключённые protected каталоги он не обходит и не меняет.
+Gate запускается после unit и непосредственно перед единственным candidate build. `security:history`
+отдельно проверяет историю. Ни один scan не заменяет ротацию уже раскрытого секрета.
+
+`.dockerignore` исключает именованные категории: `.env*` кроме безопасного `.env.example`, `.scratch`,
+prototypes, QA/test и workspace debris; fail-closed гарантию даёт не denylist, а описанный pre-build
+context guard. Production image собирается только через
+`npm run production:image:build -- --expected-commit "$EASYBOOST_RELEASE_COMMIT"`: operator передаёт
+owner-reviewed exact `EASYBOOST_NODE_BASE_IMAGE=node:22-bookworm-slim@sha256:<64hex>`, а отсутствующий
+или tag-only base отклоняется до Docker. Wrapper требует exact clean Git root на полном owner-approved
+commit, затем переносит ровно verified closure и control
+files через два descriptor/no-follow прохода, повторно сверяет
+identity/digest, сканирует все bytes и передаёт deterministic USTAR из того же Buffer прямо в stdin
+`docker build`; writable temporary context у Docker отсутствует. Raw Compose build закрыт
+отсутствующим sentinel; local app image имеет `pull_policy: never`, а PostgreSQL-only `up`/restore не
+требуют build override.
+Финальный runtime image формируется только explicit `COPY` allowlist: необходимые root runtime
+files/directories, `scripts/migrate.js`, `scripts/import-json.js` и проверенный `dist/public`; broad
+`COPY . .` нет.
+Frontend-build stage отдельно получает полный explicit input closure, включая `public`, `shared`,
+build/PWA scripts и `pwa-compat`. Synthetic context/closure regressions проверяют generic unknown paths,
+Docker grammar, ordered ignore/negation, symlink escape и documented runtime entrypoint closure.
+
+Production Compose получает PostgreSQL только через owner-approved canonical SHA256 image ID; mutable
+`postgres:17-alpine` используется лишь для explicit pull/seed и не является activation authority. Fresh-host
+restore вызывает общий `db:restore --database-only --confirm-restore`: remote watchdog и `PGAPPNAME` доказывают
+settlement до освобождения DB lock, иначе остаётся fail-closed recovery marker.
 
 ## Инцидент и откат
 
@@ -105,26 +168,12 @@ Core Web Vitals и literal bounded review outcome. `security:secrets` прове
 5. Откатить только на совместимый app SHA штатным процессом владельца. Миграции и learner evidence
    не переписывать. Повторный rollout требует полного локального gate и нового frozen review.
 
-## Evidence кандидата Ticket 09
+## Evidence кандидата Ticket 11
 
-Локальный кандидат собран от base `55a5093e5e4072a0878b6a2ddd3717bd73a77b73`. Product,
-server, storage и schema не менялись, поэтому PostgreSQL/Docker gate не применялся. Push/deploy и
-provider calls не выполнялись.
-
-- `npm test`: 1 911 тестов, 1 863 passed, 48 skipped, 0 failed.
-- `npm run lint`, `npm run check` (459 JavaScript-файлов), `npm run build:frontend` (504 assets,
-  23 lazy chunks) и `npm run openapi:grammar:check`: passed.
-- Default sequential `npm run test:e2e`, отдельные adaptive/EGE/Aisy gates и accessibility contour:
-  passed. Release path подтвердил пять learner hubs, exact 42-position EGE result, reload,
-  owner-bound cross-tab, offline close/recovery и 320/1440 px a11y без paid-provider boundary.
-  Отдельный Aisy gate также passed с намеренно hostile inherited provider configuration: оба child
-  сохранили fail-closed локальную границу.
-- Fresh performance: initial JavaScript 144,1 КБ из 150 КБ; LCP 144 мс, CLS 0,096,
-  INP 176 мс; AI-check indicator 36 мс, plan 182 мс, preview 115 мс — passed.
-- Focused release/offline/security contracts, secret scan (1 265 tracked files), secret-history scan
-  (323 commits) и scoped `git diff --check`: passed.
-
-Frozen allowlist identity: `45c22175e14ce5f5e5c60b7bdf811d2872e3ea79326e67b93303c246926c067e`.
-Независимые Standards и Spec review вернули literal `ZERO_FINDINGS`; локальный PRE и POST совпали.
-После этого выполнен только metadata/evidence closeout Ticket 09. Этот gate по-прежнему не разрешает
-deploy: для него нужен отдельный процесс владельца.
+Локальный кандидат начат от base `d36724181ee04230c1a9709a9213bcd269092282`; Cycle 8/10 observations
+сохранены только как historical/superseded. Текущий финальный `npm run test:release:aisy`, независимые
+frozen reviews и browser proof зелёные: artifact
+`d518f4a54e7b03beb357a69f7dc6380cd31befc5a11634c1ddd0df216021e290`, 26 уникальных Chromium-сценариев,
+first-load JS 90.0 KB / 150 KB, LCP 108 ms, CLS 0.000, INP 64 ms. Ticket 11 закрыт как локальный release
+candidate. Push, deploy, staging/production mutation и live VK/provider calls не выполнялись и этим документом
+не разрешаются.

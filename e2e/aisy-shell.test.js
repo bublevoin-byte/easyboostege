@@ -88,6 +88,7 @@ try{
   const deepBack=mobile.page.getByRole('button',{name:'Назад в раздел Практика',exact:true});
   await deepBack.waitFor({state:'visible',timeout:5_000});
   assert.ok((await deepBack.boundingBox()).height>=44);
+  await mobile.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
   const deepLayout=await mobile.page.evaluate(()=>{
     const back=document.getElementById('aisy-shell-back').getBoundingClientRect();
     const screen=document.getElementById('scr3').getBoundingClientRect();

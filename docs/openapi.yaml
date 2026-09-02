@@ -2829,7 +2829,7 @@ paths:
         - { in: query, name: voice, schema: { type: string } }
         - { in: query, name: slow, schema: { type: string, enum: ['0', '1'] } }
       responses:
-        '200': { description: MPEG audio, content: { audio/mpeg: {} } }
+        '200': { description: Private MPEG audio. The server may reuse its bounded disk cache, but every client response is no-store and immediately expired., content: { audio/mpeg: {} } }
         '429': { $ref: '#/components/responses/RateLimited' }
   /api/v1/stt:
     post:

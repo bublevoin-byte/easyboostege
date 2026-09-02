@@ -63,6 +63,13 @@ async function rawGet(url, headers = {}) {
   });
 }
 
+function assertNoStore(response, label) {
+  assert.match(response.headers.get('cache-control') || '', /(?:^|,)\s*no-store(?:,|$)/u,
+    `${label} must prohibit browser/proxy reuse`);
+  assert.equal(response.headers.get('pragma'), 'no-cache', `${label} must cover HTTP/1.0 caches`);
+  assert.equal(response.headers.get('expires'), '0', `${label} must be immediately expired`);
+}
+
 test('application starts and serves health, security headers and PWA assets', { timeout: 20_000 }, async () => {
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-smoke-'));
   const port = await findAvailablePort();
@@ -119,10 +126,12 @@ test('application starts and serves health, security headers and PWA assets', { 
 
   try {
     const ready = await waitForReady(baseUrl, child, output);
+    assertNoStore(ready, 'readiness health response');
     assert.deepEqual(await ready.json(), { status: 'ready', storage: 'file' });
 
     const live = await fetch(`${baseUrl}/health/live`);
     assert.equal(live.status, 200);
+    assertNoStore(live, 'liveness health response');
     assert.deepEqual(await live.json(), { status: 'ok' });
 
     const home = await fetch(`${baseUrl}/`);
@@ -149,7 +158,41 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(serviceWorker.status, 200);
     const serviceWorkerSource = await serviceWorker.text();
     assert.match(serviceWorkerSource, /CACHE_NAME/u);
-    assert.match(serviceWorkerSource, /url\.pathname\.startsWith\('\/api\/'\)/u);
+    const serviceWorkerPolicySource = await fs.readFile(
+      new URL('../public/service-worker.js', import.meta.url), 'utf8',
+    );
+    assert.equal(serviceWorkerPolicySource.includes(
+      "function privateControlPath(pathname){return /^\\/(?:api|internal|health)(?:\\/|$)/iu.test(pathname)}",
+    ), true, 'source worker must bypass API/internal/health namespaces with Express-equivalent case semantics');
+
+    const privateBootstrapResponses = [
+      ['providers success', await fetch(`${baseUrl}/api/v1/auth/providers`), 200],
+      ['me auth error', await fetch(`${baseUrl}/api/v1/me`), 401],
+      ['progress auth error', await fetch(`${baseUrl}/api/v1/progress`), 401],
+      ['word progress auth error', await fetch(`${baseUrl}/api/v1/word-progress`), 401],
+      ['voice rule auth error', await fetch(`${baseUrl}/api/v1/voice-tutor/rules/ege.grammar.forms?exam_year=2026`), 401],
+      ['admin auth error', await fetch(`${baseUrl}/api/v1/admin/status`), 401],
+      ['export auth error', await fetch(`${baseUrl}/api/v1/account/export`), 401],
+      ['subscription auth error', await fetch(`${baseUrl}/api/v1/payments/requests?product=premium_voice`), 401],
+      ['legacy Telegram check', await fetch(`${baseUrl}/api/tg/check?code=000000`), 200],
+      ['lowercase API root', await fetch(`${baseUrl}/api`), 404],
+      ['mixed-case API root', await fetch(`${baseUrl}/aPi`), 404],
+      ['uppercase API root', await fetch(`${baseUrl}/API`), 404],
+      ['lowercase internal root', await fetch(`${baseUrl}/internal`), 200],
+      ['mixed-case internal root', await fetch(`${baseUrl}/InTeRnAl`), 200],
+      ['uppercase internal root', await fetch(`${baseUrl}/INTERNAL`), 200],
+    ];
+    for (const [label, response, status] of privateBootstrapResponses) {
+      assert.equal(response.status, status, label);
+      assertNoStore(response, label);
+      await response.arrayBuffer();
+    }
+    const malformedApi = await fetch(`${baseUrl}/api/v1/tg/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{',
+    });
+    assert.equal(malformedApi.status, 400);
+    assertNoStore(malformedApi, 'body-parser validation error');
+    await malformedApi.arrayBuffer();
 
     /* Точка входа называется по-разному в исходниках и в собранной версии, поэтому берётся из
        отданной разметки: сжатие проверяется на том файле, который страница действительно грузит. */
@@ -184,6 +227,7 @@ test('application starts and serves health, security headers and PWA assets', { 
       const progressResponse = await fetch(`${baseUrl}/api/v1/progress`, { headers: activeAuthorization });
       apiDurations.push(performance.now() - startedAt);
       assert.equal(progressResponse.status, 200);
+      if (index === 0) assertNoStore(progressResponse, 'progress success');
       await progressResponse.arrayBuffer();
     }
     apiDurations.sort((left, right) => left - right);
@@ -197,6 +241,7 @@ test('application starts and serves health, security headers and PWA assets', { 
       body: JSON.stringify({ operation: 'grammar_quiz' }),
     });
     assert.equal(activeAi.status, 503);
+    assertNoStore(activeAi, 'AI provider error');
     assert.equal((await activeAi.json()).error.code, 'AI_PROVIDER_UNAVAILABLE');
     assert.deepEqual(providerRequests, ['/xai', '/groq']);
 
@@ -206,6 +251,7 @@ test('application starts and serves health, security headers and PWA assets', { 
       body: JSON.stringify({ operation: 'grammar_quiz' }),
     });
     assert.equal(rateLimitedAi.status, 429);
+    assertNoStore(rateLimitedAi, 'API rate-limit error');
     assert.equal((await rateLimitedAi.json()).error.code, 'RATE_LIMITED');
 
     const consent = await fetch(`${baseUrl}/api/v1/privacy/consent`, { headers: activeAuthorization });
@@ -225,6 +271,7 @@ test('application starts and serves health, security headers and PWA assets', { 
 
     const exported = await fetch(`${baseUrl}/api/v1/account/export`, { headers: activeAuthorization });
     assert.equal(exported.status, 200);
+    assertNoStore(exported, 'account export success');
     assert.match(exported.headers.get('content-disposition') || '', /easyboost-data\.json/u);
     assert.equal((await exported.json()).account.username, 'active');
 
@@ -240,6 +287,7 @@ test('application starts and serves health, security headers and PWA assets', { 
       body: JSON.stringify({ words: [{ word: 'achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }] }),
     });
     assert.equal(wordSync.status, 200);
+    assertNoStore(wordSync, 'word progress success');
     assert.equal((await wordSync.json()).updated, 1);
     const errorSync = await fetch(`${baseUrl}/api/v1/error-bank`, {
       method: 'POST', headers: { ...activeAuthorization, 'X-EasyBoost-Expected-Owner': 'active' },
@@ -251,10 +299,12 @@ test('application starts and serves health, security headers and PWA assets', { 
 
     const studentAdminRequest = await fetch(`${baseUrl}/api/v1/admin/status`, { headers: activeAuthorization });
     assert.equal(studentAdminRequest.status, 403);
+    assertNoStore(studentAdminRequest, 'admin authorization error');
     assert.equal((await studentAdminRequest.json()).error.code, 'FORBIDDEN');
     const adminAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'admin' }, jwtSecret)}` };
     const adminRequest = await fetch(`${baseUrl}/api/v1/admin/status`, { headers: adminAuthorization });
     assert.equal(adminRequest.status, 200);
+    assertNoStore(adminRequest, 'admin success');
     assert.equal((await adminRequest.json()).role, 'admin');
     const metricsRequest = await fetch(`${baseUrl}/api/v1/admin/metrics`, { headers: adminAuthorization });
     assert.equal(metricsRequest.status, 200);
@@ -288,15 +338,18 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.equal(metrics.system.backup.fresh, false);
     const unauthorizedMetrics = await fetch(`${baseUrl}/internal/metrics`);
     assert.equal(unauthorizedMetrics.status, 401);
+    assertNoStore(unauthorizedMetrics, 'internal metrics auth error');
     const internalMetrics = await fetch(`${baseUrl}/internal/metrics`, {
       headers: { Authorization: 'Bearer monitoring-test-token-with-32-characters' },
     });
     assert.equal(internalMetrics.status, 200);
+    assertNoStore(internalMetrics, 'internal metrics success');
     assert.equal(typeof (await internalMetrics.json()).http.requests, 'number');
 
     const revocableToken = jwt.sign({ u: 'sessionuser', sid: sessionId }, jwtSecret, { expiresIn: '1h' });
     const sessionBeforeLogout = await fetch(`${baseUrl}/api/v1/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
     assert.equal(sessionBeforeLogout.status, 200);
+    assertNoStore(sessionBeforeLogout, 'me success');
     const logout = await fetch(`${baseUrl}/api/v1/logout`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${revocableToken}` },
@@ -305,6 +358,7 @@ test('application starts and serves health, security headers and PWA assets', { 
     assert.match(logout.headers.get('set-cookie') || '', /Max-Age=0/u);
     const sessionAfterLogout = await fetch(`${baseUrl}/api/v1/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
     assert.equal(sessionAfterLogout.status, 401);
+    assertNoStore(sessionAfterLogout, 'me revoked-session error');
     assert.equal((await sessionAfterLogout.json()).error.code, 'SESSION_REVOKED');
 
     const unconfirmedDeletion = await fetch(`${baseUrl}/api/v1/account`, {

@@ -1,6 +1,7 @@
 .asya-launcher,
 .asya-assistant,
-#voiceTutorSheet {
+#voiceTutorSheet,
+#frame .voiceTutorTrigger {
   --asya-semantic-accent: var(--aisy-color-selection);
   --asya-semantic-accent-soft: var(--aisy-color-selection-soft);
 }

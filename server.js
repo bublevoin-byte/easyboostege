@@ -139,6 +139,14 @@ app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self), payment=()');
   next();
 });
+/* Private/control-plane and health responses are never reusable, including body parsing, auth,
+   validation, limiter and unexpected-error branches that return before a route can set headers. */
+app.use(['/api', '/internal', '/health'], (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
   const incoming = String(req.headers['x-request-id'] || '');
@@ -188,6 +196,9 @@ app.get('/', async (req, res, next) => {
   try {
     const loginCode = String(req.query.login_code || '');
     if (loginCode) {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       const confirmed = await consumeTelegramAuthCode(loginCode);
       if (!confirmed) return res.redirect('/?login_error=expired');
       const existing = await getUserByTelegram(confirmed.telegram_id);

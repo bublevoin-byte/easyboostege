@@ -1,6 +1,9 @@
+name: easyboost-production
+
 services:
   postgres:
-    image: postgres:17-alpine
+    image: ${EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID:?set the owner-approved PostgreSQL sha256 image ID}
+    pull_policy: never
     restart: unless-stopped
     environment:
       POSTGRES_DB: easyboost
@@ -17,7 +20,11 @@ services:
       - backend
 
   app:
-    build: .
+    image: ${EASYBOOST_PRODUCTION_APP_IMAGE_ID:?set the canonical production app image ID}
+    pull_policy: never
+    build:
+      context: ./.guarded-production-build-context-required
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
       - path: .env

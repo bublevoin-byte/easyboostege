@@ -75,7 +75,7 @@ test('every new Reading session waits for the shared fresh server access gate', 
 
 test('adaptive Reading cancellation reaches the fresh session fetch and releases its launch lock', () => {
   assert.match(api, /async function get\(path, options = \{\}\)/u);
-  assert.match(api, /request\(baseUrl \+ path, \{ \.\.\.options, credentials: 'same-origin' \}\)/u);
+  assert.match(api, /request\(baseUrl \+ path, \{ \.\.\.options, cache: 'no-store', credentials: 'same-origin' \}\)/u);
   assert.match(auth, /async function currentSession\(options = \{\}\)/u);
   assert.match(auth, /api\.get\('\/api\/v1\/me', options\)/u);
   assert.match(app, /async function verifyLearningAccessForLaunch\(\{signal=null\}=\{\}\)/u);

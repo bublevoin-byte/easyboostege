@@ -256,7 +256,14 @@ try {
   ]);
   await page.locator('.practice-row[data-skill="vocabulary"] button').press('Enter');
   await page.locator('#scr2.on').waitFor({ state: 'visible' });
-  await page.getByRole('button', { name: 'Назад в раздел Практика', exact: true }).press('Enter');
+  await page.waitForFunction(() => document.getElementById('scr2')?.contains(document.activeElement), null, {
+    timeout: 5_000,
+  });
+  const practiceBack = page.getByRole('button', { name: 'Назад в раздел Практика', exact: true });
+  await practiceBack.focus();
+  assert.equal(await practiceBack.evaluate((button) => button === document.activeElement), true,
+    'the deep-screen back action must be keyboard focused before activation');
+  await page.keyboard.press('Enter');
   await page.locator('#aisy-practice.on').waitFor({ state: 'visible' });
 
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));

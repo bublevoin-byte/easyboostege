@@ -989,13 +989,13 @@ async function runAdaptiveDiagnosticE2E() {
       for (let row = 0; row < 6; row += 1) {
         await page.locator(`#lmt_row_${row} button`).nth(row).click();
       }
-      await page.getByRole('button', { name: 'Проверить', exact: true }).click();
+      await page.getByRole('button', { name: 'Проверить ответы', exact: true }).click();
     } else {
       const questionCount = await page.locator('[id^="liq_row_"]').count();
       for (let row = 0; row < questionCount; row += 1) {
         await page.locator(`#liq_row_${row} button`).first().click();
       }
-      await page.getByRole('button', { name: 'Проверить', exact: true }).click();
+      await page.getByRole('button', { name: 'Проверить ответы', exact: true }).click();
     }
     const attemptResponse = await attemptResponsePromise;
     if (!attemptResponse) {

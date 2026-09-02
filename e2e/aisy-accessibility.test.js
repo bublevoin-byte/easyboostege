@@ -20,11 +20,18 @@ const projectDirectory=fileURLToPath(new URL('..',import.meta.url));
 const serverPath=fileURLToPath(new URL('../server.js',import.meta.url));
 const jwtSecret='aisy-accessibility-e2e-secret-at-least-32-chars';
 const viewports=[
-  {label:'320×720 portrait',width:320,height:720},{label:'720×320 landscape',width:720,height:320},
+  {label:'320×768 portrait',width:320,height:768},{label:'768×320 landscape',width:768,height:320},
   {label:'375×812 portrait',width:375,height:812},{label:'812×375 landscape',width:812,height:375},
-  {label:'390×844 portrait',width:390,height:844},{label:'844×390 landscape',width:844,height:390},
   {label:'768×1024 portrait',width:768,height:1024},{label:'1024×768 landscape',width:1024,height:768},
-  {label:'1440×900 landscape',width:1440,height:900},{label:'900×1440 portrait',width:900,height:1440},
+  {label:'1440×1920 portrait',width:1440,height:1920},{label:'1920×1440 landscape',width:1920,height:1440},
+];
+const surfaceModes=[
+  {label:'forced light / normal motion',theme:'light',reducedMotion:'no-preference',systemScheme:'dark'},
+  {label:'forced light / reduced motion',theme:'light',reducedMotion:'reduce',systemScheme:'dark'},
+  {label:'forced dark / normal motion',theme:'dark',reducedMotion:'no-preference',systemScheme:'light'},
+  {label:'forced dark / reduced motion',theme:'dark',reducedMotion:'reduce',systemScheme:'light'},
+  {label:'system / normal motion',theme:'system',reducedMotion:'no-preference'},
+  {label:'system / reduced motion',theme:'system',reducedMotion:'reduce'},
 ];
 
 const indexSource=await fs.readFile(new URL('../public/index.html',import.meta.url),'utf8');
@@ -106,14 +113,15 @@ try{
     {name:'Сегодня',screen:'#scr1.on',heading:null},
   ];
 
-  for(const viewport of viewports){
+  for(const [viewportIndex,viewport] of viewports.entries()){
     await page.setViewportSize({width:viewport.width,height:viewport.height});
-    for(const theme of ['light','dark']){
-      await page.emulateMedia({colorScheme:theme,reducedMotion:'reduce'});
+    for(const surfaceMode of surfaceModes){
+      const systemScheme=surfaceMode.systemScheme||(viewportIndex%2===0?'light':'dark');
+      await page.emulateMedia({colorScheme:systemScheme,reducedMotion:surfaceMode.reducedMotion});
       await page.evaluate(value=>new Promise(resolve=>{
         window.AisyTheme.set(value);
         requestAnimationFrame(()=>requestAnimationFrame(resolve));
-      }),theme);
+      }),surfaceMode.theme);
       for(const destination of destinations){
         await navigation.getByRole('button',{name:destination.name,exact:true}).click();
         await page.locator(destination.screen).waitFor({state:'visible',timeout:8_000});
@@ -137,31 +145,47 @@ try{
             frameLeft:frame.left,frameRight:frame.right,frameBottom:frame.bottom,frameWidth:frame.width,
             navLeft:nav.left,navRight:nav.right,navBottom:nav.bottom,navWidth:nav.width,navHeight:nav.height,
             navColumns:getComputedStyle(navList).gridTemplateColumns.split(' ').filter(Boolean).length,
-            controls,motion,colorScheme:rootStyle.colorScheme,theme:document.documentElement.dataset.theme,
+            controls,motion,colorScheme:rootStyle.colorScheme,theme:document.documentElement.dataset.theme||null,
+            systemDark:matchMedia('(prefers-color-scheme: dark)').matches,
+            reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches,
             headingId:heading?.id||'',headingText:heading?.textContent||'',
             mainLabel:labelledMain?.getAttribute('aria-labelledby')||'',
             liveStates:active.querySelectorAll('[role="status"][aria-live]').length,
           };
         },destination.screen);
-        assert.ok(layout.documentWidth<=layout.viewport,`${destination.name} horizontal overflow at ${viewport.label}/${theme}`);
-        assert.ok(layout.frameLeft>=-0.5&&layout.frameRight<=layout.viewport+0.5,`${destination.name} frame overflow at ${viewport.label}/${theme}`);
-        assert.ok(layout.frameWidth<=390.5,`${destination.name} learner canvas exceeds the approved phone width at ${viewport.label}/${theme}`);
+        const evidenceLabel=`${viewport.label}/${surfaceMode.label}`;
+        assert.ok(layout.documentWidth<=layout.viewport,`${destination.name} horizontal overflow at ${evidenceLabel}`);
+        assert.ok(layout.frameLeft>=-0.5&&layout.frameRight<=layout.viewport+0.5,`${destination.name} frame overflow at ${evidenceLabel}`);
+        assert.ok(layout.frameWidth<=390.5,`${destination.name} learner canvas exceeds the approved phone width at ${evidenceLabel}`);
         assert.ok(Math.abs(layout.navLeft-layout.frameLeft)<=1&&Math.abs(layout.navRight-layout.frameRight)<=1,
-          `${destination.name} bottom navigation must stay inside the phone at ${viewport.label}/${theme}`);
-        assert.equal(layout.navColumns,5,`${destination.name} navigation became a side rail at ${viewport.label}/${theme}`);
-        assert.ok(layout.navWidth>layout.navHeight,`${destination.name} navigation became a side rail at ${viewport.label}/${theme}`);
-        assert.ok(Math.abs(layout.navBottom-layout.frameBottom)<=1,`${destination.name} navigation left the bottom edge at ${viewport.label}/${theme}`);
+          `${destination.name} bottom navigation must stay inside the phone at ${evidenceLabel}`);
+        assert.equal(layout.navColumns,5,`${destination.name} navigation became a side rail at ${evidenceLabel}`);
+        assert.ok(layout.navWidth>layout.navHeight,`${destination.name} navigation became a side rail at ${evidenceLabel}`);
+        assert.ok(Math.abs(layout.navBottom-layout.frameBottom)<=1,`${destination.name} navigation left the bottom edge at ${evidenceLabel}`);
         assert.ok(Math.abs(layout.frameLeft-(layout.viewport-layout.frameWidth)/2)<=1,
-          `${destination.name} phone is not centered at ${viewport.label}/${theme}`);
-        assert.deepEqual(layout.controls.filter(control=>control.width<44||control.height<44),[],`${destination.name} touch target below 44px at ${viewport.label}/${theme}`);
+          `${destination.name} phone is not centered at ${evidenceLabel}`);
+        assert.deepEqual(layout.controls.filter(control=>control.width<44||control.height<44),[],`${destination.name} touch target below 44px at ${evidenceLabel}`);
         if(destination.heading)assert.match(layout.headingText,new RegExp(destination.heading,'u'));
         else assert.ok(layout.headingText.trim(),`${destination.name} must expose a non-empty h1`);
-        assert.equal(layout.mainLabel,layout.headingId,`${destination.name} main must reference its h1 at ${viewport.label}/${theme}`);
-        assert.ok(layout.liveStates>=1,`${destination.name} must expose an assistive live state at ${viewport.label}/${theme}`);
+        assert.equal(layout.mainLabel,layout.headingId,`${destination.name} main must reference its h1 at ${evidenceLabel}`);
+        assert.ok(layout.liveStates>=1,`${destination.name} must expose an assistive live state at ${evidenceLabel}`);
         assert.equal(await navigation.locator('[aria-current="page"]').count(),1);
-        assert.ok(layout.motion==='0s'||Number.parseFloat(layout.motion)<=0.01,`reduced motion exceeds the existing 10ms accessibility contract at ${viewport.label}/${theme}`);
-        assert.equal(layout.theme,theme,`theme attribute changed at ${viewport.label}`);
-        assert.equal(layout.colorScheme,theme,`wrong ${theme} color scheme at ${viewport.label}: ${JSON.stringify(layout)}`);
+        if(surfaceMode.reducedMotion==='reduce'){
+          assert.ok(layout.motion==='0s'||Number.parseFloat(layout.motion)<=0.01,`reduced motion exceeds the existing 10ms accessibility contract at ${evidenceLabel}`);
+          assert.equal(layout.reducedMotion,true,`reduced-motion media query did not apply at ${evidenceLabel}`);
+        }else{
+          assert.ok(Number.parseFloat(layout.motion)>=0.1,`normal motion was accidentally suppressed at ${evidenceLabel}`);
+          assert.equal(layout.reducedMotion,false,`normal-motion media query did not apply at ${evidenceLabel}`);
+        }
+        if(surfaceMode.theme==='system'){
+          assert.equal(layout.theme,null,`system theme must not pin a data-theme at ${evidenceLabel}`);
+          assert.equal(layout.systemDark,systemScheme==='dark',`system theme did not follow the OS scheme at ${evidenceLabel}`);
+          assert.ok(layout.colorScheme.split(/\s+/u).includes(systemScheme),
+            `system color-scheme does not permit the active OS preference at ${evidenceLabel}: ${layout.colorScheme}`);
+        }else{
+          assert.equal(layout.theme,surfaceMode.theme,`theme attribute changed at ${evidenceLabel}`);
+          assert.equal(layout.colorScheme,surfaceMode.theme,`forced theme did not override ${systemScheme} OS at ${evidenceLabel}: ${JSON.stringify(layout)}`);
+        }
       }
     }
   }

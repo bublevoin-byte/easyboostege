@@ -59,7 +59,12 @@ test('the written runner and exact revision caches are reachable after an app re
   assert.match(screenLoader, /scr16:function\(\)\{return import\('\.\/screens\/ege-mock\.js'\)\}/u);
   assert.match(worker, /easyboost-ege-mock-assets-v1-/u);
   assert.match(worker, /ege-mock-form-1-v1\.js/u);
-  assert.match(worker, /!key\.startsWith\('easyboost-ege-mock-assets-v1-'\)/u);
+  const ownedReleasePruner = worker.slice(
+    worker.indexOf('function obsoleteAisyReleaseCache'),
+    worker.indexOf('async function pruneObsoleteAisyReleasesIfSafe'),
+  );
+  assert.doesNotMatch(ownedReleasePruner, /easyboost-ege-mock-assets-v1-/u,
+    'exact form caches are learner runtime data, not obsolete release-owned caches');
   assert.match(worker, /matchEgeMockAsset\(url,requestedCache,rangeHeader\(request\)\)/u);
   assert.match(worker, /searchParams\.get\('egeMockAssetCache'\)/u);
   assert.match(worker, /caches\.open\(requestedCache\)/u);

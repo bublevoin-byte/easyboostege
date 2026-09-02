@@ -1,0 +1,138 @@
+{
+  "schemaVersion": "aisy-pwa-predecessor-compat-v1",
+  "baseCommit": "d36724181ee04230c1a9709a9213bcd269092282",
+  "cacheName": "easyboost-static-uizoyf",
+  "contentSha256": "299ee5c9cbeb03279dfdc072a8b6f34b5ba3f0a06b28a111a4df61e06258a6ca",
+  "files": [
+    {
+      "path": "/assets/adaptive-session-runtime-DXt0a5mB.js",
+      "bytes": 34026,
+      "sha256": "f4fbda7b0fdbec818f6f687b2d1b820f2bef69eddfc13d7b2003df9a1ca05b59"
+    },
+    {
+      "path": "/assets/asya-assistant-1Lybndln.js",
+      "bytes": 14642,
+      "sha256": "f2a2e4371e15daa72b46777eb4fe61b4a694a7f3bf573f8a6603947db380d176"
+    },
+    {
+      "path": "/assets/ege-hub-hDwPxoCE.js",
+      "bytes": 11849,
+      "sha256": "73c4bffc2c98aca887513b878f04e99cccfdaf80dab78392a07f1b07d0c7b1f4"
+    },
+    {
+      "path": "/assets/ege-mock-DNumVurK.js",
+      "bytes": 155424,
+      "sha256": "0a54b6321e3d54098bcc91f90f55969acd12174bb39b566905f85fa32cc104fc"
+    },
+    {
+      "path": "/assets/ege-mock-form-1-v1-ck16U3mP.js",
+      "bytes": 39109,
+      "sha256": "6eb33c85aa1fe006930bfd1b1d379bca1e789a56e63703dd5ef96e52d88ce189"
+    },
+    {
+      "path": "/assets/ege-writing-text-sanitizer-CDOFcdT1.js",
+      "bytes": 408,
+      "sha256": "f2d063505f9fbd10d06d9da7b6d59a6bb603a9471765ea9cd6e943224d8a77a9"
+    },
+    {
+      "path": "/assets/index-BnVNj60P.css",
+      "bytes": 224296,
+      "sha256": "43fd480d2b08c8999beb929a0437b7602b1f16a63daf4f7aa0db72a8207fa73b"
+    },
+    {
+      "path": "/assets/index-D1W0sRN-.js",
+      "bytes": 544988,
+      "sha256": "706913e932586edc702e2c89a085c713995a65b2e04ffd4d59615d8b65252a80"
+    },
+    {
+      "path": "/assets/listening-DOnCIhye.js",
+      "bytes": 47564,
+      "sha256": "d65fa9f6c4aad24549b77067ceb8eedb551508e57d888605f64a5dcda2f1a482"
+    },
+    {
+      "path": "/assets/listening-catalog-contract-CcfoU0P0.js",
+      "bytes": 9576,
+      "sha256": "641a3faefcbda364306b3bdecedea38e61f020dfb63f021421f9ae373577a1aa"
+    },
+    {
+      "path": "/assets/listening-pilot-v1-ByhhrGbq.js",
+      "bytes": 182968,
+      "sha256": "393fdad782a45bc50e813064dd794b704bd9c514e4ec1e8783f2d686ab5fe720"
+    },
+    {
+      "path": "/assets/listening-wZXw26fr.js",
+      "bytes": 5174,
+      "sha256": "2a70f94ab6d6e4504332709ff3a50bce8c64f37106f98dce6e43b8b61f94d9c1"
+    },
+    {
+      "path": "/assets/practice-BvUSPETQ.js",
+      "bytes": 13966,
+      "sha256": "1eb74f5c4844822ff1a99e80482318c058568e7cc8728da5c82231026fe8e40d"
+    },
+    {
+      "path": "/assets/privacy-ByDsTEaf.js",
+      "bytes": 9798,
+      "sha256": "a6db63085ff15185bf56c06fe71b5c9e9c6cb8114697e5f7207eefdbf44591b7"
+    },
+    {
+      "path": "/assets/profile-ClAXIhru.js",
+      "bytes": 11321,
+      "sha256": "0f39b9c5442f66d658039fd4f894c4dcd417052e615b9c8462e99203810cc9a7"
+    },
+    {
+      "path": "/assets/progress-CJGNqn5x.js",
+      "bytes": 59808,
+      "sha256": "53b23451db0f373acf996a00f36249f84fc881290dd445c9316ad2f3588f8b1e"
+    },
+    {
+      "path": "/assets/reading-BzQIensA.js",
+      "bytes": 44753,
+      "sha256": "3f6953f342f68c59cbf1e1a9b4396927e6cb16d3df8628b1639df6fc4bcc5395"
+    },
+    {
+      "path": "/assets/reading-RQiHcM48.js",
+      "bytes": 16385,
+      "sha256": "8e0653cdc6fdb6e2496ac51a9ea26969ba0ab482b02e361bb288d9789e0e39d0"
+    },
+    {
+      "path": "/assets/reading-catalog-contract-HSvgPmNc.js",
+      "bytes": 13036,
+      "sha256": "518cc358031b6c9b8a61b615a03515395effe4e5001b6cd6a999280bfcbb8414"
+    },
+    {
+      "path": "/assets/speaking-DTb1P33E.js",
+      "bytes": 289797,
+      "sha256": "f3f4ecf8d8eaf7a04ccdcfe418ee09580e14854807a6f70c823261e9822b5887"
+    },
+    {
+      "path": "/assets/speaking-pronunciation-audio-CsKpLrRX.js",
+      "bytes": 5763,
+      "sha256": "0ed3914b89d4c37200afcd5463676adeab3de5486631ef18a5249a0da6c631b5"
+    },
+    {
+      "path": "/assets/task10-v1-yPz1glKj.js",
+      "bytes": 85610,
+      "sha256": "ba81bc9d978bf236ae6b35715665a9d9994deb519aedb06c0c97dc75723aec8f"
+    },
+    {
+      "path": "/assets/task11-v1-CTj1lmu5.js",
+      "bytes": 60397,
+      "sha256": "684bde00b0b96473b7efb838f7dbee060819275bbf080393d63ae8603a2a5920"
+    },
+    {
+      "path": "/assets/task12-18-v1-C20VGiYJ.js",
+      "bytes": 168962,
+      "sha256": "453b47e2315ee6a21a04f0ff36b3cf441d14c19fc53f92b9a7a8266324f6f447"
+    },
+    {
+      "path": "/assets/voice-tutor-CITqVqtP.js",
+      "bytes": 32357,
+      "sha256": "33c286e798d48d3ab91cd8cd974deb99c732d39441a6e34d5fe443de6720c2dc"
+    },
+    {
+      "path": "/assets/writing-CAo5q20n.js",
+      "bytes": 41806,
+      "sha256": "9a779dd12252a83ee5e9f9ff73502f225aa6b0c837aedb1fc148d4fef3630865"
+    }
+  ]
+}

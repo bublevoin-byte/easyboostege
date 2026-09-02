@@ -10,7 +10,9 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The full unit phase alone took about 31 minutes in the pre-freeze run. The rest of the release wrapper,
+    # PostgreSQL, Android/Firefox/WebKit, browser installation, quality checks and cold-run variance need margin.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,30 +24,19 @@ jobs:
       - run: npm ci
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
-      - name: Scan tracked files for secrets
-        run: npm run security:secrets
-      - name: Scan Git history for secrets
-        run: npm run security:history
-      - name: Lint JavaScript
-        run: npm run lint
-      - run: npm run check
       - name: Validate staging deployment
+        # Syntax/model validation must not discover or reuse a host image. The all-zero digest is
+        # a canonical-shaped, deliberately non-deployable CI-only authority.
+        env:
+          EASYBOOST_STAGING_POSTGRES_IMAGE_ID: sha256:0000000000000000000000000000000000000000000000000000000000000000
         run: |
           bash -n scripts/staging-deploy.sh scripts/staging-rollback.sh
           cp .env.staging.example .env.staging
           docker compose -f compose.staging.yml --env-file .env.staging config --quiet
       - name: PostgreSQL repository integration
         run: npm run test:postgres
-      # Сервер отдаёт dist/public, если сборка есть, и public/ иначе. Оба пути должны быть зелёными,
-      # поэтому первый прогон идёт по исходникам, а всё, что после сборки, — по собранной версии,
-      # то есть ровно по той, которая уезжает в production.
-      - run: npm test
-      - name: Chrome E2E on sources
-        run: npm run test:e2e
-      - name: Build and verify frontend assets
-        run: npm run build:frontend
-      - name: Chrome E2E on the build
-        run: npm run test:e2e
+      - name: Run the canonical one-build release gate
+        run: npm run test:release:aisy
       - name: Chrome Android E2E
         run: npm run test:e2e:android
       - name: Install Firefox and WebKit for Playwright

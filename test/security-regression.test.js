@@ -102,21 +102,21 @@ test('frontend prepaints theme through one classic CSP-safe asset and keeps a si
 
   /*
    * Порядок выполнения оболочки — часть контракта. Тяжёлые экранные реализации остаются за
-   * маленькими loader-seams, а общие Words/Grammar/Profile domains готовы до app.js.
+   * маленькими loader-seams, а общие Words/Grammar/Exam/Profile domains готовы до app.js.
    */
   const entry = await fs.readFile(new URL('../public/main.js', import.meta.url), 'utf8');
   const imported = [...entry.matchAll(/^import\s+(?:[^;']*from\s*)?'\.\/([^']+)'/gmu)].map((match) => match[1]);
   assert.deepEqual(imported, [
     'theme.js', 'globals.js', 'api.js', 'auth.js', 'owner-incarnation.js', 'sync.js', 'store.js', 'components.js', 'router.js', 'aisy-shell.js', 'asya-launcher.js',
-    'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/profile.js', 'app.js',
-    'voice-tutor-loader.js', 'screens/words.js', 'screens/grammar.js', 'screens/today.js',
+    'learning.js', 'modules/words.js', 'modules/grammar.js', 'modules/exam.js', 'modules/profile.js', 'app.js',
+    'voice-tutor-loader.js', 'screens/words.js', 'screens/today.js',
     'privacy-loader.js', 'tts.js', 'pwa.js',
   ]);
 
   /*
    * Разделение экранов на статические и ленивые — требование, а не вкус. Раздел 6.1 ТЗ обещает без
-   * сети словарные карточки и встроенные грамматические тесты. Остальные top-level routes лежат в
-   * измеряемом service-worker closure, но не входят в initial JS.
+   * сети словарные карточки и встроенные грамматические тесты. Grammar и остальные top-level routes
+   * лежат в измеряемом service-worker install closure, но не входят в initial JS.
    *
    * Practice, ЕГЭ hub и остальные пять экранов обязаны остаться ленивыми: на них держится бюджет раздела 19. Уже открытый
    * пробник продолжает работу из runtime-cache, который его exact preflight успел заполнить до старта.
@@ -124,12 +124,12 @@ test('frontend prepaints theme through one classic CSP-safe asset and keeps a si
    */
   const eagerScreens = imported.filter((name) => name.startsWith('screens/'));
   assert.deepEqual(eagerScreens, [
-    'screens/words.js', 'screens/grammar.js', 'screens/today.js',
+    'screens/words.js', 'screens/today.js',
   ]);
   const loader = await fs.readFile(new URL('../public/screens.js', import.meta.url), 'utf8');
   const lazy = [...loader.matchAll(/import\(\s*'\.\/(screens\/[^']+)'\s*\)/gu)].map((match) => match[1]);
   assert.deepEqual(lazy, [
-    'screens/practice.js', 'screens/ege-hub.js', 'screens/progress.js', 'screens/profile.js',
+    'screens/grammar.js', 'screens/practice.js', 'screens/ege-hub.js', 'screens/progress.js', 'screens/profile.js',
     'screens/listening.js', 'screens/reading.js', 'screens/writing.js', 'screens/speaking.js',
     'screens/ege-mock.js',
   ]);
@@ -284,12 +284,37 @@ test('PWA shell is installable and never caches API responses', async () => {
   assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512' && icon.type === 'image/png'));
   assert.ok(manifest.icons.some((icon) => icon.purpose === 'maskable'));
   assert.match(html, /<link rel="manifest" href="\/manifest\.json">/u);
-  assert.match(worker, /url\.pathname\.startsWith\('\/api\/'\)/u);
-  assert.match(worker, /caches\.match\('\/offline\.html'\)/u);
-  // A reload without network must reopen the cached application, not the placeholder page.
-  assert.match(worker, /caches\.match\('\/'\)\.then\(shell=>shell\|\|caches\.match\('\/offline\.html'\)\)/u);
-  assert.match(worker, /fetch\(request\).*catch\(\(\)=>caches\.match\(request\)\)/u);
-  assert.match(worker, /self\.skipWaiting\(\)/u);
+  assert.equal(worker.includes("function privateControlPath(pathname){return /^\\/(?:api|internal|health)(?:\\/|$)/iu.test(pathname)}"), true,
+    'API, internal and health bypass must use one case-insensitive, segment-bounded policy');
+  assert.match(worker,
+    /function privateControlRequest\(url\)\{return privateControlPath\(url\.pathname\)[\s\S]*?url\.pathname==='\/'&&url\.searchParams\.has\('login_code'\)/u,
+    'the exact legacy root callback must bypass the worker before any navigation fallback');
+  assert.match(worker, /function responseHasNoStore[\s\S]*?async function putRuntimeResponse/u,
+    'generic Cache API writes must reject no-store responses');
+  assert.match(worker, /async function refreshVerifiedRootShell/u);
+  assert.match(worker, /requestUrl\.pathname!==['"]\/['"]/u);
+  assert.match(worker, /data-aisy-app-shell=["']v1["']/u);
+  assert.match(worker, /async function offlineNavigation/u);
+  // Offline navigation prefers the exact cached document and falls back to the verified root shell.
+  assert.match(worker, /const cache=await caches\.open\(CACHE_NAME\);[\s\S]*?cache\.match\(request,\{ignoreSearch:true\}\)/u);
+  assert.match(worker, /cache\.match\('\/'\)\|\|cache\.match\('\/offline\.html'\)/u);
+  assert.match(worker, /async function currentRuntimeFallback\(request\)\{return \(await caches\.open\(CACHE_NAME\)\)\.match\(request\)\}/u,
+    'candidate-owned stable assets must bypass the browser HTTP cache before runtime caching');
+  assert.doesNotMatch(worker, /catch\(\(\)=>caches\.match\(request\)\)/u,
+    'offline fallback must not search obsolete or foreign caches globally');
+  assert.match(worker, /if\(!HAD_ACTIVE_PREDECESSOR\)await self\.skipWaiting\(\)/u);
+  assert.match(worker, /const PWA_PARTICIPANT_PREFIX='\/__easyboost\/pwa-learner-shell-v1\/';[\s\S]*?function legacyLearnerShellClient\(client\)\{\s*const url=new URL\(client\.url,self\.location\.origin\);\s*return url\.origin===self\.location\.origin&&\(url\.pathname==='\/'\|\|url\.pathname==='\/index\.html'\)\s*\}[\s\S]*?async function participatingWindowClients\(\)\{\s*const windows=await self\.clients\.matchAll\(\{type:'window',includeUncontrolled:true\}\);\s*const registered=await markedClientIds\(PWA_PARTICIPANT_PREFIX\);\s*return windows\.filter\(client=>legacyLearnerShellClient\(client\)\|\|registered\.has\(client\.id\)\)\s*\}/u,
+    'only legacy shell roots and explicitly registered learner-shell clients may join update quorum');
+  assert.match(worker, /async function updateConsentQuorumReached\(\)\{\s*const windows=await participatingWindowClients\(\);\s*const consenting=await markedClientIds\(PWA_CONSENT_PREFIX\);\s*return windows\.every\(client=>consenting\.has\(client\.id\)\)\s*\}/u,
+    'a shared-scope worker must wait until every live same-origin tab explicitly consents');
+  assert.match(worker, /async function consentToUpdate[\s\S]*?if\(await releaseIsActivated\(\)\)\{await client\.navigate\(client\.url\);return\}[\s\S]*?if\(!await requestActivationWhenQuorum\(\)\)[\s\S]*?WAITING_FOR_OTHER_TABS[\s\S]*?recheckUpdateConsentQuorum/u,
+    'consent must preserve predecessor tabs until quorum, then activate once without duplicate navigation');
+  assert.match(worker, /function recheckUpdateConsentQuorum[\s\S]*?UPDATE_QUORUM_RECHECK_ATTEMPTS[\s\S]*?requestActivationWhenQuorum/u,
+    'closing the final nonconsenting task tab must be noticed without another user click');
+  assert.match(worker, /markClient\(prefix,client\)[\s\S]*?new Response\(RELEASE_VERSION\)/u,
+    'client state markers may store only a release token, never the private client URL');
+  assert.doesNotMatch(worker, /cache\.put\('\/'\s*,\s*response\.clone\(\)\)/u,
+    'a non-root navigation must never overwrite the verified root app shell');
   assert.match(worker, /self\.clients\.claim\(\)/u);
   assert.equal((offline.match(/<script\b/giu) || []).length, 1);
   assert.match(offline, /<script src="\/theme-prepaint\.js"><\/script>/u);
@@ -400,7 +425,7 @@ test('validated generated content is cached before external AI budget checks', a
   assert.match(ai, /promptVersion: CONTENT_PROMPT_VERSION, input/u);
 });
 
-test('audio endpoints enforce upload controls, timeouts and private cached responses', async () => {
+test('audio endpoints enforce upload controls, timeouts and no-store browser responses', async () => {
   const [media, frontend] = await Promise.all([
     fs.readFile(mediaRoutePath, 'utf8'),
     /* Запись голоса живёт в чанке экрана говорения. */
@@ -409,8 +434,10 @@ test('audio endpoints enforce upload controls, timeouts and private cached respo
   assert.match(media, /validateAudioUpload\(req\.headers\['content-type'\], buf, config\.ai\.sttMaxBytes\)/u);
   assert.match(media, /controller\.abort\(\), config\.ai\.sttTimeoutMs/u);
   assert.match(media, /pruneAudioCache\(TTS_DIR/u);
-  assert.match(media, /Cache-Control', 'private, max-age=604800'/u);
-  assert.doesNotMatch(media, /Cache-Control', 'public, max-age=604800'/u);
+  assert.match(media, /Cache-Control', 'no-store, max-age=0'/u);
+  assert.match(media, /Pragma', 'no-cache'/u);
+  assert.match(media, /Expires', '0'/u);
+  assert.doesNotMatch(media, /Cache-Control', '(?:public|private), max-age=/u);
   assert.match(frontend, /function spDeleteRecording\(/u);
   assert.match(frontend, /function spFlagTranscript\(/u);
   assert.match(frontend, /полноту чтения, беглость распознавания/u);

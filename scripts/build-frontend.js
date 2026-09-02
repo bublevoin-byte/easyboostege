@@ -20,6 +20,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
+import { computePwaReleaseVersion, injectPwaReleaseVersion } from './pwa-release-version.js';
+import {
+  PREDECESSOR_COMMIT, compatibilityArtifactDirectory, verifyPredecessorCompatibility,
+} from './pwa-predecessor-compat.js';
+import { publishReleaseArtifact } from './verify-release-artifact.js';
 
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const sourceDirectory = path.join(projectDirectory, 'public');
@@ -27,6 +32,10 @@ const sharedSourceDirectory = path.join(projectDirectory, 'shared');
 const outputDirectory = path.join(projectDirectory, 'dist', 'public');
 const stagingDirectory = path.join(projectDirectory, 'dist', 'public.building');
 const configFile = path.join(projectDirectory, 'vite.config.js');
+const predecessorCompatibility = await verifyPredecessorCompatibility({
+  directory: compatibilityArtifactDirectory(projectDirectory, PREDECESSOR_COMMIT),
+  expectedCommit: PREDECESSOR_COMMIT,
+});
 
 const SHELL_MARKER_START = '/* build:app-shell */';
 const SHELL_MARKER_END = '/* end build:app-shell */';
@@ -34,6 +43,8 @@ const EGE_MOCK_FORM_MARKER_START = '/* build:ege-mock-form */';
 const EGE_MOCK_FORM_MARKER_END = '/* end build:ege-mock-form */';
 const EGE_MOCK_EXEC_MARKER_START = '/* build:ege-mock-exec */';
 const EGE_MOCK_EXEC_MARKER_END = '/* end build:ege-mock-exec */';
+const PREDECESSOR_COMPAT_MARKER_START = '/* build:predecessor-compat */';
+const PREDECESSOR_COMPAT_MARKER_END = '/* end build:predecessor-compat */';
 
 /* ---------- исходники ---------- */
 
@@ -120,7 +131,7 @@ for (const entry of entryPoints) {
   for (const name of await walkModuleGraph(entry, { staticOnly: true })) shellModules.add(name);
 }
 const offlineEntryModules = [
-  'screens/practice.js', 'screens/ege-hub.js', 'screens/progress.js', 'screens/profile.js',
+  'screens/grammar.js', 'screens/practice.js', 'screens/ege-hub.js', 'screens/progress.js', 'screens/profile.js',
   'asya-assistant.js', 'privacy.js', 'adaptive-session-runtime.js',
 ];
 const offlineLazyModules = [...new Set((await Promise.all(offlineEntryModules.map(
@@ -209,7 +220,9 @@ if (!builtEgeMockFormModule) throw new Error('Exact EGE mock form module не п
 const builtEgeMockFormPath = `/${builtEgeMockFormModule}`;
 const builtEgeMockScreenModule = modules['screens/ege-mock.js'];
 if (!builtEgeMockScreenModule) throw new Error('Lazy EGE mock executable не попал в сборку');
-const builtEgeMockExecPaths = [...new Set(sourceEgeMockExecModules.map((name) => `/${modules[name]}`))];
+const builtEgeMockExecPaths = [...new Set(
+  sourceEgeMockExecModules.map((name) => `/${modules[name]}`),
+)].sort();
 
 const entryChunk = chunks.find((chunk) => chunk.isEntry);
 if (!entryChunk) throw new Error('Сборка не дала точки входа');
@@ -239,6 +252,28 @@ for (const name of staticAssets) {
   const destination = path.join(stagingDirectory, name);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.copyFile(path.join(sourceDirectory, name), destination);
+}
+
+/* All 26 exact predecessor executables are packaged at their original content-hashed URLs and are
+ * installed into the predecessor cache only during an update. Every truly predecessor-only file
+ * must stay outside current APP_SHELL. Exactly two digest-identical current emissions are shell
+ * members; the other 24 compatibility entries stay outside shell (including unchanged lazy outputs). */
+const predecessorArtifactDirectory = compatibilityArtifactDirectory(projectDirectory, PREDECESSOR_COMMIT);
+for (const file of predecessorCompatibility.files) {
+  const name = file.path.slice(1);
+  const source = path.join(predecessorArtifactDirectory, 'files', name);
+  const destination = path.join(stagingDirectory, name);
+  try {
+    const current = await fs.readFile(destination);
+    const currentDigest = crypto.createHash('sha256').update(current).digest('hex');
+    if (current.length !== file.bytes || currentDigest !== file.sha256) {
+      throw new Error(`Predecessor compatibility collides with different current bytes: ${file.path}`);
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.copyFile(source, destination);
+  }
 }
 
 function shellFrom(files) {
@@ -298,6 +333,25 @@ if (!sourceEgeMockExecBlock.includes(sourceEgeMockExecDeclaration)) {
   throw new Error(`Source service worker потерял EGE executable paths: ${sourceEgeMockExecDeclaration}`);
 }
 workerBuilt = `${workerBuilt.slice(0, egeMockExecStart)}${EGE_MOCK_EXEC_MARKER_START}\nconst EGE_MOCK_EXEC_PATHS=${JSON.stringify(builtEgeMockExecPaths).replaceAll('"', "'")};\n${workerBuilt.slice(egeMockExecEnd)}`;
+const predecessorCompatStart = workerBuilt.indexOf(PREDECESSOR_COMPAT_MARKER_START);
+const predecessorCompatEnd = workerBuilt.indexOf(PREDECESSOR_COMPAT_MARKER_END);
+if (predecessorCompatStart === -1 || predecessorCompatEnd === -1) {
+  throw new Error('public/service-worker.js потерял markers build:predecessor-compat');
+}
+const predecessorWorkerContract = {
+  schemaVersion: predecessorCompatibility.schemaVersion,
+  baseCommit: predecessorCompatibility.baseCommit,
+  cacheName: predecessorCompatibility.cacheName,
+  contentSha256: predecessorCompatibility.contentSha256,
+  files: predecessorCompatibility.files,
+};
+workerBuilt = `${workerBuilt.slice(0, predecessorCompatStart)}${PREDECESSOR_COMPAT_MARKER_START}\nconst PREDECESSOR_COMPATIBILITY=${JSON.stringify(predecessorWorkerContract)};\n${workerBuilt.slice(predecessorCompatEnd)}`;
+const releaseVersion = await computePwaReleaseVersion({
+  directory: stagingDirectory,
+  shell: builtShell,
+  workerSource: workerBuilt,
+});
+workerBuilt = injectPwaReleaseVersion(workerBuilt, releaseVersion);
 await fs.writeFile(path.join(stagingDirectory, 'service-worker.js'), workerBuilt, 'utf8');
 
 /* ---------- целостность ---------- */
@@ -318,6 +372,11 @@ for (const name of builtScripts) {
 if (!assets[builtEgeMockFormPath.slice(1)]) {
   throw new Error(`Exact EGE mock form module отсутствует в dist: ${builtEgeMockFormPath}`);
 }
+for (const pathname of builtEgeMockExecPaths) {
+  if (!assets[pathname.slice(1)]) {
+    throw new Error(`Derived EGE executable отсутствует в dist: ${pathname}`);
+  }
+}
 if (!builtScripts.includes(entryChunk.fileName)) {
   throw new Error(`Собранный index.html не подключает точку входа ${entryChunk.fileName}`);
 }
@@ -328,23 +387,36 @@ if (/<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu.test(builtHtml)) {
 for (const name of builtShell.slice(1)) {
   if (!assets[name.slice(1)]) throw new Error(`APP_SHELL ссылается на отсутствующий файл: ${name}`);
 }
+for (const file of predecessorCompatibility.files) {
+  const name = file.path.slice(1);
+  if (!assets[name] || assets[name].bytes !== file.bytes || assets[name].sha256 !== file.sha256) {
+    throw new Error(`Packaged predecessor executable failed final integrity: ${file.path}`);
+  }
+  if (builtShell.includes(file.path) && !emitted.has(name)) {
+    throw new Error(`Predecessor-only executable leaked into current APP_SHELL: ${file.path}`);
+  }
+}
 
 await fs.writeFile(
   path.join(stagingDirectory, 'asset-manifest.json'),
   `${JSON.stringify({
     generatedBy: 'npm run build:frontend',
     entry: entryChunk.fileName,
+    releaseVersion,
     shell: builtShell,
     dynamicChunks: dynamicChunks.sort(),
+    predecessorCompatibility: predecessorWorkerContract,
     modules,
     assets,
   }, null, 2)}\n`,
   'utf8',
 );
 
-/* Проверенная сборка встаёт на место прежней одним шагом — до этого момента сервер отдаёт старую. */
-await fs.rm(outputDirectory, { recursive: true, force: true });
-await fs.rename(stagingDirectory, outputDirectory);
+/*
+ * Staging проверяется до публикации; прежнее поколение сохраняется до повторной проверки уже
+ * опубликованного каталога и автоматически восстанавливается при ошибке rename/verification.
+ */
+const verifiedArtifact = await publishReleaseArtifact({ stagingDirectory, publicDirectory: outputDirectory });
 
 const shellBytes = [...shellChunks].reduce((total, name) => total + assets[name].bytes, 0);
-console.log(`Frontend build created ${builtFiles.length} verified assets in dist/public: оболочка — ${shellChunks.size} файлов и ${(shellBytes / 1024).toFixed(1)} КБ JavaScript, ленивых чанков ${dynamicChunks.length}.`);
+console.log(`Frontend build created ${builtFiles.length} verified assets in dist/public: оболочка — ${shellChunks.size} файлов и ${(shellBytes / 1024).toFixed(1)} КБ JavaScript, ленивых чанков ${dynamicChunks.length}; artifact ${verifiedArtifact.aggregateSha256}.`);

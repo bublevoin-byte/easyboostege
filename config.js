@@ -1,7 +1,14 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 
-dotenv.config();
+function dotenvLoadingDisabled(source = process.env) {
+  const raw = source.EASYBOOST_DISABLE_DOTENV;
+  if (raw == null || raw === '' || raw === 'false' || raw === '0') return false;
+  if (raw === 'true' || raw === '1') return true;
+  throw new Error('EASYBOOST_DISABLE_DOTENV must be true, false, 1 or 0');
+}
+
+if (!dotenvLoadingDisabled()) dotenv.config();
 
 function readInteger(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
   const raw = process.env[name];

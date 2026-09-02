@@ -11,6 +11,17 @@ import { availablePort, chromeExecutable, createActiveSubscriptionPage, openPrac
 const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
 const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
 
+async function commitReadingWordAction(page, status) {
+  const popover = page.locator('#r_pop');
+  await page.waitForFunction(() => {
+    const state = document.querySelector('#r_pop')?.dataset.lookupState;
+    return state === 'online' || state === 'builtin';
+  });
+  const name = status === 'know' ? '✓ Знаю' : '+ Учить';
+  await popover.getByRole('button', { name, exact: true }).press('Enter');
+  await popover.waitFor({ state: 'hidden' });
+}
+
 let browser;
 let child;
 let temporaryDirectory;
@@ -84,6 +95,25 @@ try {
   const page=activeHarness.page;
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.route('**/api/v1/ai/generate-content', async (route) => {
+    let payload = null;
+    try { payload = route.request().postDataJSON(); } catch (_) { payload = null; }
+    if (payload?.operation !== 'dictionary_lookup' || payload.word !== 'volunteer') {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-easyboost-response-owner': 'vocabulary-sync-user',
+      },
+      body: JSON.stringify({
+        data: { ipa: '/ˌvɒlənˈtɪə/', tr: 'работать волонтёром' },
+        provider: 'local-e2e-fixture', promptVersion: 'local-e2e-fixture-v1', cached: false,
+      }),
+    });
+  });
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
   await page.locator('#scr1.on').waitFor({state:'visible',timeout:5_000});
   await openPracticeSkill(page, 'reading');
@@ -108,20 +138,20 @@ try {
   const volunteerInReading = page.locator('#r_area button[data-w="volunteer"]').first();
   await volunteerInReading.press('Enter');
   await page.locator('#r_pop').waitFor();
-  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+  await commitReadingWordAction(page, 'know');
   await volunteerInReading.press('Enter');
-  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+  await commitReadingWordAction(page, 'know');
 
   await page.getByRole('button', { name: 'К каталогу' }).press('Enter');
   await page.getByRole('button', { name: 'Начать Task 10' }).press('Enter');
   const manyInReading = page.locator('#r_area button[data-w="many"]').first();
   await manyInReading.press('Enter');
   await page.locator('#r_tr').getByText(/many|многие/u).waitFor();
-  await page.getByRole('button', { name: '+ Учить', exact: true }).press('Enter');
+  await commitReadingWordAction(page, 'learn');
   await manyInReading.press('Enter');
-  await page.getByRole('button', { name: '+ Учить', exact: true }).press('Enter');
+  await commitReadingWordAction(page, 'learn');
   await manyInReading.press('Enter');
-  await page.locator('#r_pop button[onclick="r_add(\'know\')"]').press('Enter');
+  await commitReadingWordAction(page, 'know');
   const readingCards = await page.evaluate(() => ({
     cards: window.S.personalWords,
     progress: window.S.srs.volunteer,
@@ -277,6 +307,7 @@ try {
     window.S.wstatus = {};
     window.wShowHome();
   });
+  await page.waitForFunction(()=>document.activeElement?.id==='w_home_title');
   await page.getByRole('button', { name: /^Начать ·/u }).press('Enter');
   await page.getByRole('heading', { name: 'Напиши слово' }).waitFor();
   await page.getByLabel('Ответ по-английски').fill('volunteer');
@@ -447,6 +478,8 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Проверить ответ' }).isEnabled(),true);
   await page.getByRole('button', { name: 'Проверить ответ' }).press('Enter');
   await page.waitForFunction(()=>document.activeElement?.id==='w_primary_action');
+  assert.equal(await page.locator('[id="w_primary_action"]').count(),1,
+    'the runtime Vocabulary action must own a unique document ID');
   assert.equal(await page.locator('#w_primary_action').getAttribute('aria-label'),'Разобрать ответ');
   await page.waitForTimeout(350);
   assert.equal(await page.locator('#w_area').getAttribute('data-session-phase'),'answer');
@@ -491,6 +524,7 @@ try {
 
   await page.getByRole('button', { name: 'К плану слов' }).press('Enter');
   await page.getByRole('heading', { name: 'Сегодня' }).waitFor();
+  await page.waitForFunction(()=>document.activeElement?.id==='w_home_title');
   assert.equal(await page.evaluate(()=>document.activeElement?.id),'w_home_title');
   const trend = page.getByRole('region', { name: 'Самостоятельное вспоминание' });
   assert.match(await trend.innerText(), /7 дней/u);
