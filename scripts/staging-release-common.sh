@@ -1435,19 +1435,31 @@ begin_release_transaction() {
 
 clear_transaction_marker() {
   local removal_status
-  reverify_transaction_marker_identity || return 1
+  reverify_transaction_marker_identity || {
+    echo 'Staging transaction marker identity could not be revalidated before removal' >&2
+    return 1
+  }
   if durable_remove_file "$recovery_marker"; then
-    capture_transaction_marker_identity
-    return
+    capture_transaction_marker_identity || {
+      echo 'Staging transaction marker absence authority could not be captured' >&2
+      return 1
+    }
+    return 0
   else
     removal_status="$?"
+    echo "Staging transaction marker durable removal failed with status $removal_status" >&2
   fi
   # A pathname command may report failure after it has already removed the
   # exact, prevalidated marker. Preserve the nonzero/fail-closed result, but
   # durably reconcile absence and replace the stale inode authority so cleanup
   # can publish a new recovery-required marker without claiming success.
   if durable_confirm_absence "$recovery_marker"; then
-    capture_transaction_marker_identity || return 1
+    capture_transaction_marker_identity || {
+      echo 'Staging transaction marker reconciled absence could not be captured' >&2
+      return 1
+    }
+  else
+    echo 'Staging transaction marker absence could not be durably reconciled' >&2
   fi
   return "$removal_status"
 }

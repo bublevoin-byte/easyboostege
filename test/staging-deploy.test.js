@@ -611,7 +611,7 @@ test('root-owned staging restart preserves release authority and fails closed on
     const probe = runBash(['--version']);
     if (!probe) return context.skip('Git Bash is not installed');
     const ready = await createFixture();
-    context.after(() => fs.rm(ready.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(ready.root));
     const markerBefore = await fs.readFile(path.join(ready.appDir, '.release-sha256'), 'utf8');
     const success = runRestart(ready);
     assert.equal(success.status, 0, success.stdout + '\n' + success.stderr);
@@ -626,7 +626,7 @@ test('root-owned staging restart preserves release authority and fails closed on
     await assert.rejects(fs.access(path.join(ready.root, 'host-operation.lock')), { code: 'ENOENT' });
 
     const unavailable = await createFixture();
-    context.after(() => fs.rm(unavailable.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(unavailable.root));
     const failure = runRestart(unavailable, { FAKE_RESTART_READINESS_FAIL: '1' });
     assert.notEqual(failure.status, 0, failure.stdout + '\n' + failure.stderr);
     assert.match(await fs.readFile(path.join(unavailable.appDir, '.staging-recovery-required'), 'utf8'),
@@ -732,7 +732,7 @@ test('a failed staging image build preserves the active tree and proves no relea
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
 
   const result = runDeploy(fixture, { FAKE_BUILD_FAIL: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -751,7 +751,7 @@ test('a post-build frozen-archive mutation is detected before image promotion or
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
 
   const result = runDeploy(fixture, { FAKE_MUTATE_FROZEN_AFTER_BUILD: '1' });
   assert.equal(result.status, 65, `${result.stdout}\n${result.stderr}`);
@@ -769,7 +769,7 @@ test('a failed staging stable-tag promotion preserves the active marker and runn
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
 
   const result = runDeploy(fixture, { FAKE_PROMOTE_FAIL: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -784,7 +784,7 @@ test('a failed staging stable-tag promotion preserves the active marker and runn
 
 test('an ambiguous stable-tag result reconciles the actual daemon state for active and first deploys', async (context) => {
   const active = await createFixture();
-  context.after(() => fs.rm(active.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(active.root));
   const activeResult = runDeploy(active, { FAKE_PROMOTE_SIDE_EFFECT_ERROR: '1' });
   assert.notEqual(activeResult.status, 0, `${activeResult.stdout}\n${activeResult.stderr}`);
   assert.equal(await fs.readFile(`${active.commandLog}.image-state`, 'utf8'),
@@ -794,7 +794,7 @@ test('an ambiguous stable-tag result reconciles the actual daemon state for acti
   assert.equal(await fs.readFile(path.join(active.appDir, 'shared.txt'), 'utf8'), 'old\n');
 
   const first = await createFixture();
-  context.after(() => fs.rm(first.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(first.root));
   await makeFirstDeploymentFixture(first);
   const firstResult = runDeploy(first, {
     FAKE_NO_PREVIOUS_IMAGE: '1', FAKE_PROMOTE_SIDE_EFFECT_ERROR: '1',
@@ -810,7 +810,7 @@ test('readiness failure restores the previous stable image, code tree and marker
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
 
   const result = runDeploy(fixture, { FAKE_READINESS_FAIL: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -849,7 +849,7 @@ test('every partial release-pair publication removes exact temp and final paths 
       'FAKE_RELEASE_SIDECAR_MV_FAIL',
     ]) {
       const fixture = await createFixture();
-      context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+      context.after(() => removeFixture(fixture.root));
       const result = runDeploy(fixture, { [flag]: '1' });
       assert.notEqual(result.status, 0, `${flag}: ${result.stdout}\n${result.stderr}`);
       assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
@@ -873,7 +873,7 @@ test('every partial release-pair publication removes exact temp and final paths 
 test('release-pair cleanup attempts every owned path and never claims an unverified prior store',
   async (context) => {
     const cleanupFailure = await createFixture();
-    context.after(() => fs.rm(cleanupFailure.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(cleanupFailure.root));
     const cleanupResult = runDeploy(cleanupFailure, {
       FAKE_PAIR_ARCHIVE_FINAL_RM_FAIL: '1',
       FAKE_RELEASE_SIDECAR_WRITE_FAIL: '1',
@@ -891,7 +891,7 @@ test('release-pair cleanup attempts every owned path and never claims an unverif
     assert.doesNotMatch(cleanupResult.stderr, /verified prior state restored/u);
 
     const revalidation = await createFixture();
-    context.after(() => fs.rm(revalidation.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(revalidation.root));
     const revalidationResult = runDeploy(revalidation, {
       FAKE_RELEASE_SIDECAR_MV_FAIL: '1',
       FAKE_TAMPER_PREVIOUS_STORE_ON_PAIR_CLEANUP: '1',
@@ -907,7 +907,7 @@ test('release-pair cleanup attempts every owned path and never claims an unverif
 
 test('release-pair publication never overwrites a foreign final-path race', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_RELEASE_FINAL_PUBLICATION_REPLACE: '1' });
   const candidateArchive = path.join(
     fixture.appDir, 'rollbacks', 'releases', `release-${fixture.candidate.sha}.tar.gz`,
@@ -921,7 +921,7 @@ test('release-pair publication never overwrites a foreign final-path race', asyn
 
 test('release-pair cleanup quarantines and preserves a foreign final-path replacement', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, {
     FAKE_RELEASE_SIDECAR_WRITE_FAIL: '1',
     FAKE_PAIR_FINAL_CLEANUP_REPLACE: '1',
@@ -938,7 +938,7 @@ test('release-pair cleanup quarantines and preserves a foreign final-path replac
 
 test('failure clearing the transaction marker keeps the committed candidate fail-closed', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_TRANSACTION_MARKER_RM_FAIL: '1' });
   assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
   assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
@@ -961,7 +961,7 @@ test('every deploy post-commit retirement failure preserves the committed candid
       ['remove private staging work directory', 'FAKE_WORKDIR_RM_FAIL'],
     ]) {
       const fixture = await createFixture();
-      context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+      context.after(() => removeFixture(fixture.root));
       const result = runDeploy(fixture, { [flag]: '1' });
       assert.equal(result.status, 70, `${step}: ${result.stdout}\n${result.stderr}`);
       assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
@@ -982,7 +982,7 @@ test('deploy accepts only an authoritative exact-not-found after temporary image
   async (context) => {
     for (const status of ['124', '128', '1']) {
       const fixture = await createFixture();
-      context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+      context.after(() => removeFixture(fixture.root));
       const result = runDeploy(fixture, { FAKE_RELEASE_INSPECT_AFTER_RM_STATUS: status });
       assert.equal(result.status, 70, `inspect ${status}: ${result.stdout}\n${result.stderr}`);
       assert.doesNotMatch(result.stdout, /staging_release_sha256=|staging_ready=/u, status);
@@ -994,7 +994,7 @@ test('deploy accepts only an authoritative exact-not-found after temporary image
 
 test('deploy rejects every noncanonical Docker image identity before build', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_NONCANONICAL_IMAGE_IDENTITIES: '1' });
 
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -1007,7 +1007,7 @@ test('deploy recovery cannot claim a restored predecessor after an indeterminate
   async (context) => {
     for (const status of ['124', '128', '1']) {
       const fixture = await createFixture();
-      context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+      context.after(() => removeFixture(fixture.root));
       const result = runDeploy(fixture, {
         FAKE_READINESS_FAIL: '1', FAKE_RELEASE_INSPECT_AFTER_RM_STATUS: status,
       });
@@ -1024,7 +1024,7 @@ test('deploy rejects every indeterminate temporary-image preflight before Docker
   async (context) => {
     for (const status of ['124', '128', '1']) {
       const fixture = await createFixture();
-      context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+      context.after(() => removeFixture(fixture.root));
       const result = runDeploy(fixture, { FAKE_RELEASE_PROBE_BEFORE_BUILD_STATUS: status });
       assert.equal(result.status, 70, `probe ${status}: ${result.stdout}\n${result.stderr}`);
       const log = await fs.readFile(fixture.commandLog, 'utf8');
@@ -1036,7 +1036,7 @@ test('deploy rejects every indeterminate temporary-image preflight before Docker
 test('deploy never removes a temporary image reference after its captured identity drifts',
   async (context) => {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const result = runDeploy(fixture, { FAKE_RELEASE_IMAGE_DRIFT_BEFORE_RM: '1' });
     assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
     assert.doesNotMatch(result.stdout, /staging_release_sha256=|staging_ready=/u);
@@ -1050,7 +1050,7 @@ test('deploy never removes a temporary image reference after its captured identi
 
 test('deploy does not remove a foreign tag rebound after the ownership probe', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_RELEASE_REBOUND_AFTER_OWNERSHIP_PROBE: '1' });
 
   assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
@@ -1084,7 +1084,7 @@ test('deploy and rollback use one common ordered release finalizer without mode 
 test('normal success revalidates the whole release store after its reservation is removed',
   async (context) => {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const result = runDeploy(fixture, { FAKE_ADD_STORE_ENTRY_AFTER_RESERVATION_RELEASE: '1' });
     assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
     assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
@@ -1099,7 +1099,7 @@ test('normal success revalidates the whole release store after its reservation i
 
 test('active-marker publication failure recovers while predecessor material and reservations remain available', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_ACTIVE_MARKER_PUBLISH_FAIL: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
@@ -1117,7 +1117,7 @@ test('first deployment success and post-promotion failure leave a bootstrappable
   if (!probe) return context.skip('Git Bash is not installed');
 
   const success = await createFixture();
-  context.after(() => fs.rm(success.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(success.root));
   await makeFirstDeploymentFixture(success);
   const first = runDeploy(success, { FAKE_NO_PREVIOUS_IMAGE: '1' });
   assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
@@ -1126,7 +1126,7 @@ test('first deployment success and post-promotion failure leave a bootstrappable
     `${success.candidate.sha}\n`);
 
   const failure = await createFixture();
-  context.after(() => fs.rm(failure.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(failure.root));
   await makeFirstDeploymentFixture(failure);
   const failed = runDeploy(failure, {
     FAKE_NO_PREVIOUS_IMAGE: '1', FAKE_READINESS_FAIL: '1',
@@ -1160,7 +1160,7 @@ test('first deployment success and post-promotion failure leave a bootstrappable
     `${failure.candidate.sha}\n`);
 
   const partialPublication = await createFixture();
-  context.after(() => fs.rm(partialPublication.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(partialPublication.root));
   await makeFirstDeploymentFixture(partialPublication);
   const partial = runDeploy(partialPublication, {
     FAKE_NO_PREVIOUS_IMAGE: '1', FAKE_RELEASE_SIDECAR_MV_FAIL: '1',
@@ -1187,7 +1187,7 @@ test('first-deploy recovery fails closed when any exact Compose project object s
       ['backend network', 'FAKE_NETWORK_RESIDUE', 'network-state'],
     ]) {
       const fixture = await createFixture();
-      context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+      context.after(() => removeFixture(fixture.root));
       await makeFirstDeploymentFixture(fixture);
       const result = runDeploy(fixture, {
         FAKE_NO_PREVIOUS_IMAGE: '1', FAKE_READINESS_FAIL: '1', [flag]: '1',
@@ -1206,7 +1206,7 @@ test('first deploy refuses contaminated Docker state and recovers pre-promotion 
   for (const flag of ['FAKE_FIRST_STALE_STABLE', 'FAKE_FIRST_STALE_RELEASE',
     'FAKE_FIRST_STALE_CONTAINER']) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     await makeFirstDeploymentFixture(fixture);
     const result = runDeploy(fixture, { FAKE_NO_PREVIOUS_IMAGE: '1', [flag]: '1' });
     assert.notEqual(result.status, 0, `${flag}: ${result.stdout}\n${result.stderr}`);
@@ -1215,7 +1215,7 @@ test('first deploy refuses contaminated Docker state and recovers pre-promotion 
   }
 
   const failedBuild = await createFixture();
-  context.after(() => fs.rm(failedBuild.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(failedBuild.root));
   await makeFirstDeploymentFixture(failedBuild);
   const failed = runDeploy(failedBuild, { FAKE_NO_PREVIOUS_IMAGE: '1', FAKE_BUILD_FAIL: '1' });
   assert.notEqual(failed.status, 0, `${failed.stdout}\n${failed.stderr}`);
@@ -1239,7 +1239,7 @@ test('every checked active recovery failure is separately diagnosed and leaves f
     ['readiness', 'FAKE_RECOVERY_READINESS_FAIL'],
   ]) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const result = runDeploy(fixture, { FAKE_READINESS_FAIL: '1', [flag]: '1' });
     assert.equal(result.status, 70, `${label}: ${result.stdout}\n${result.stderr}`);
     assert.match(result.stderr, /Primary staging deploy failed with status 1; recovery failed at:/u);
@@ -1258,7 +1258,7 @@ test('first-deployment cleanup failure is explicit and leaves a recovery-require
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   await makeFirstDeploymentFixture(fixture);
   const result = runDeploy(fixture, {
     FAKE_NO_PREVIOUS_IMAGE: '1', FAKE_READINESS_FAIL: '1', FAKE_IMAGE_RM_FAIL: '1',
@@ -1275,7 +1275,7 @@ test('stale deploy protocol and bounded store failures happen before Docker or c
   if (!probe) return context.skip('Git Bash is not installed');
 
   const stale = await createFixture();
-  context.after(() => fs.rm(stale.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(stale.root));
   const staleResult = runBash([
     posixPath(deployScript), posixPath(stale.candidate.archive), stale.candidate.sha,
   ], {
@@ -1289,7 +1289,7 @@ test('stale deploy protocol and bounded store failures happen before Docker or c
   assert.equal(await fs.readFile(path.join(stale.appDir, 'shared.txt'), 'utf8'), 'old\n');
 
   const bounded = await createFixture();
-  context.after(() => fs.rm(bounded.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(bounded.root));
   for (let index = 0; index < 4; index += 1) {
     const release = await createRelease(bounded.root, `retained-${index}`, `retained-${index}`);
     const stored = path.join(
@@ -1311,7 +1311,7 @@ test('release store rejects temporary debris and malformed checksum sidecars bef
   if (!probe) return context.skip('Git Bash is not installed');
 
   const debris = await createFixture();
-  context.after(() => fs.rm(debris.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(debris.root));
   await fs.writeFile(path.join(debris.appDir, 'rollbacks', 'releases', '.candidate.tmp'), 'partial\n');
   const debrisResult = runDeploy(debris);
   assert.equal(debrisResult.status, 67, `${debrisResult.stdout}\n${debrisResult.stderr}`);
@@ -1320,7 +1320,7 @@ test('release store rejects temporary debris and malformed checksum sidecars bef
   assert.equal(await fs.readFile(path.join(debris.appDir, 'shared.txt'), 'utf8'), 'old\n');
 
   const sidecar = await createFixture();
-  context.after(() => fs.rm(sidecar.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(sidecar.root));
   const previousSidecar = path.join(
     sidecar.appDir, 'rollbacks', 'releases', `release-${sidecar.previous.sha}.tar.gz.sha256`,
   );
@@ -1339,7 +1339,7 @@ test('active release marker requires exactly one lowercase SHA line with a newli
     ['missing newline', 'missing-newline'],
   ]) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const marker = path.join(fixture.appDir, '.release-sha256');
     if (body === null) await fs.writeFile(marker, `${fixture.previous.sha}\nextra\n`);
     else if (body === 'uppercase') await fs.writeFile(marker, `${fixture.previous.sha.toUpperCase()}\n`);
@@ -1355,7 +1355,7 @@ test('the shared nonblocking staging release lock rejects concurrent deploy befo
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_LOCK_BUSY: '1' });
   assert.equal(result.status, 75, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /release operation is active/u);
@@ -1365,7 +1365,7 @@ test('the shared nonblocking staging release lock rejects concurrent deploy befo
 
 test('protected staging store and lock paths reject symlinks before write or Docker', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const store = path.join(fixture.appDir, 'rollbacks', 'releases');
   const outsideStore = path.join(fixture.root, 'outside-store');
   await fs.rm(store, { recursive: true, force: true });
@@ -1379,7 +1379,7 @@ test('protected staging store and lock paths reject symlinks before write or Doc
   assert.doesNotMatch(log, /docker\|/u);
 
   const lockFixture = await createFixture();
-  context.after(() => fs.rm(lockFixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(lockFixture.root));
   const outsideLock = path.join(lockFixture.root, 'outside-lock');
   const lock = path.join(lockFixture.appDir, '.staging-release.lock');
   await fs.writeFile(outsideLock, 'must-not-change\n');
@@ -1400,7 +1400,7 @@ test('deploy refuses a legacy active tree without a verified retained source arc
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   await fs.rm(path.join(fixture.appDir, '.release-sha256'));
   await fs.rm(path.join(fixture.appDir, 'rollbacks', 'releases'), { recursive: true, force: true });
   await fs.mkdir(path.join(fixture.appDir, 'rollbacks', 'releases'));
@@ -1414,7 +1414,7 @@ test('deploy refuses a legacy active tree without a verified retained source arc
 
 test('deploy rejects stable-tag and running-container drift before build or mutation', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const markerBefore = await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8');
   const result = runDeploy(fixture, { FAKE_RUNNING_IMAGE_DRIFT: '1' });
   assert.equal(result.status, 67, `${result.stdout}\n${result.stderr}`);
@@ -1427,7 +1427,7 @@ test('deploy rejects stable-tag and running-container drift before build or muta
 
 test('deploy admits live/store/temp peak capacity before Docker or active-tree mutation', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_LOW_APP_DISK: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /disk|space|headroom|capacity/iu);
@@ -1442,7 +1442,7 @@ test('deploy rejects a byte-identical upload swap after capture and cleans its e
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const replacement = path.join(fixture.root, 'byte-identical-replacement.tar.gz');
   const temporaryRoot = path.join(fixture.root, 'deploy-temporary');
   await Promise.all([
@@ -1464,7 +1464,7 @@ test('deploy rejects a byte-identical upload swap after capture and cleans its e
 
 test('deploy fails before upload copy when exact pre-copy capacity cannot be reserved', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const temporaryRoot = path.join(fixture.root, 'deploy-temporary');
   await fs.mkdir(temporaryRoot);
   const result = runDeploy(fixture, {
@@ -1480,7 +1480,7 @@ test('deploy fails before upload copy when exact pre-copy capacity cannot be res
 
 test('deploy rejects a symlink replacement between upload capture and descriptor open', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const replacement = path.join(fixture.root, 'symlink-target.tar.gz');
   const temporaryRoot = path.join(fixture.root, 'deploy-temporary');
   await Promise.all([
@@ -1509,7 +1509,7 @@ test('deploy rejects a symlink replacement between upload capture and descriptor
 
 test('deploy rejects an oversized sparse upload before reservation, copy or Docker', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const temporaryRoot = path.join(fixture.root, 'deploy-temporary');
   await fs.mkdir(temporaryRoot);
   await fs.truncate(fixture.candidate.archive, (256 * 1024 * 1024) + 1);
@@ -1526,7 +1526,7 @@ test('partial pre-copy allocation failures clean only their private exact state'
   for (const flag of ['FAKE_UPLOAD_CAPACITY_SIDE_EFFECT_FAIL',
     'FAKE_UPLOAD_OUTPUT_SIDE_EFFECT_FAIL']) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const temporaryRoot = path.join(fixture.root, 'deploy-temporary');
     await fs.mkdir(temporaryRoot);
     const result = runDeploy(fixture, {
@@ -1544,7 +1544,7 @@ test('partial pre-copy allocation failures clean only their private exact state'
 test('disk reservation must prove allocated blocks and leaves no reservation debris', async (context) => {
   if (process.platform !== 'win32') {
     const sparse = await createFixture();
-    context.after(() => fs.rm(sparse.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(sparse.root));
     const rejected = runDeploy(sparse, { FAKE_SPARSE_RESERVATION: '1' });
     assert.equal(rejected.status, 68, `${rejected.stdout}\n${rejected.stderr}`);
     assert.match(rejected.stderr, /reservation.*(?:capacity|proven)|disk/iu);
@@ -1553,7 +1553,7 @@ test('disk reservation must prove allocated blocks and leaves no reservation deb
   }
 
   const valid = await createFixture();
-  context.after(() => fs.rm(valid.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(valid.root));
   const result = runDeploy(valid);
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   const debris = [];
@@ -1571,7 +1571,7 @@ test('disk reservation must prove allocated blocks and leaves no reservation deb
 test('bounded database backup failure is pre-promotion and leaves no partial live artifact', async (context) => {
   for (const flag of ['FAKE_PG_DUMP_FAIL', 'FAKE_BACKUP_WRITE_TIMEOUT']) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const result = runDeploy(fixture, { [flag]: '1' });
     assert.notEqual(result.status, 0, `${flag}: ${result.stdout}\n${result.stderr}`);
     const log = await fs.readFile(fixture.commandLog, 'utf8').catch((error) => {
@@ -1589,7 +1589,7 @@ test('bounded database backup failure is pre-promotion and leaves no partial liv
 test('database backup publication is crash-durable before stable-image promotion', async (context) => {
   for (const flag of ['FAKE_BACKUP_FILE_SYNC_FAIL', 'FAKE_BACKUP_PARENT_SYNC_FAIL']) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const result = runDeploy(fixture, { [flag]: '1' });
     assert.notEqual(result.status, 0, `${flag}: ${result.stdout}\n${result.stderr}`);
     const log = await fs.readFile(fixture.commandLog, 'utf8').catch((error) => {
@@ -1606,7 +1606,7 @@ test('database backup publication is crash-durable before stable-image promotion
 
 test('pinned protected runtime identity rejects a same-owner post-lock replacement before promotion', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const marker = await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8');
   const result = runDeploy(fixture, { FAKE_SWAP_ENV_AFTER_BUILD: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -1621,7 +1621,7 @@ test('pinned protected runtime identity rejects a same-owner post-lock replaceme
 test('active-marker and release-store authority remain closed after lock acquisition', async (context) => {
   for (const flag of ['FAKE_REWRITE_ACTIVE_MARKER_AFTER_BUILD', 'FAKE_ADD_STORE_ENTRY_AFTER_BUILD']) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const result = runDeploy(fixture, { [flag]: '1' });
     assert.equal(result.status, 70, `${flag}: ${result.stdout}\n${result.stderr}`);
     assert.match(result.stderr, /authority|identity|membership|changed/iu);
@@ -1635,7 +1635,7 @@ test('active-marker and release-store authority remain closed after lock acquisi
 
 test('pinned protected environment rejects same-inode byte rewrites and unsafe private modes', async (context) => {
   const rewritten = await createFixture();
-  context.after(() => fs.rm(rewritten.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(rewritten.root));
   const rewriteResult = runDeploy(rewritten, { FAKE_REWRITE_ENV_IN_PLACE_AFTER_BUILD: '1' });
   assert.notEqual(rewriteResult.status, 0, `${rewriteResult.stdout}\n${rewriteResult.stderr}`);
   assert.match(rewriteResult.stderr, /protected staging runtime authority changed/iu);
@@ -1644,7 +1644,7 @@ test('pinned protected environment rejects same-inode byte rewrites and unsafe p
 
   if (process.platform !== 'win32') {
     const publicEnv = await createFixture();
-    context.after(() => fs.rm(publicEnv.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(publicEnv.root));
     await fs.chmod(path.join(publicEnv.appDir, '.env.staging'), 0o644);
     const modeResult = runDeploy(publicEnv);
     assert.equal(modeResult.status, 67, `${modeResult.stdout}\n${modeResult.stderr}`);
@@ -1656,7 +1656,7 @@ test('pinned protected environment rejects same-inode byte rewrites and unsafe p
 
 test('pinned PostgreSQL image identity is rechecked immediately before activation', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_POSTGRES_DRIFT_ONCE: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /postgres.*identity changed/iu);
@@ -1673,7 +1673,7 @@ test('pinned PostgreSQL image identity is rechecked immediately before activatio
 test('captured PostgreSQL ID remains Compose authority when the lookup tag is retagged',
   async (context) => {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const result = runDeploy(fixture, { FAKE_POSTGRES_RETAG_AFTER_CAPTURE: '1' });
     assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.match(result.stderr, /postgres.*identity changed/iu);
@@ -1691,7 +1691,7 @@ test('deploy rejects an uploaded archive whose frozen bytes do not match the req
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   await fs.appendFile(fixture.candidate.archive, 'changed-after-checksum');
 
   const result = runDeploy(fixture);
@@ -1748,7 +1748,7 @@ test('deploy rejects traversal, protected runtime paths and links before Docker'
     ['env-descendant', { name: '.env.staging/private', body: Buffer.from('blocked\n') }],
   ]) {
     const fixture = await createFixture();
-    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    context.after(() => removeFixture(fixture.root));
     const bytes = tarArchive([
       { name: '.dockerignore', body: Buffer.from('/backups\n') },
       { name: 'Dockerfile', body: Buffer.from('FROM scratch\n') },
@@ -1770,7 +1770,7 @@ test('resolved Compose authority rejects comment-spoofed image and context value
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   await fs.writeFile(path.join(fixture.candidate.directory, 'compose.staging.yml'), [
     '# image: easyboost-staging-app:local',
     '# pull_policy: never',
@@ -1797,7 +1797,7 @@ test('resolved Compose authority rejects comment-spoofed image and context value
 
 test('resolved Compose authority rejects unapproved services and build contexts before mutation', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const result = runDeploy(fixture, { FAKE_EXTRA_SERVICE: '1' });
   assert.equal(result.status, 65, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /Compose|service|context|unsafe/iu);
@@ -1830,7 +1830,7 @@ test('root staging deploy rejects public credential sentinels before Docker or r
     for (const { file, name, value } of cases) {
       const label = `${file}:${name}`;
       const fixture = await createFixture();
-      context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+      context.after(() => removeFixture(fixture.root));
       const model = approvedComposeModel(fixture.appDir);
       model.services.app.environment[name] = value;
       if (name === 'POSTGRES_PASSWORD') {
@@ -1960,7 +1960,7 @@ test('documented staging env inventory resolves to the exact approved app model 
 
 test('staging Compose validation is transaction-deadline bounded before mutation', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const started = Date.now();
   const result = runDeploy(fixture, { FAKE_BOUNDED_COMPOSE_TIMEOUT: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -1973,7 +1973,7 @@ test('staging Compose validation is transaction-deadline bounded before mutation
 
 test('live-tree and recovery filesystem children are bounded while the release lock is held', async (context) => {
   const liveCopy = await createFixture();
-  context.after(() => fs.rm(liveCopy.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(liveCopy.root));
   const liveResult = runDeploy(liveCopy, { FAKE_LIVE_COPY_TIMEOUT: '1' });
   assert.equal(liveResult.status, 124, `${liveResult.stdout}\n${liveResult.stderr}`);
   assert.match(liveResult.stderr, /verified prior state restored/u);
@@ -1983,7 +1983,7 @@ test('live-tree and recovery filesystem children are bounded while the release l
     `${liveCopy.previous.sha}\n`);
 
   const recoveryCopy = await createFixture();
-  context.after(() => fs.rm(recoveryCopy.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(recoveryCopy.root));
   const recoveryResult = runDeploy(recoveryCopy, {
     FAKE_READINESS_FAIL: '1', FAKE_RECOVERY_COPY_TIMEOUT: '1',
   });
@@ -1996,7 +1996,7 @@ test('live-tree and recovery filesystem children are bounded while the release l
 
 test('staging v4 helper digest authority rejects a mixed same-protocol bundle before state access', async (context) => {
   const fixture = await createFixture();
-  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  context.after(() => removeFixture(fixture.root));
   const bundle = path.join(fixture.root, 'immutable-archive-v4-mixed');
   await fs.mkdir(bundle);
   for (const file of HELPER_BUNDLE_FILES) {
