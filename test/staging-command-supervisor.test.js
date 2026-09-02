@@ -145,18 +145,18 @@ test('CLI rejects ordinary leader exit until its same-group descendant is termin
     `echo $! > ${JSON.stringify(descendantPidFile)}`,
     `while [ ! -s ${JSON.stringify(readyFile)} ]; do :; done`,
     'exit 0',
-  ].join('; ');
+  ].join('\n');
   const result = spawnSync(process.execPath, [
-    supervisor, '--milliseconds', '1_000', String(process.pid), '100',
+    supervisor, '--milliseconds', '1000', String(process.pid), '100',
     '--', 'sh', '-c', script,
   ], { encoding: 'utf8', timeout: 5_000 });
+
+  assert.equal(result.status, 127, result.stderr);
+  assert.match(result.stderr, /leader exited.*descendants remained alive/iu);
   recordedPids.push(
     Number(await fs.readFile(leaderPidFile, 'utf8')),
     Number(await fs.readFile(descendantPidFile, 'utf8')),
   );
-
-  assert.equal(result.status, 127, result.stderr);
-  assert.match(result.stderr, /leader exited.*descendants remained alive/iu);
   await waitFor(() => !groupAlive(recordedPids[0]));
 });
 
@@ -865,7 +865,7 @@ test('supervisor bounds and reaps a TERM-ignoring command group', {
     `echo $$ > ${JSON.stringify(childPid)}`,
     `(trap "" TERM; echo $$ > ${JSON.stringify(grandchildPid)}; while :; do sleep 1; done) &`,
     'while :; do sleep 1; done',
-  ].join('; ');
+  ].join('\n');
   const result = spawnSync(process.execPath,
     [supervisor, '1', String(process.pid), '--', 'bash', '-c', script],
     { encoding: 'utf8', timeout: 10_000 });
@@ -892,7 +892,7 @@ test('supervisor keeps escalation armed when TERM closes the leader before its d
     `echo $$ > ${JSON.stringify(leaderPid)}`,
     `(trap "" TERM; echo $BASHPID > ${JSON.stringify(grandchildPid)}; while :; do sleep 1; done) &`,
     'while :; do sleep 1; done',
-  ].join('; ');
+  ].join('\n');
   const result = spawnSync(process.execPath, [
     supervisor, '--milliseconds', '250', String(process.pid), '100',
     '--', 'bash', '-c', script,
@@ -945,9 +945,12 @@ test('supervisor kills descendants when its invoking parent is externally SIGKIL
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-supervisor-parent-'));
   context.after(() => fs.rm(root, { recursive: true, force: true }));
   const childPid = path.join(root, 'child.pid');
-  const parent = spawn('bash', ['-c', [
-    `node ${JSON.stringify(supervisor)} 30 $$ -- bash -c ${JSON.stringify(`echo $$ > ${childPid}; trap "" TERM; while :; do sleep 1; done`)}`,
-  ].join('')], { detached: false, stdio: 'ignore' });
+  const parentScript = [
+    `node ${JSON.stringify(supervisor)} 30 "$$" -- bash -c 'echo $$ > "$1"; trap "" TERM; while :; do sleep 1; done' child ${JSON.stringify(childPid)} &`,
+    'supervisor_pid=$!',
+    'wait "$supervisor_pid"',
+  ].join('\n');
+  const parent = spawn('bash', ['-c', parentScript], { detached: false, stdio: 'ignore' });
   await waitFor(async () => fs.readFile(childPid, 'utf8').then(() => true, () => false));
   const pid = Number(await fs.readFile(childPid, 'utf8'));
   parent.kill('SIGKILL');

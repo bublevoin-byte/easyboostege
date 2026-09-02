@@ -1131,7 +1131,8 @@ finalize_release_boundaries() {
     record_finalization_failure "$reservation_step"
   fi
   if [ -n "${work_dir:-}" ]; then
-    if run_bounded "$COMMAND_SECONDS" rm -rf -- "$work_dir" \
+    if run_bounded "$COMMAND_SECONDS" chmod -R u+w -- "$work_dir" \
+      && run_bounded "$COMMAND_SECONDS" rm -rf -- "$work_dir" \
       && [ ! -e "$work_dir" ] && [ ! -L "$work_dir" ]; then
       work_dir=''
     else
@@ -1166,6 +1167,7 @@ recover_previous_release() {
   consume_reservation "$live_reservation_file" "$previous_expanded" || return 1
   clear_release_tree || return 1
   run_bounded "$COMMAND_SECONDS" cp -a "$previous_tree"/. "$app_dir"/ || return 1
+  run_bounded "$COMMAND_SECONDS" chmod 700 "$app_dir" || return 1
   run_tree_verify "$previous_archive" "$app_dir" || return 1
   recovery_step='restart previous application'
   compose_file="$app_dir/compose.staging.yml"

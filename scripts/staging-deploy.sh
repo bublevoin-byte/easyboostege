@@ -448,6 +448,7 @@ tree_mutated=1
 consume_reservation "$live_reservation_file" "$candidate_expanded" || exit 68
 clear_release_tree
 run_bounded "$COMMAND_SECONDS" cp -a "$release_dir"/. "$app_dir"/
+run_bounded "$COMMAND_SECONDS" chmod 700 "$app_dir"
 compose_file="$app_dir/compose.staging.yml"
 run_tree_verify "$frozen_archive" "$app_dir"
 validate_staging_compose_contract "$compose_file"

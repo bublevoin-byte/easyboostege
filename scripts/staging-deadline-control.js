@@ -59,6 +59,32 @@ function sameFileIdentity(left, right) {
   return String(left.dev) === String(right.dev) && String(left.ino) === String(right.ino);
 }
 
+function withOpenFileIdentity(filesystem, entry, label, operation) {
+  // Windows denies the rename/unlink attack while the file is open, but it also
+  // denies the legitimate parent-directory rename used by tombstone validation.
+  // POSIX permits both, so retain an open descriptor there to prevent inode reuse.
+  if (process.platform === 'win32') {
+    const identity = filesystem.lstatSync(entry);
+    if (!identity.isFile() || identity.isSymbolicLink()) {
+      throw new Error(`${label} changed before validation`);
+    }
+    return operation(identity);
+  }
+  let descriptor;
+  try {
+    descriptor = filesystem.openSync(entry, 'r');
+    const identity = filesystem.fstatSync(descriptor);
+    const pathnameIdentity = filesystem.lstatSync(entry);
+    if (!identity.isFile() || pathnameIdentity.isSymbolicLink()
+        || !sameFileIdentity(identity, pathnameIdentity)) {
+      throw new Error(`${label} changed before validation`);
+    }
+    return operation(identity);
+  } finally {
+    if (descriptor !== undefined) filesystem.closeSync(descriptor);
+  }
+}
+
 function pathIsAbsent(filesystem, entry) {
   try {
     filesystem.lstatSync(entry);
@@ -664,37 +690,47 @@ export function cleanupStagingDeadlinePublicationResidue(authority, {
         throw new Error('staging deadline publication terminal payload is missing');
       }
       const containerIdentity = filesystem.lstatSync(tombstone);
-      sourceIdentity = filesystem.lstatSync(temporary);
-      beforeUnlink(Object.freeze({ destination, temporary, tombstone }));
-      const current = filesystem.lstatSync(temporary);
-      const currentContainer = filesystem.lstatSync(tombstone);
-      if (!sameFileIdentity(sourceIdentity, current)
-          || !sameFileIdentity(containerIdentity, currentContainer)
-          || !terminalSlotMatches(readExactTerminalSlotRecord(tombstone, filesystem), expected)) {
-        throw new Error('staging deadline publication residue changed before quarantine');
-      }
-      filesystem.renameSync(temporary, payload);
+      sourceIdentity = withOpenFileIdentity(filesystem, temporary,
+        'staging deadline publication residue', (identity) => {
+          beforeUnlink(Object.freeze({ destination, temporary, tombstone }));
+          const current = filesystem.lstatSync(temporary);
+          const currentContainer = filesystem.lstatSync(tombstone);
+          if (!sameFileIdentity(identity, current)
+              || !sameFileIdentity(containerIdentity, currentContainer)
+              || !terminalSlotMatches(readExactTerminalSlotRecord(tombstone, filesystem), expected)) {
+            throw new Error('staging deadline publication residue changed before quarantine');
+          }
+          filesystem.renameSync(temporary, payload);
+          return identity;
+        });
     } else if (tombstone === null) {
-      sourceIdentity = filesystem.lstatSync(temporary);
-      beforeUnlink(Object.freeze({ destination, temporary }));
-      const current = filesystem.lstatSync(temporary);
-      if (!sameFileIdentity(sourceIdentity, current)) {
-        throw new Error('staging deadline publication residue changed before quarantine');
-      }
-      const reserved = reserveTerminalSlot(root, expected, { filesystem, synchronizeDirectory });
-      tombstone = reserved.container;
-      retainedTombstone = tombstone;
-      filesystem.renameSync(temporary, path.join(tombstone, 'payload'));
+      sourceIdentity = withOpenFileIdentity(filesystem, temporary,
+        'staging deadline publication residue', (identity) => {
+          beforeUnlink(Object.freeze({ destination, temporary }));
+          const current = filesystem.lstatSync(temporary);
+          if (!sameFileIdentity(identity, current)) {
+            throw new Error('staging deadline publication residue changed before quarantine');
+          }
+          const reserved = reserveTerminalSlot(root, expected,
+            { filesystem, synchronizeDirectory });
+          tombstone = reserved.container;
+          retainedTombstone = tombstone;
+          filesystem.renameSync(temporary, path.join(tombstone, 'payload'));
+          return identity;
+        });
     } else {
-      sourceIdentity = filesystem.lstatSync(payload);
       const containerIdentity = filesystem.lstatSync(tombstone);
-      beforeUnlink(Object.freeze({ destination, temporary, tombstone }));
-      const currentContainer = filesystem.lstatSync(tombstone);
-      const currentPayload = filesystem.lstatSync(payload);
-      if (!sameFileIdentity(containerIdentity, currentContainer)
-          || !sameFileIdentity(sourceIdentity, currentPayload)) {
-        throw new Error('staging deadline publication tombstone changed before finalization');
-      }
+      sourceIdentity = withOpenFileIdentity(filesystem, payload,
+        'staging deadline publication tombstone payload', (identity) => {
+          beforeUnlink(Object.freeze({ destination, temporary, tombstone }));
+          const currentContainer = filesystem.lstatSync(tombstone);
+          const currentPayload = filesystem.lstatSync(payload);
+          if (!sameFileIdentity(containerIdentity, currentContainer)
+              || !sameFileIdentity(identity, currentPayload)) {
+            throw new Error('staging deadline publication tombstone changed before finalization');
+          }
+          return identity;
+        });
     }
     retainedTombstone = tombstone;
     const activePayload = path.join(tombstone, 'payload');

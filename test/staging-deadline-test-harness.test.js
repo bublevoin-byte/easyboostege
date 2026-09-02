@@ -23,6 +23,7 @@ test('deadline harness rejects a DISARMed leader whose bounded session still own
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-deadline-harness-session-'));
     context.after(() => fs.rm(root, { force: true, recursive: true }));
     const descendantPid = path.join(root, 'descendant.pid');
+    const descendantReady = path.join(root, 'descendant.ready');
     context.after(async () => {
       const pid = Number(await fs.readFile(descendantPid, 'utf8').catch(() => '0'));
       if (!Number.isSafeInteger(pid) || pid <= 0) return;
@@ -37,7 +38,8 @@ test('deadline harness rejects a DISARMed leader whose bounded session still own
       '#!/bin/bash',
       'set -Eeuo pipefail',
       `node ${JSON.stringify(posixPath(transactionSupervisor))} --ready 1800 1000`,
-      `(trap '' TERM; echo $BASHPID > ${JSON.stringify(posixPath(descendantPid))}; while :; do sleep 1; done) &`,
+      `(trap '' HUP TERM; echo $BASHPID > ${JSON.stringify(posixPath(descendantPid))}; echo ready > ${JSON.stringify(posixPath(descendantReady))}; while :; do sleep 1; done) &`,
+      `while [ ! -s ${JSON.stringify(posixPath(descendantReady))} ]; do :; done`,
       `node ${JSON.stringify(posixPath(transactionSupervisor))} --request DISARM 0 1 1000`,
     ].join('\n'));
     const configuration = Buffer.from(JSON.stringify({
