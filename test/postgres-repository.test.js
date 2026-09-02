@@ -630,8 +630,10 @@ test('PostgreSQL Voice Tutor replay and recovery recheck Premium after the owner
 
     await locker.query('BEGIN');
     await locker.query('SELECT username FROM users WHERE username = $1 FOR UPDATE', [owner]);
+    // PostgreSQL keeps microseconds while node-postgres Date values round to milliseconds.
+    // Use a strictly expired boundary so the post-lock access check cannot tie within one millisecond.
     await locker.query(
-      `UPDATE subscription_entitlements SET ends_at = clock_timestamp()
+      `UPDATE subscription_entitlements SET ends_at = clock_timestamp() - INTERVAL '1 millisecond'
        WHERE username = $1 AND entitlement = 'voice_tutor'`,
       [owner],
     );
@@ -1824,8 +1826,9 @@ test('PostgreSQL targeted assignment revalidates after a concurrent owner-locked
     }).finally(() => { reportSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));
     assert.equal(reportSettled, false, 'learning report must wait for the owner lock');
+    // Keep the revoke strictly before the post-lock JavaScript Date after driver precision conversion.
     await raw.query(
-      `UPDATE subscription_entitlements SET ends_at = clock_timestamp()
+      `UPDATE subscription_entitlements SET ends_at = clock_timestamp() - INTERVAL '1 millisecond'
        WHERE username = $1 AND entitlement = 'voice_tutor'`,
       [owner],
     );
@@ -1867,7 +1870,7 @@ test('PostgreSQL targeted assignment revalidates after a concurrent owner-locked
     await new Promise((resolve) => setTimeout(resolve, 25));
     assert.equal(effectiveAssignmentSettled, false, 'targeted assignment must wait for the owner lock');
     await raw.query(
-      `UPDATE subscription_entitlements SET ends_at = clock_timestamp()
+      `UPDATE subscription_entitlements SET ends_at = clock_timestamp() - INTERVAL '1 millisecond'
        WHERE username = $1 AND entitlement = 'voice_tutor'`,
       [owner],
     );
