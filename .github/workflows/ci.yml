@@ -36,6 +36,11 @@ jobs:
       - name: PostgreSQL repository integration
         run: npm run test:postgres
       - name: Run the canonical one-build release gate
+        # Process-authority and staging fault-injection suites deliberately use real deadlines and
+        # child groups. Serial CI execution prevents unrelated files from starving those proofs;
+        # ordinary local `npm test` remains parallel when this variable is absent.
+        env:
+          EASYBOOST_TEST_CONCURRENCY: 1
         run: npm run test:release:aisy
       - name: Chrome Android E2E
         run: npm run test:e2e:android

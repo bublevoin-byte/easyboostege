@@ -131,6 +131,10 @@ test('the default and dedicated release gates build once and run one unique Aisy
     .map((match) => match[1]);
   assert.equal(ciCommands.filter((step) => step === 'npm run test:release:aisy').length, 1,
     'clean CI must delegate the canonical one-build chain to exactly one release wrapper');
+  assert.match(ciWorkflow,
+    /name: Run the canonical one-build release gate[\s\S]*EASYBOOST_TEST_CONCURRENCY: 1[\s\S]*run: npm run test:release:aisy/u,
+    'hosted CI must serialize process-authority suites without slowing ordinary local npm test');
+  assert.equal(packageJson.scripts.test, 'node scripts/run-unit-tests.js');
   assert.equal(ciCommands.includes('npm run build:frontend'), false,
     'CI must not duplicate steps already owned by the canonical release wrapper');
   assert.equal(ciCommands.includes('npm run test:e2e'), false,

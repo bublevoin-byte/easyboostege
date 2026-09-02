@@ -27,7 +27,9 @@ npm run test:release:aisy
 перед build — `npm run security:secrets` вместе с Docker-context guard, после него
 `npm run build:frontend`, единый список `npm run test:e2e:aisy:built`,
 `npm run test:e2e:performance`, `npm run security:history` и
-`git diff --check`. Обычные `npm run test:e2e`
+`git diff --check`. В hosted CI `EASYBOOST_TEST_CONCURRENCY=1` делает unit-фазу детерминированно
+последовательной для process-authority и staging fault-injection; обычный локальный `npm test` без
+этой переменной остаётся параллельным. Обычные `npm run test:e2e`
 и `npm run test:e2e:aisy` используют тот же список и отличаются только назначением; внутри одного
 запуска тесты не дублируются.
 
