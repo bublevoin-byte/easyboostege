@@ -1465,7 +1465,7 @@ test('POSIX durable writer carries the original source identity and content into
     const destination = path.join(directory, 'ready.proof');
     const temporary = path.join(root,
       '.owned-session.ready.proof.11111111111111111111111111111111.tmp');
-    await fs.mkdir(directory);
+    await fs.mkdir(directory, { mode: 0o700 });
     let recoveryAuthority;
     try {
       assert.throws(() => supervisor.writeDurablePosixSessionRecord(

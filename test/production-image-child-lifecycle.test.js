@@ -2876,6 +2876,16 @@ test('Windows Job completion never deletes retirement proof replaced at delete c
       protocol: 'easyboost-windows-job-empty-v1',
       token: control.specification.proofToken,
     })}\n`, { flag: 'wx', mode: 0o600 });
+    if (process.platform !== 'win32') {
+      assert.deepEqual(supervisor.recoverWindowsJobControl({
+        controlKey,
+        temporaryDirectory,
+      }), {
+        controlDirectory: path.dirname(control.specification.proofPath),
+        retired: true,
+        state: 'absent',
+      });
+    }
     assert.throws(() => supervisor.recoverWindowsJobControl({
       beforeRetirementProofDeleteCommit({ proof }) {
         lateProof = proof;
@@ -3050,7 +3060,9 @@ test('native database child authority reaps a real descendant tree', async () =>
     child = spawned.child;
     assert.equal(
       spawned.authority.kind,
-      process.platform === 'win32' ? 'windows-job-object-wrapper' : 'posix-process-group',
+      process.platform === 'win32'
+        ? 'windows-job-object-wrapper'
+        : 'posix-owned-session-wrapper',
     );
     let closed = false;
     const closeOutcome = new Promise((resolve) => {
