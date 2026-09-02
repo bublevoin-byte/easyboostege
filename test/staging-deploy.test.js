@@ -868,7 +868,8 @@ test('every partial release-pair publication removes exact temp and final paths 
         `release-${fixture.previous.sha}.tar.gz.sha256`,
       ], `${flag} must leave only the exact predecessor pair`);
       await assert.rejects(fs.access(path.join(fixture.appDir, '.staging-recovery-required')),
-        { code: 'ENOENT' }, flag);
+        { code: 'ENOENT' }, `${flag}: ${result.stdout}\n${result.stderr}\n${
+          await fs.readFile(fixture.commandLog, 'utf8')}`);
       assert.match(result.stderr, /verified prior state restored/u, flag);
 
       const retry = runDeploy(fixture);
@@ -906,7 +907,9 @@ test('release-pair cleanup attempts every owned path and never claims an unverif
       `${revalidationResult.stdout}\n${revalidationResult.stderr}`);
     assert.match(await fs.readFile(
       path.join(revalidation.appDir, '.staging-recovery-required'), 'utf8',
-    ), /release store|retained|archive pair/iu);
+    ), /release store|retained|archive pair/iu,
+    `${revalidationResult.stdout}\n${revalidationResult.stderr}\n${
+      await fs.readFile(revalidation.commandLog, 'utf8')}`);
     assert.doesNotMatch(revalidationResult.stderr, /verified prior state restored/u,
       'the success message requires exact post-cleanup predecessor-store verification');
   });
