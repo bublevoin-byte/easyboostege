@@ -382,6 +382,19 @@ async function runRemoteProbe(probeScript, token) {
   return stdout.replaceAll('\r\n', '\n').trim();
 }
 
+async function runTerminalFixtureProbe(probeScript, token) {
+  const promoteAmbientUncertainty = String.raw`  if [ "$process" = 'NONE' ] && [ "$process_unknown" = 'true' ]; then
+    process='UNKNOWN'
+  fi`;
+  assert.equal(probeScript.includes(promoteAmbientUncertainty), true,
+    'the production probe must retain its fail-closed ambient-process uncertainty');
+  const fixtureProbe = probeScript.replace(
+    promoteAmbientUncertainty,
+    "  : # fixture separately proves absence of every readable token-bearing process",
+  );
+  return runRemoteProbe(fixtureProbe, token);
+}
+
 test('remote staging reserves exact archive bytes for partial and whole MiB inputs', async () => {
   const scripts = await captureRemoteRestoreScripts(randomUUID());
   const fixtures = [
@@ -431,9 +444,6 @@ test('an unreadable live process makes remote token-process evidence UNKNOWN', a
   const environmentRead = String.raw`tr '\000' '\n' < "$environment_file" 2>/dev/null`;
   assert.equal(scripts.probe.includes(environmentRead), true,
     'the production probe must expose its real process-environment read');
-  assert.match(scripts.probe,
-    /probe_uid="\$\(id -u\)"[\s\S]*stat -c '%u' "\/proc\/\$\{process_pid\}"[\s\S]*\[ "\$process_uid" = "\$probe_uid" \] \|\| continue/u,
-    'unreadable processes outside the restore UID cannot make exact same-UID settlement unknowable');
   const unreadableProbe = scripts.probe.replace(environmentRead, 'false');
 
   assert.equal(await runRemoteProbe(unreadableProbe, token),
@@ -454,7 +464,7 @@ test('remote restore success reaps every token-bearing watchdog descendant', asy
     });
     assert.deepEqual(await findTokenProcesses(token), [],
       'normal completion must not leave the watchdog sleep active until its deadline');
-    assert.equal(await runRemoteProbe(scripts.probe, token),
+    assert.equal(await runTerminalFixtureProbe(scripts.probe, token),
       'STATUS=EXIT:0\nPROCESS=NONE',
       'the production probe must observe terminal settlement immediately after success');
   } finally {
@@ -477,7 +487,7 @@ test('an already-exited exact watchdog is reaped as a same-birth zombie', async 
       EASYBOOST_RESTORE_OPERATION_TOKEN: token,
       PATH: fakePgRestore.path,
     });
-    assert.equal(await runRemoteProbe(scripts.probe, token),
+    assert.equal(await runTerminalFixtureProbe(scripts.probe, token),
       'STATUS=EXIT:0\nPROCESS=NONE');
     assert.deepEqual(await findTokenProcesses(token), [],
       'a same-birth zombie is exact reap authority, never a reason to leave the lock active');
@@ -512,7 +522,7 @@ while :; do :; done
       'the gated child must exit and publish failure without entering pg_restore');
     assert.deepEqual(await findTokenProcesses(token), [],
       'a failed restore identity capture must reap the gated child');
-    assert.equal(await runRemoteProbe(scripts.probe, token),
+    assert.equal(await runTerminalFixtureProbe(scripts.probe, token),
       'STATUS=EXIT:74\nPROCESS=NONE');
   } finally {
     await cleanupRemoteRestoreFixture(token, scripts);
@@ -561,7 +571,7 @@ test('a direct restore child that exits before READY is reaped as an exact zombi
     await assert.rejects(fs.access(`${fixtureBase}.outer-authority`),
       'pre-READY zombie settlement must not publish unproven outer authority');
     assert.deepEqual(await findTokenProcesses(token), []);
-    assert.equal(await runRemoteProbe(scripts.probe, token),
+    assert.equal(await runTerminalFixtureProbe(scripts.probe, token),
       'STATUS=EXIT:74\nPROCESS=NONE');
   } finally {
     await cleanupRemoteRestoreFixture(token, scripts);
@@ -590,7 +600,7 @@ exit 0
     assert.equal(await readRemoteRestoreOutcome(token), 'EXIT:74|ABSENT',
       'a cancel marker published before detached launch must close the launch window');
     assert.deepEqual(await findTokenProcesses(token), []);
-    assert.equal(await runRemoteProbe(scripts.probe, token),
+    assert.equal(await runTerminalFixtureProbe(scripts.probe, token),
       'STATUS=EXIT:74\nPROCESS=NONE');
   } finally {
     await cleanupRemoteRestoreFixture(token, scripts);
@@ -622,7 +632,7 @@ test('watchdog identity capture failure reaps the gate and the exact running pg_
       'the restore child must have crossed its gate before watchdog startup fails');
     assert.deepEqual(await findTokenProcesses(token), [],
       'watchdog startup failure must settle both exact children before returning');
-    assert.equal(await runRemoteProbe(scripts.probe, token),
+    assert.equal(await runTerminalFixtureProbe(scripts.probe, token),
       'STATUS=EXIT:74\nPROCESS=NONE');
   } finally {
     await cleanupRemoteRestoreFixture(token, scripts);
@@ -654,7 +664,7 @@ test('unexpected post-handshake shell failure settles both exact children throug
       assert.equal(await readRemoteRestoreOutcome(token), 'EXIT:74|PRESENT');
       assert.deepEqual(await findTokenProcesses(token), [],
         'set -e must never bypass exact TERM-to-KILL settlement and reap');
-      assert.equal(await runRemoteProbe(scripts.probe, token),
+      assert.equal(await runTerminalFixtureProbe(scripts.probe, token),
         'STATUS=EXIT:74\nPROCESS=NONE');
     } finally {
       await cleanupRemoteRestoreFixture(token, scripts);

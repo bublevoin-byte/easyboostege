@@ -517,7 +517,6 @@ read_remote_status() {
 }
 process='NONE'
 process_unknown='false'
-probe_uid="$(id -u)"
 scan_remote_processes() {
   process='NONE'
   process_unknown='false'
@@ -542,12 +541,6 @@ scan_remote_processes() {
     process_state="$1"
     process_start_time="${SHELL_DOLLAR}{20}"
     [ "$process_state" = 'Z' ] && continue
-    process_uid=''
-    if ! process_uid="$(stat -c '%u' "/proc/${SHELL_DOLLAR}{process_pid}" 2>/dev/null)"; then
-      [ ! -e "$stat_file" ] || process_unknown='true'
-      continue
-    fi
-    [ "$process_uid" = "$probe_uid" ] || continue
     environment_file="/proc/${SHELL_DOLLAR}{process_pid}/environ"
     if [ ! -r "$environment_file" ]; then
       [ ! -e "$stat_file" ] || process_unknown='true'

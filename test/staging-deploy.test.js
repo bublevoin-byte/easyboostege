@@ -25,6 +25,8 @@ const STALE_IMAGE_ID = `sha256:${'5'.repeat(64)}`;
 const STALE_RELEASE_IMAGE_ID = `sha256:${'6'.repeat(64)}`;
 const FOREIGN_IMAGE_ID = `sha256:${'7'.repeat(64)}`;
 const DRIFTED_RUNNING_IMAGE_ID = `sha256:${'8'.repeat(64)}`;
+const STAGING_TEST_TRANSACTION_SECONDS = 120;
+const STAGING_TEST_RECOVERY_SECONDS = 60;
 
 function posixPath(value) {
   return value.replace(/^([A-Za-z]):/u, (_, drive) => `/${drive.toLowerCase()}`).replaceAll('\\', '/');
@@ -432,6 +434,8 @@ async function writeFakeCommands(root) {
     '  builtin source "$@" || return',
     '  case "${1:-}" in',
     '    */staging-release-common.sh)',
+    `      TRANSACTION_SECONDS=${STAGING_TEST_TRANSACTION_SECONDS}`,
+    `      RECOVERY_SECONDS=${STAGING_TEST_RECOVERY_SECONDS}`,
     '      run_bounded() {',
     '        local requested="$1" remaining bound',
     '        shift',
@@ -549,9 +553,9 @@ function runDeploy(fixture, extraEnv = {}) {
     arguments: arguments_,
     bash: gitBash,
     controlKey: `staging-deadline-test:deploy:${deployScript}:${JSON.stringify(arguments_)}`,
-    recoverySeconds: 600,
+    recoverySeconds: STAGING_TEST_RECOVERY_SECONDS,
     script: posixPath(deployScript),
-    transactionSeconds: 1_800,
+    transactionSeconds: STAGING_TEST_TRANSACTION_SECONDS,
   })).toString('base64url');
   return spawnSync(process.execPath, [deadlineHarness, configuration], {
     encoding: 'utf8',
@@ -583,9 +587,9 @@ function runRestart(fixture, extraEnv = {}) {
     arguments: arguments_,
     bash: gitBash,
     controlKey: `staging-deadline-test:restart:${restartScript}:${JSON.stringify(arguments_)}`,
-    recoverySeconds: 600,
+    recoverySeconds: STAGING_TEST_RECOVERY_SECONDS,
     script: posixPath(restartScript),
-    transactionSeconds: 1_800,
+    transactionSeconds: STAGING_TEST_TRANSACTION_SECONDS,
   })).toString('base64url');
   return spawnSync(process.execPath, [deadlineHarness, configuration], {
     encoding: 'utf8',
@@ -782,7 +786,7 @@ test('a failed staging stable-tag promotion preserves the active marker and runn
   assert.doesNotMatch(log, / up -d |--build/u);
 });
 
-test('an ambiguous stable-tag result reconciles the actual daemon state for active and first deploys', async (context) => {
+test('an ambiguous stable-tag result restores the active deployment', async (context) => {
   const active = await createFixture();
   context.after(() => removeFixture(active.root));
   const activeResult = runDeploy(active, { FAKE_PROMOTE_SIDE_EFFECT_ERROR: '1' });
@@ -792,7 +796,9 @@ test('an ambiguous stable-tag result reconciles the actual daemon state for acti
   assert.equal(await fs.readFile(path.join(active.appDir, '.release-sha256'), 'utf8'),
     `${active.previous.sha}\n`);
   assert.equal(await fs.readFile(path.join(active.appDir, 'shared.txt'), 'utf8'), 'old\n');
+});
 
+test('an ambiguous stable-tag result removes a failed first deployment', async (context) => {
   const first = await createFixture();
   context.after(() => removeFixture(first.root));
   await makeFirstDeploymentFixture(first);
