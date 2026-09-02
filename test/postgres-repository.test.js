@@ -4068,8 +4068,11 @@ test('PostgreSQL proxy tickets, usage settlement and canonical review are atomic
     await repository.activateVoiceTutorProxySession(timeout.username, timeout.sessionId, {
       now: new Date(Date.now() + 1_000),
     });
+    const timeoutBeforeFinish = await repository.getVoiceTutorSession(
+      timeout.username, timeout.sessionId,
+    );
     await repository.finishVoiceTutorSession(timeout.username, timeout.sessionId, {
-      now: new Date(now.getTime() + 301_000), limits,
+      now: new Date(new Date(timeoutBeforeFinish.expires_at).getTime() + 1_000), limits,
     });
     const timeoutStored = await repository.getVoiceTutorSession(timeout.username, timeout.sessionId);
     assert.equal(timeoutStored.status, 'expired');
