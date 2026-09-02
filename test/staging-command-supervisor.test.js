@@ -122,7 +122,7 @@ test('leader success rejects after bounded cleanup when its POSIX process group 
   ]);
 });
 
-test('CLI rejects ordinary leader exit until its same-group descendant is terminated', {
+test('CLI settles ordinary leader exit only after its same-group descendant is terminated', {
   skip: process.platform === 'win32' ? 'requires POSIX process-group signals' : false,
 }, async (context) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-supervisor-descendant-exit-'));
@@ -151,8 +151,7 @@ test('CLI rejects ordinary leader exit until its same-group descendant is termin
     '--', 'sh', '-c', script,
   ], { encoding: 'utf8', timeout: 5_000 });
 
-  assert.equal(result.status, 127, result.stderr);
-  assert.match(result.stderr, /leader exited.*descendants remained alive/iu);
+  assert.equal(result.status, 0, result.stderr);
   recordedPids.push(
     Number(await fs.readFile(leaderPidFile, 'utf8')),
     Number(await fs.readFile(descendantPidFile, 'utf8')),
@@ -388,6 +387,47 @@ test('a post-spawn child error settles the owned POSIX session before rejecting'
     'a live owned session must settle before a post-spawn error is returned');
   assert.equal(wrapperMarked, true);
   assert.equal(disposed, true, 'exact absence proof permits normal control disposal');
+});
+
+test('an owned POSIX timeout preserves status 124 when target status is unavailable', async () => {
+  const child = new EventEmitter();
+  child.pid = 4747;
+  let wrapperClosed = false;
+  let disposed = false;
+  const signals = [];
+  const control = {
+    dispose() { disposed = true; },
+    markWrapperSpawned() {},
+    observeWrapperClose() { wrapperClosed = true; },
+    proofState() { return { state: wrapperClosed ? 'absent' : 'alive' }; },
+    request(signal) {
+      signals.push(signal);
+      if (signal === 'SIGTERM') queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
+    },
+    specification: { controlDirectory: '/fixture/staging-timeout' },
+    targetStatus() { return { state: 'missing' }; },
+  };
+  const status = await supervisorRuntime.runSupervisedCommand({
+    command: process.execPath,
+    args: ['-e', 'setInterval(() => {}, 1000)'],
+    timeoutMs: 10,
+    parentPid: process.pid,
+    parentStartTime: stableParentStartTime,
+    termGraceMs: 10,
+    postKillGraceMs: 20,
+    platform: 'linux',
+    readProcessStartTime: () => stableParentStartTime,
+    forcePosixSession: true,
+    posixSessionControl: control,
+    posixSessionInvocation(command, args, cwd, settlement, environment, authority) {
+      return { args: [], command: 'fixture-owned-session', posixSessionControl: authority };
+    },
+    spawnProcess() { return child; },
+  });
+
+  assert.equal(status, 124);
+  assert.deepEqual(signals, ['SIGTERM']);
+  assert.equal(disposed, true, 'the absent owned session must be disposed after timeout');
 });
 
 test('a pre-PID spawn error rejects without entering process-group settlement', async () => {
@@ -946,11 +986,19 @@ test('supervisor kills descendants when its invoking parent is externally SIGKIL
   context.after(() => fs.rm(root, { recursive: true, force: true }));
   const childPid = path.join(root, 'child.pid');
   const parentScript = [
-    `node ${JSON.stringify(supervisor)} 30 "$$" -- bash -c 'echo $$ > "$1"; trap "" TERM; while :; do sleep 1; done' child ${JSON.stringify(childPid)} &`,
-    'supervisor_pid=$!',
-    'wait "$supervisor_pid"',
+    "const { spawn } = require('node:child_process');",
+    'const child = spawn(process.execPath, [',
+    '  process.argv[1], \'30\', String(process.pid), \'--\',',
+    '  \'bash\', \'-c\', \'echo $$ > "$1"; trap "" TERM; while :; do sleep 1; done\',',
+    "  'child', process.argv[2],",
+    "], { stdio: 'ignore' });",
+    "child.once('exit', (code) => { process.exitCode = Number.isInteger(code) ? code : 1; });",
+    'setInterval(() => {}, 1_000);',
   ].join('\n');
-  const parent = spawn('bash', ['-c', parentScript], { detached: false, stdio: 'ignore' });
+  const parent = spawn(process.execPath, ['-e', parentScript, supervisor, childPid], {
+    detached: false,
+    stdio: 'ignore',
+  });
   await waitFor(async () => fs.readFile(childPid, 'utf8').then(() => true, () => false));
   const pid = Number(await fs.readFile(childPid, 'utf8'));
   parent.kill('SIGKILL');

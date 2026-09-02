@@ -591,7 +591,7 @@ export function runSupervisedCommand({
               `bounded staging command could not start: ${status.errorCode}`,
             );
           }
-        } else if (!primaryFailure) {
+        } else if (!primaryFailure && requestedStatus === null) {
           primaryFailure = new Error('bounded staging command target status was not proven');
         }
       }

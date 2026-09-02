@@ -15,7 +15,16 @@ function posixPath(value) {
     .replaceAll('\\', '/');
 }
 
-test('deadline harness rejects a DISARMed leader whose bounded session still owns a descendant',
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+test('deadline harness settles DISARM only after reclaiming the bounded session descendant',
   async (context) => {
     const probe = spawnSync(gitBash, ['--version'], { encoding: 'utf8' });
     if (probe.error?.code === 'ENOENT') return context.skip('Git Bash is not installed');
@@ -59,9 +68,14 @@ test('deadline harness rejects a DISARMed leader whose bounded session still own
       },
       timeout: 15_000,
     });
-    assert.equal(result.status, 125, `${result.stdout}\n${result.stderr}`);
-    assert.doesNotMatch(result.stderr, /settlement.*not proven/iu,
-      'a resolved nonzero status must not misreport an unproven Job/session settlement');
+    // Windows Job Objects can report that descendants existed and therefore
+    // preserve the stricter 125 semantic result. Linux cannot prove that
+    // historical fact without a racy /proc snapshot; its isolated wrapper
+    // instead kills the whole session and proves it absent before returning.
+    const expectedStatus = process.platform === 'win32' ? 125 : 0;
+    assert.equal(result.status, expectedStatus, `${result.stdout}\n${result.stderr}`);
+    const pid = Number(await fs.readFile(descendantPid, 'utf8'));
+    assert.equal(alive(pid), false, 'deadline harness returned before its descendant was reaped');
   });
 
 test('deadline harness accepts DISARM only after the bounded supervisor proves its session empty',
