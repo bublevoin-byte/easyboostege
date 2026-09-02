@@ -1904,6 +1904,7 @@ test('current launcher keeps one private Node through transaction wrapper bash a
         'node "$script_dir/staging-transaction-supervisor.js" --ready 1800 5000',
         "printf '%s\\n' '{\"role\":\"bash\"}' >> \"$EASYBOOST_TEST_RUNTIME_CHAIN_MARKER\"",
         'node "$EASYBOOST_TEST_RUNTIME_CHAIN_CHILD"',
+        'node "$script_dir/staging-transaction-supervisor.js" --request DISARM 0 1 5000',
         '',
       ].join('\n'));
       await fs.writeFile(path.join(source, 'staging-command-supervisor.js'), [
@@ -2501,7 +2502,7 @@ test('first-setup executable creates the private staging roots and installs one 
       return context.skip('POSIX ownership and private-mode bootstrap executes on Linux');
     }
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-staging-bootstrap-'));
-    context.after(() => fs.rm(root, { recursive: true, force: true }));
+    context.after(() => removeFixture(root));
     const appRoot = path.join(root, 'app');
     const installRoot = path.join(root, 'lib');
     const linkRoot = path.join(root, 'bin');
