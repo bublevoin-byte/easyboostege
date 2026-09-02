@@ -1306,6 +1306,10 @@ test('stale deploy protocol and bounded store failures happen before Docker or c
     );
     await fs.copyFile(release.archive, stored);
     await fs.writeFile(`${stored}.sha256`, `${release.sha}\n`);
+    await Promise.all([
+      fs.chmod(stored, 0o600),
+      fs.chmod(`${stored}.sha256`, 0o600),
+    ]);
   }
   const boundedResult = runDeploy(bounded);
   assert.equal(boundedResult.status, 67, `${boundedResult.stdout}\n${boundedResult.stderr}`);
@@ -1321,7 +1325,9 @@ test('release store rejects temporary debris and malformed checksum sidecars bef
 
   const debris = await createFixture();
   context.after(() => removeFixture(debris.root));
-  await fs.writeFile(path.join(debris.appDir, 'rollbacks', 'releases', '.candidate.tmp'), 'partial\n');
+  const debrisPath = path.join(debris.appDir, 'rollbacks', 'releases', '.candidate.tmp');
+  await fs.writeFile(debrisPath, 'partial\n');
+  await fs.chmod(debrisPath, 0o600);
   const debrisResult = runDeploy(debris);
   assert.equal(debrisResult.status, 67, `${debrisResult.stdout}\n${debrisResult.stderr}`);
   assert.match(debrisResult.stderr, /unowned or temporary debris/u);
@@ -1413,6 +1419,7 @@ test('deploy refuses a legacy active tree without a verified retained source arc
   await fs.rm(path.join(fixture.appDir, '.release-sha256'));
   await fs.rm(path.join(fixture.appDir, 'rollbacks', 'releases'), { recursive: true, force: true });
   await fs.mkdir(path.join(fixture.appDir, 'rollbacks', 'releases'));
+  await fs.chmod(path.join(fixture.appDir, 'rollbacks', 'releases'), 0o700);
 
   const result = runDeploy(fixture);
   assert.equal(result.status, 67, `${result.stdout}\n${result.stderr}`);

@@ -2407,6 +2407,9 @@ test('partial, mixed or linked helper generations fail closed without changing c
       'staging-release-common.sh'), 0o644);
     await fs.appendFile(path.join(installRoot, 'generations', installed.bundleDigest,
       'staging-release-common.sh'), '\n# corruption\n');
+    await fs.chmod(path.join(installRoot, 'generations', installed.bundleDigest,
+      'staging-release-common.sh'), 0o555);
+    await fs.chmod(path.join(installRoot, 'generations', installed.bundleDigest), 0o555);
     await assert.rejects(
       installStagingHelperBundle({
         sourceDirectory: source, installRoot, linkRoot, allowedPrefix: root,
@@ -2506,19 +2509,36 @@ test('first-setup executable creates the private staging roots and installs one 
     const hostLockDirectory = path.join(root, 'host-operations', 'host-operation.lock');
     const templateBytes = Buffer.from('NODE_ENV=production\nAPP_PORT=3001\n');
     await fs.writeFile(template, templateBytes);
-    const invocation = spawnSync(gitBash, [posixPath(bootstrapScript)], {
+    const bootstrapSource = path.join(root, 'bootstrap-source');
+    await copyBundleSource(bootstrapSource);
+    await Promise.all([
+      fs.copyFile(bootstrapScript, path.join(bootstrapSource,
+        path.basename(bootstrapScript))),
+      fs.copyFile(helperInstallerScript, path.join(bootstrapSource,
+        path.basename(helperInstallerScript))),
+    ]);
+    const fixtureInstaller = path.join(bootstrapSource, path.basename(helperInstallerScript));
+    const installerSource = (await fs.readFile(fixtureInstaller, 'utf8')).replace(
+      "PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'",
+      'PATH="${EASYBOOST_TEST_BOOTSTRAP_NODE_DIRECTORY}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
+    );
+    await fs.writeFile(fixtureInstaller, installerSource);
+    const fixtureBootstrap = path.join(bootstrapSource, path.basename(bootstrapScript));
+    const bootstrapEnvironment = {
+      ...process.env,
+      EASYBOOST_TEST_BOOTSTRAP_NODE_DIRECTORY: hermeticNodeRoot,
+      STAGING_APP_DIR: posixPath(appRoot),
+      STAGING_BOOTSTRAP_ALLOWED_PREFIX: posixPath(root),
+      STAGING_ENV_TEMPLATE: posixPath(template),
+      STAGING_HELPER_INSTALL_ROOT: posixPath(installRoot),
+      STAGING_HELPER_LINK_ROOT: posixPath(linkRoot),
+      EASYBOOST_HOST_OPERATION_LOCK_DIR: posixPath(hostLockDirectory),
+      EASYBOOST_HOST_OPERATION_OWNER_UID: String(process.getuid()),
+      EASYBOOST_HOST_OPERATION_OWNER_GID: String(process.getgid()),
+    };
+    const invocation = spawnSync(gitBash, [posixPath(fixtureBootstrap)], {
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        STAGING_APP_DIR: posixPath(appRoot),
-        STAGING_BOOTSTRAP_ALLOWED_PREFIX: posixPath(root),
-        STAGING_ENV_TEMPLATE: posixPath(template),
-        STAGING_HELPER_INSTALL_ROOT: posixPath(installRoot),
-        STAGING_HELPER_LINK_ROOT: posixPath(linkRoot),
-        EASYBOOST_HOST_OPERATION_LOCK_DIR: posixPath(hostLockDirectory),
-        EASYBOOST_HOST_OPERATION_OWNER_UID: String(process.getuid()),
-        EASYBOOST_HOST_OPERATION_OWNER_GID: String(process.getgid()),
-      },
+      env: bootstrapEnvironment,
     });
     if (invocation.error?.code === 'ENOENT') return context.skip('Git Bash is not installed');
     assert.equal(invocation.status, 0, `${invocation.stdout}\n${invocation.stderr}`);
@@ -2541,19 +2561,9 @@ test('first-setup executable creates the private staging roots and installs one 
       'bootstrap must not pre-create the atomic lock directory itself');
 
     await fs.writeFile(path.join(appRoot, '.env.staging'), 'CUSTOM_FLAG=preserved\n');
-    const repeated = spawnSync(gitBash, [posixPath(bootstrapScript)], {
+    const repeated = spawnSync(gitBash, [posixPath(fixtureBootstrap)], {
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        STAGING_APP_DIR: posixPath(appRoot),
-        STAGING_BOOTSTRAP_ALLOWED_PREFIX: posixPath(root),
-        STAGING_ENV_TEMPLATE: posixPath(template),
-        STAGING_HELPER_INSTALL_ROOT: posixPath(installRoot),
-        STAGING_HELPER_LINK_ROOT: posixPath(linkRoot),
-        EASYBOOST_HOST_OPERATION_LOCK_DIR: posixPath(hostLockDirectory),
-        EASYBOOST_HOST_OPERATION_OWNER_UID: String(process.getuid()),
-        EASYBOOST_HOST_OPERATION_OWNER_GID: String(process.getgid()),
-      },
+      env: bootstrapEnvironment,
     });
     assert.equal(repeated.status, 0, `${repeated.stdout}\n${repeated.stderr}`);
     assert.equal(await fs.readFile(path.join(appRoot, '.env.staging'), 'utf8'),

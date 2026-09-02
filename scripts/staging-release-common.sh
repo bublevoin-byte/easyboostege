@@ -1284,13 +1284,25 @@ remove_owned_publication_path() {
   local quarantine_dir quarantine move_status=0 removal_status=0 restore_status=0 directory_status=0
   [ -n "$candidate" ] || return 0
   if [ ! -e "$candidate" ] && [ ! -L "$candidate" ]; then
-    durable_confirm_absence "$candidate"
-    return
+    durable_confirm_absence "$candidate" || {
+      echo "$role absence durability could not be confirmed" >&2
+      return 1
+    }
+    return 0
   fi
-  [ -n "$expected_identity" ] || return 1
+  [ -n "$expected_identity" ] || {
+    echo "$role cleanup identity is unavailable" >&2
+    return 1
+  }
   quarantine_dir="$(run_bounded "$COMMAND_SECONDS" \
-    mktemp -d "$release_store/.publication-cleanup.XXXXXX")" || return 1
-  run_bounded "$COMMAND_SECONDS" chmod 700 "$quarantine_dir" || return 1
+    mktemp -d "$release_store/.publication-cleanup.XXXXXX")" || {
+    echo "$role cleanup quarantine could not be created" >&2
+    return 1
+  }
+  run_bounded "$COMMAND_SECONDS" chmod 700 "$quarantine_dir" || {
+    echo "$role cleanup quarantine could not be protected" >&2
+    return 1
+  }
   quarantine="$quarantine_dir/owned-entry"
   durable_move_no_replace_file "$candidate" "$quarantine" || move_status="$?"
   if [ -e "$candidate" ] || [ -L "$candidate" ] \
@@ -1312,7 +1324,10 @@ remove_owned_publication_path() {
   durable_remove_file "$quarantine" || removal_status="$?"
   if [ -e "$quarantine" ] || [ -L "$quarantine" ]; then removal_status=1; fi
   durable_remove_empty_directory "$quarantine_dir" || directory_status="$?"
-  durable_confirm_absence "$candidate" || return 1
+  durable_confirm_absence "$candidate" || {
+    echo "$role original-path absence durability could not be confirmed" >&2
+    return 1
+  }
   if [ "$move_status" -ne 0 ] || [ "$removal_status" -ne 0 ] \
     || [ "$directory_status" -ne 0 ]; then
     echo "$role cleanup durability failed (move=$move_status removal=$removal_status directory=$directory_status)" >&2

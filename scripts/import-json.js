@@ -325,7 +325,6 @@ export async function runDockerCommand(arguments_, {
     completion.then(() => null, (error) => error),
     new Promise((resolve) => {
       hardTimer = setTimeout(() => { resolve(commandTimeout); }, hardTimeoutMs);
-      hardTimer.unref?.();
     }),
   ]);
   clearTimeout(hardTimer);

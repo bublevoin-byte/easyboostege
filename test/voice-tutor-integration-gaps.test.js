@@ -10,7 +10,7 @@ import express from 'express';
 import { createUserRoutes } from '../routes/users.js';
 import { createFileRepository } from '../storage/file-repository.js';
 
-const NOW = new Date('2026-08-03T09:00:00.000Z');
+const NOW = new Date('2036-08-03T09:00:00.000Z');
 const LIMITS = Object.freeze({ dailySeconds: 600, monthlySeconds: 7_200, sessionSeconds: 300 });
 
 function authenticationFor(student, admin) {

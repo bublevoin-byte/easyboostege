@@ -1553,12 +1553,31 @@ async function runCli() {
   process.exitCode = status;
 }
 
+function diagnosticErrorMessages(error) {
+  const pending = [error];
+  const seen = new Set();
+  const messages = [];
+  while (pending.length > 0 && seen.size < 32) {
+    const current = pending.shift();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+    if (typeof current.message === 'string' && !messages.includes(current.message)) {
+      messages.push(current.message);
+    }
+    if (current instanceof AggregateError) pending.push(...current.errors);
+    pending.push(current.cause);
+  }
+  return messages;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runCli().catch((error) => {
     if (error?.recoveryAuthority) {
       process.stderr.write(`STAGING_TRANSACTION_RECOVERY_REQUIRED ${JSON.stringify(error.recoveryAuthority)}\n`);
     }
-    console.error(error.message);
+    for (const [index, message] of diagnosticErrorMessages(error).entries()) {
+      console.error(index === 0 ? message : `caused by: ${message}`);
+    }
     process.exitCode = error?.exitCode ?? 125;
   });
 }
