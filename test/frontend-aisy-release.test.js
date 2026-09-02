@@ -82,6 +82,8 @@ test('heavy Grammar presentation is lazy on the network and pre-cached for first
 });
 
 test('the default and dedicated release gates build once and run one unique Aisy learner inventory', async () => {
+  assert.equal(packageJson.scripts.test, 'node --test --test-concurrency=1 "test/*.test.js"',
+    'process-authority integration files must not run concurrently in the canonical unit gate');
   for (const script of ['test:e2e', 'test:e2e:aisy']) {
     assert.equal(packageJson.scripts[script], 'npm run build:frontend && npm run test:e2e:aisy:built');
   }

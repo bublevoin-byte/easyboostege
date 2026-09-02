@@ -25,7 +25,7 @@
     "check": "node scripts/check-syntax.js && node scripts/check-inline-handlers.js",
     "openapi:grammar:sync": "node scripts/sync-grammar-openapi-contract.js",
     "openapi:grammar:check": "node scripts/sync-grammar-openapi-contract.js --check",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\"",
     "test:postgres": "node scripts/test-postgres.js",
     "test:e2e": "npm run build:frontend && npm run test:e2e:aisy:built",
     "test:e2e:aisy": "npm run build:frontend && npm run test:e2e:aisy:built",
