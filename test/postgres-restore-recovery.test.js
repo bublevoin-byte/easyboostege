@@ -82,7 +82,7 @@ test('host guard absence lease blocks concurrent acquisition through caller tran
       lockDirectory: hostLockDirectory,
       operation: 'database-restore',
     });
-    await releaseHostOperationLock(release, 100);
+    await releaseHostOperationLock(release, 1_000);
     const absenceLease = await acquireHostOperationAbsenceLease({
       lockDirectory: hostLockDirectory,
     });
