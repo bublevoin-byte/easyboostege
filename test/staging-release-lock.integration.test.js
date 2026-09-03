@@ -464,6 +464,7 @@ exit 0
       ...process.env,
       BARRIER_DIR: barriers,
       CONTAINER_STATE: containerState,
+      EASYBOOST_HOST_OPERATION_LOCK_DIR: path.join(root, 'host-operation.lock'),
       IMAGE_STATE: imageState,
       RELEASE_STATE: releaseState,
       RESOLVED_COMPOSE_JSON: JSON.stringify(approvedComposeModel(appDir)),
