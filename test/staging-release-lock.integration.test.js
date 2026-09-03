@@ -196,6 +196,20 @@ async function settleCleanupOperations(operations) {
     : []);
 }
 
+async function makeDirectoriesOwnerWritable(directory) {
+  const identity = await fs.lstat(directory).catch((error) => {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (!identity?.isDirectory() || identity.isSymbolicLink()) return;
+  await fs.chmod(directory, 0o700);
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory() && !entry.isSymbolicLink()) {
+      await makeDirectoriesOwnerWritable(path.join(directory, entry.name));
+    }
+  }
+}
+
 function combineCleanupFailures(primaryFailure, cleanupErrors) {
   if (primaryFailure && cleanupErrors.length > 0) {
     return new AggregateError([primaryFailure, ...cleanupErrors],
@@ -225,7 +239,13 @@ async function cleanupLockIntegrationResources({ barriers, handles, root }) {
   ]));
   if (root) {
     errors.push(...await settleCleanupOperations([
-      { label: 'fixture root', operation: () => fs.rm(root, { recursive: true, force: true }) },
+      {
+        label: 'fixture root',
+        operation: async () => {
+          if (process.platform !== 'win32') await makeDirectoriesOwnerWritable(root);
+          await fs.rm(root, { recursive: true, force: true });
+        },
+      },
     ]));
   }
   return errors;
@@ -294,6 +314,7 @@ test('real Linux flock excludes deploy and rollback through build, tree activati
     const installed = spawnSync('bash', [installerScript], {
       env: {
         ...process.env,
+        STAGING_HELPER_ALLOWED_PREFIX: root,
         STAGING_HELPER_INSTALL_ROOT: helperRoot,
         STAGING_HELPER_LINK_ROOT: helperLinks,
       },
@@ -307,6 +328,7 @@ test('real Linux flock excludes deploy and rollback through build, tree activati
     const installedAgain = spawnSync('bash', [installerScript], {
       env: {
         ...process.env,
+        STAGING_HELPER_ALLOWED_PREFIX: root,
         STAGING_HELPER_INSTALL_ROOT: helperRoot,
         STAGING_HELPER_LINK_ROOT: helperLinks,
       },
