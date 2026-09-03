@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { HELPER_BUNDLE_FILES } from '../scripts/staging-helper-bundle.js';
 import { createReleaseArchive } from '../scripts/staging-release-archive.js';
 
 const installerScript = path.resolve('scripts/install-staging-release-helpers.sh');
@@ -210,6 +211,29 @@ async function makeDirectoriesOwnerWritable(directory) {
   }
 }
 
+async function prepareHermeticHelperInstaller(root) {
+  const source = path.join(root, 'helper-installer-source');
+  const nodeDirectory = path.join(root, 'node-authority');
+  const nodeExecutable = path.join(nodeDirectory, 'node');
+  await Promise.all([
+    fs.mkdir(source),
+    fs.mkdir(nodeDirectory, { mode: 0o755 }),
+  ]);
+  await Promise.all(HELPER_BUNDLE_FILES.map((name) => (
+    fs.copyFile(path.resolve('scripts', name), path.join(source, name))
+  )));
+  await fs.copyFile(process.execPath, nodeExecutable);
+  await fs.chmod(nodeDirectory, 0o755);
+  await fs.chmod(nodeExecutable, 0o755);
+  const installer = path.join(source, path.basename(installerScript));
+  const installerSource = (await fs.readFile(installerScript, 'utf8')).replace(
+    "PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'",
+    'PATH="${EASYBOOST_TEST_INSTALLER_NODE_DIRECTORY}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
+  );
+  await fs.writeFile(installer, installerSource);
+  return { installer, nodeDirectory };
+}
+
 function combineCleanupFailures(primaryFailure, cleanupErrors) {
   if (primaryFailure && cleanupErrors.length > 0) {
     return new AggregateError([primaryFailure, ...cleanupErrors],
@@ -311,9 +335,11 @@ test('real Linux flock excludes deploy and rollback through build, tree activati
     await fs.mkdir(barriers);
     const helperRoot = path.join(root, 'helpers');
     const helperLinks = path.join(root, 'sbin');
-    const installed = spawnSync('bash', [installerScript], {
+    const hermeticInstaller = await prepareHermeticHelperInstaller(root);
+    const installed = spawnSync('bash', [hermeticInstaller.installer], {
       env: {
         ...process.env,
+        EASYBOOST_TEST_INSTALLER_NODE_DIRECTORY: hermeticInstaller.nodeDirectory,
         STAGING_HELPER_ALLOWED_PREFIX: root,
         STAGING_HELPER_INSTALL_ROOT: helperRoot,
         STAGING_HELPER_LINK_ROOT: helperLinks,
@@ -325,9 +351,10 @@ test('real Linux flock excludes deploy and rollback through build, tree activati
     const bundleDigest = /staging_helper_bundle_sha256=([a-f0-9]{64})/u.exec(installed.stdout)?.[1];
     assert.match(bundleDigest ?? '', /^[a-f0-9]{64}$/u);
     assert.equal(await fs.readFile(path.join(helperRoot, 'current'), 'utf8'), `${bundleDigest}\n`);
-    const installedAgain = spawnSync('bash', [installerScript], {
+    const installedAgain = spawnSync('bash', [hermeticInstaller.installer], {
       env: {
         ...process.env,
+        EASYBOOST_TEST_INSTALLER_NODE_DIRECTORY: hermeticInstaller.nodeDirectory,
         STAGING_HELPER_ALLOWED_PREFIX: root,
         STAGING_HELPER_INSTALL_ROOT: helperRoot,
         STAGING_HELPER_LINK_ROOT: helperLinks,
