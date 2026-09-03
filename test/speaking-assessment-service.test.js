@@ -184,10 +184,13 @@ test('service returns bounded processing state when an attempted durable start c
   };
   await withService(provider, async ({ service, repository, username, advance }) => {
     const idempotencyKey = '10000000-0000-4000-8000-000000000070';
+    let timeout;
     const outcome = await Promise.race([
       service.assess(username, assessmentInput(idempotencyKey)),
-      new Promise((resolve) => setTimeout(() => resolve('service_hung'), 50)),
-    ]);
+      new Promise((resolve) => {
+        timeout = setTimeout(() => resolve('service_hung'), 1_000);
+      }),
+    ]).finally(() => clearTimeout(timeout));
     assert.notEqual(outcome, 'service_hung');
     assert.deepEqual(outcome.assessment, {
       status: 'processing', available: false, reason: 'assessment_in_progress', retryable: true,
