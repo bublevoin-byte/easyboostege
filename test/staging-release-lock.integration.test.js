@@ -84,10 +84,18 @@ async function release(root, name, copy) {
   return { archive, sha: created.sha256, source };
 }
 
-async function waitForFile(file, timeoutMs = 15_000) {
+async function waitForFile(file, handle, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try { await fs.access(file); return; } catch {}
+    if (!childIsLive(handle.child)) {
+      const result = await handle.done;
+      assert.fail([
+        `Process exited before ${path.basename(file)} barrier`,
+        `status=${result.status} signal=${result.signal ?? 'none'}`,
+        result.stderr,
+      ].join('\n'));
+    }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for ${file}`);
@@ -211,7 +219,7 @@ async function makeDirectoriesOwnerWritable(directory) {
   }
 }
 
-async function prepareHermeticHelperInstaller(root) {
+async function prepareHermeticHelperInstaller(root, trustedCommandDirectory) {
   const source = path.join(root, 'helper-installer-source');
   const nodeDirectory = path.join(root, 'node-authority');
   const nodeExecutable = path.join(nodeDirectory, 'node');
@@ -222,6 +230,17 @@ async function prepareHermeticHelperInstaller(root) {
   await Promise.all(HELPER_BUNDLE_FILES.map((name) => (
     fs.copyFile(path.resolve('scripts', name), path.join(source, name))
   )));
+  const helperBundle = path.join(source, 'staging-helper-bundle.js');
+  const trustedSystemPath = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+  const productionDeclaration = `const TRUSTED_SHELL_PATH = '${trustedSystemPath}';`;
+  const helperBundleSource = await fs.readFile(helperBundle, 'utf8');
+  const fixtureBundleSource = helperBundleSource.replace(
+    productionDeclaration,
+    `const TRUSTED_SHELL_PATH = ${JSON.stringify(`${trustedCommandDirectory}:${trustedSystemPath}`)};`,
+  );
+  assert.notEqual(fixtureBundleSource, helperBundleSource,
+    'fixture helper bundle must bind its hermetic command directory');
+  await fs.writeFile(helperBundle, fixtureBundleSource);
   await fs.copyFile(process.execPath, nodeExecutable);
   await fs.chmod(nodeDirectory, 0o755);
   await fs.chmod(nodeExecutable, 0o755);
@@ -335,7 +354,7 @@ test('real Linux flock excludes deploy and rollback through build, tree activati
     await fs.mkdir(barriers);
     const helperRoot = path.join(root, 'helpers');
     const helperLinks = path.join(root, 'sbin');
-    const hermeticInstaller = await prepareHermeticHelperInstaller(root);
+    const hermeticInstaller = await prepareHermeticHelperInstaller(root, fakeBin);
     const installed = spawnSync('bash', [hermeticInstaller.installer], {
       env: {
         ...process.env,
@@ -458,7 +477,7 @@ exit 0
       'immutable-archive-v4', bundleDigest];
 
     building = start('bash', deployArgs, { ...environment, BLOCK_AT: 'build' });
-    await waitForFile(path.join(barriers, 'build'));
+    await waitForFile(path.join(barriers, 'build'), building);
     const blockedRollback = spawnSync('bash', [installedRollback, current.sha,
       'immutable-archive-v4', bundleDigest], {
       env: environment, encoding: 'utf8', timeout: 10_000,
@@ -473,7 +492,7 @@ exit 0
       'immutable-archive-v4', bundleDigest], {
       ...environment, BLOCK_AT: 'tree',
     });
-    await waitForFile(path.join(barriers, 'tree'));
+    await waitForFile(path.join(barriers, 'tree'), activating);
     const blockedDeploy = spawnSync('bash', deployArgs, {
       env: environment, encoding: 'utf8', timeout: 10_000,
     });
@@ -487,7 +506,7 @@ exit 0
     recovering = start('bash', deployArgs, {
       ...environment, BLOCK_AT: 'recovery', FAIL_CANDIDATE_READY: '1',
     });
-    await waitForFile(path.join(barriers, 'recovery'));
+    await waitForFile(path.join(barriers, 'recovery'), recovering);
     const blockedDuringRecovery = spawnSync('bash', [installedRollback, candidate.sha,
       'immutable-archive-v4', bundleDigest], {
       env: environment, encoding: 'utf8', timeout: 10_000,
@@ -501,7 +520,7 @@ exit 0
     await fs.rm(path.join(barriers, 'build'), { force: true });
     await fs.rm(path.join(barriers, 'release-build'), { force: true });
     killed = start('bash', deployArgs, { ...environment, BLOCK_AT: 'build' });
-    await waitForFile(path.join(barriers, 'build'));
+    await waitForFile(path.join(barriers, 'build'), killed);
     const blockedBuildPid = Number(await fs.readFile(path.join(barriers, 'build-pid'), 'utf8'));
     await assert.rejects(fs.access(path.join(barriers, 'inherited-lock-fd')), { code: 'ENOENT' });
     killed.child.kill('SIGKILL');
