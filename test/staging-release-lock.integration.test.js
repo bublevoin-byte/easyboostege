@@ -9,6 +9,7 @@ import { HELPER_BUNDLE_FILES } from '../scripts/staging-helper-bundle.js';
 import { createReleaseArchive } from '../scripts/staging-release-archive.js';
 
 const installerScript = path.resolve('scripts/install-staging-release-helpers.sh');
+const postgresImageId = `sha256:${'3'.repeat(64)}`;
 
 function approvedComposeModel(appDirectory) {
   return {
@@ -56,7 +57,7 @@ function approvedComposeModel(appDirectory) {
           test: ['CMD-SHELL', 'pg_isready -U easyboost_staging -d easyboost_staging'],
           timeout: '5s',
         },
-        image: 'postgres:17-alpine', networks: { backend: null }, pull_policy: 'never',
+        image: postgresImageId, networks: { backend: null }, pull_policy: 'never',
         restart: 'unless-stopped',
         volumes: [{ source: 'postgres-data', target: '/var/lib/postgresql/data', type: 'volume' }],
       },
@@ -424,7 +425,7 @@ if [ "\${1:-}" = build ]; then
 fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   target="\${@: -1}"
-  case "$target" in easyboost-staging-app:release-*) [ -f "$RELEASE_STATE" ] || exit 1; cat "$RELEASE_STATE" ;; easyboost-staging-app:local) cat "$IMAGE_STATE" ;; postgres:17-alpine) echo sha256:${'3'.repeat(64)} ;; *) exit 1 ;; esac
+  case "$target" in easyboost-staging-app:release-*) [ -f "$RELEASE_STATE" ] || exit 1; cat "$RELEASE_STATE" ;; easyboost-staging-app:local) cat "$IMAGE_STATE" ;; postgres:17-alpine) echo ${postgresImageId} ;; *) exit 1 ;; esac
   exit 0
 fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = tag ]; then
