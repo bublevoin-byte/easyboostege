@@ -1,0 +1,404 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
+import http from 'node:http';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import jwt from 'jsonwebtoken';
+
+const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
+const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
+
+async function findAvailablePort() {
+  const listener = net.createServer();
+  await new Promise((resolve, reject) => {
+    listener.once('error', reject);
+    listener.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = listener.address();
+  await new Promise((resolve, reject) => listener.close((error) => error ? reject(error) : resolve()));
+  return port;
+}
+
+async function waitForReady(baseUrl, child, output) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`Server exited early (${child.exitCode}).\n${output.join('')}`);
+    try {
+      const response = await fetch(`${baseUrl}/health/ready`);
+      if (response.ok) return response;
+    } catch {
+      // The socket is expected to reject connections while the process starts.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Server did not become ready.\n${output.join('')}`);
+}
+
+async function stopProcess(child) {
+  if (child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([
+    new Promise((resolve) => child.once('exit', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 3_000)),
+  ]);
+  if (child.exitCode === null) child.kill('SIGKILL');
+}
+
+async function rawGet(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { headers }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({
+        status: response.statusCode,
+        headers: response.headers,
+        body: Buffer.concat(chunks),
+      }));
+    });
+    request.on('error', reject);
+  });
+}
+
+function assertNoStore(response, label) {
+  assert.match(response.headers.get('cache-control') || '', /(?:^|,)\s*no-store(?:,|$)/u,
+    `${label} must prohibit browser/proxy reuse`);
+  assert.equal(response.headers.get('pragma'), 'no-cache', `${label} must cover HTTP/1.0 caches`);
+  assert.equal(response.headers.get('expires'), '0', `${label} must be immediately expired`);
+}
+
+test('application starts and serves health, security headers and PWA assets', { timeout: 20_000 }, async () => {
+  const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-smoke-'));
+  const port = await findAvailablePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const dataFile = path.join(temporaryDirectory, 'data.json');
+  const jwtSecret = 'smoke-test-secret-with-at-least-32-characters';
+  const sessionId = '750f111c-1f2f-48c7-9956-b2c284722a2b';
+  const providerPort = await findAvailablePort();
+  const providerRequests = [];
+  const providerServer = http.createServer((request, response) => {
+    providerRequests.push(request.url);
+    request.resume();
+    response.writeHead(503, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: 'Expected provider failure' } }));
+  });
+  await new Promise((resolve, reject) => {
+    providerServer.once('error', reject);
+    providerServer.listen(providerPort, '127.0.0.1', resolve);
+  });
+  await fs.writeFile(dataFile, JSON.stringify({
+    users: {
+      expired: { created: Date.now(), sub_until: Date.now() - 60_000 },
+      active: { created: Date.now(), sub_until: Date.now() + 60_000, privacy_consent: { text_processing: true, voice_processing: true, policy_version: '2026-08-26-vk-id-v1', updated_at: new Date().toISOString() } },
+      sessionuser: { created: Date.now(), sub_until: Date.now() + 60_000 },
+      admin: { created: Date.now(), sub_until: Date.now() + 60_000, role: 'admin' },
+    },
+    progress: { expired: {}, active: {}, sessionuser: {}, admin: {} },
+    sessions: { [sessionId]: { username: 'sessionuser', expires_at: Date.now() + 60_000, created_at: Date.now(), revoked_at: null } },
+  }), 'utf8');
+  const output = [];
+  const child = spawn(process.execPath, [serverPath], {
+    cwd: projectDirectory,
+    env: {
+      ...process.env,
+      NODE_ENV: 'test',
+      PORT: String(port),
+      APP_URL: baseUrl,
+      DATABASE_PROVIDER: 'file',
+      DATA_FILE: dataFile,
+      JWT_SECRET: jwtSecret,
+      TELEGRAM_BOT_TOKEN: '',
+      ADMIN_TELEGRAM_ID: '',
+      XAI_API_KEY: 'xai-integration-test-key',
+      XAI_API_URL: `http://127.0.0.1:${providerPort}/xai`,
+      GROQ_API_KEY: 'groq-integration-test-key',
+      GROQ_API_URL: `http://127.0.0.1:${providerPort}/groq`,
+      AI_REQUESTS_PER_HOUR: '1',
+      MONITORING_TOKEN: 'monitoring-test-token-with-32-characters',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout.on('data', (chunk) => output.push(chunk.toString()));
+  child.stderr.on('data', (chunk) => output.push(chunk.toString()));
+
+  try {
+    const ready = await waitForReady(baseUrl, child, output);
+    assertNoStore(ready, 'readiness health response');
+    assert.deepEqual(await ready.json(), { status: 'ready', storage: 'file' });
+
+    const live = await fetch(`${baseUrl}/health/live`);
+    assert.equal(live.status, 200);
+    assertNoStore(live, 'liveness health response');
+    assert.deepEqual(await live.json(), { status: 'ok' });
+
+    const home = await fetch(`${baseUrl}/`);
+    assert.equal(home.status, 200);
+    assert.match(home.headers.get('content-security-policy') || '', /default-src 'self'/u);
+    assert.match(home.headers.get('cache-control') || '', /no-store/u);
+    const homeMarkup = await home.text();
+    assert.match(homeMarkup, /<title>Aisy ЕГЭ — Английский · Aisy\.space<\/title>/u);
+
+    const manifest = await fetch(`${baseUrl}/manifest.json`);
+    assert.equal(manifest.status, 200);
+    const manifestPayload = await manifest.json();
+    assert.equal(manifestPayload.display, 'standalone');
+    assert.equal(manifestPayload.name, 'Aisy ЕГЭ — Английский');
+    assert.equal(manifestPayload.short_name, 'Aisy.space');
+
+    const theme = await fetch(`${baseUrl}/aisy-theme.css`);
+    assert.equal(theme.status, 200);
+    const themeSource = await theme.text();
+    assert.match(themeSource, /--aisy-primitive-coral-action:\s*#b9433a/u);
+    assert.match(themeSource, /--aisy-color-primary:\s*light-dark\(var\(--aisy-primitive-coral-action\),\s*var\(--aisy-primitive-coral-action-dark\)\)/u);
+
+    const serviceWorker = await fetch(`${baseUrl}/service-worker.js`);
+    assert.equal(serviceWorker.status, 200);
+    const serviceWorkerSource = await serviceWorker.text();
+    assert.match(serviceWorkerSource, /CACHE_NAME/u);
+    const serviceWorkerPolicySource = await fs.readFile(
+      new URL('../public/service-worker.js', import.meta.url), 'utf8',
+    );
+    assert.equal(serviceWorkerPolicySource.includes(
+      "function privateControlPath(pathname){return /^\\/(?:api|internal|health)(?:\\/|$)/iu.test(pathname)}",
+    ), true, 'source worker must bypass API/internal/health namespaces with Express-equivalent case semantics');
+
+    const privateBootstrapResponses = [
+      ['providers success', await fetch(`${baseUrl}/api/v1/auth/providers`), 200],
+      ['me auth error', await fetch(`${baseUrl}/api/v1/me`), 401],
+      ['progress auth error', await fetch(`${baseUrl}/api/v1/progress`), 401],
+      ['word progress auth error', await fetch(`${baseUrl}/api/v1/word-progress`), 401],
+      ['voice rule auth error', await fetch(`${baseUrl}/api/v1/voice-tutor/rules/ege.grammar.forms?exam_year=2026`), 401],
+      ['admin auth error', await fetch(`${baseUrl}/api/v1/admin/status`), 401],
+      ['export auth error', await fetch(`${baseUrl}/api/v1/account/export`), 401],
+      ['subscription auth error', await fetch(`${baseUrl}/api/v1/payments/requests?product=premium_voice`), 401],
+      ['legacy Telegram check', await fetch(`${baseUrl}/api/tg/check?code=000000`), 200],
+      ['lowercase API root', await fetch(`${baseUrl}/api`), 404],
+      ['mixed-case API root', await fetch(`${baseUrl}/aPi`), 404],
+      ['uppercase API root', await fetch(`${baseUrl}/API`), 404],
+      ['lowercase internal root', await fetch(`${baseUrl}/internal`), 200],
+      ['mixed-case internal root', await fetch(`${baseUrl}/InTeRnAl`), 200],
+      ['uppercase internal root', await fetch(`${baseUrl}/INTERNAL`), 200],
+    ];
+    for (const [label, response, status] of privateBootstrapResponses) {
+      assert.equal(response.status, status, label);
+      assertNoStore(response, label);
+      await response.arrayBuffer();
+    }
+    const malformedApi = await fetch(`${baseUrl}/api/v1/tg/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{',
+    });
+    assert.equal(malformedApi.status, 400);
+    assertNoStore(malformedApi, 'body-parser validation error');
+    await malformedApi.arrayBuffer();
+
+    /* Точка входа называется по-разному в исходниках и в собранной версии, поэтому берётся из
+       отданной разметки: сжатие проверяется на том файле, который страница действительно грузит. */
+    const entryScript = /<script(?=[^>]*\btype="module")(?=[^>]*\bsrc="(\/[^"]+\.js)")[^>]*>/u.exec(homeMarkup);
+    assert.ok(entryScript, 'отданная разметка обязана подключать точку входа');
+    const compressedEntry = await rawGet(`${baseUrl}${entryScript[1]}`, { 'Accept-Encoding': 'gzip' });
+    const plainEntry = await rawGet(`${baseUrl}${entryScript[1]}`, { 'Accept-Encoding': 'identity' });
+    assert.equal(compressedEntry.status, 200);
+    assert.equal(plainEntry.status, 200);
+    assert.equal(compressedEntry.headers['content-encoding'], 'gzip');
+    assert.ok(compressedEntry.body.length < plainEntry.body.length * 0.5);
+    console.log(`performance: ${entryScript[1]} gzip=${compressedEntry.body.length} bytes, served=${plainEntry.body.length} bytes`);
+
+    const expiredAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'expired' }, jwtSecret)}` };
+    const paidRequests = [
+      fetch(`${baseUrl}/api/v1/ai/generate-content`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'grammar_quiz' }) }),
+      fetch(`${baseUrl}/api/v1/tts?text=hello`, { headers: expiredAuthorization }),
+      fetch(`${baseUrl}/api/v1/stt`, { method: 'POST', headers: { ...expiredAuthorization, 'Content-Type': 'audio/webm' }, body: new Uint8Array([1]) }),
+    ];
+    for (const response of await Promise.all(paidRequests)) {
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error.code, 'SUBSCRIPTION_REQUIRED');
+    }
+
+    const activeAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'active' }, jwtSecret)}`, 'Content-Type': 'application/json' };
+    const bearerAdaptive = await fetch(`${baseUrl}/api/v1/adaptive-learning/goal`, { headers: activeAuthorization });
+    assert.equal(bearerAdaptive.status, 404, 'a verified bearer identity does not need to echo its signed JWT as an owner');
+    assert.equal(bearerAdaptive.headers.get('x-easyboost-response-owner'), 'active');
+    const apiDurations = [];
+    for (let index = 0; index < 60; index += 1) {
+      const startedAt = performance.now();
+      const progressResponse = await fetch(`${baseUrl}/api/v1/progress`, { headers: activeAuthorization });
+      apiDurations.push(performance.now() - startedAt);
+      assert.equal(progressResponse.status, 200);
+      if (index === 0) assertNoStore(progressResponse, 'progress success');
+      await progressResponse.arrayBuffer();
+    }
+    apiDurations.sort((left, right) => left - right);
+    const apiP95Ms = apiDurations[Math.ceil(apiDurations.length * 0.95) - 1];
+    assert.ok(apiP95Ms < 500, `ordinary API p95 is ${apiP95Ms.toFixed(1)} ms`);
+    console.log(`performance: ordinary API p95=${apiP95Ms.toFixed(1)} ms over ${apiDurations.length} requests`);
+
+    const activeAi = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
+      method: 'POST',
+      headers: activeAuthorization,
+      body: JSON.stringify({ operation: 'grammar_quiz' }),
+    });
+    assert.equal(activeAi.status, 503);
+    assertNoStore(activeAi, 'AI provider error');
+    assert.equal((await activeAi.json()).error.code, 'AI_PROVIDER_UNAVAILABLE');
+    assert.deepEqual(providerRequests, ['/xai', '/groq']);
+
+    const rateLimitedAi = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
+      method: 'POST',
+      headers: activeAuthorization,
+      body: JSON.stringify({ operation: 'grammar_quiz' }),
+    });
+    assert.equal(rateLimitedAi.status, 429);
+    assertNoStore(rateLimitedAi, 'API rate-limit error');
+    assert.equal((await rateLimitedAi.json()).error.code, 'RATE_LIMITED');
+
+    const consent = await fetch(`${baseUrl}/api/v1/privacy/consent`, { headers: activeAuthorization });
+    assert.equal(consent.status, 200);
+    assert.equal((await consent.json()).text_processing, true);
+
+    const revokedConsent = await fetch(`${baseUrl}/api/v1/privacy/consent`, {
+      method: 'PUT', headers: activeAuthorization, body: JSON.stringify({ text_processing: false, voice_processing: false }),
+    });
+    assert.equal(revokedConsent.status, 200);
+    assert.equal((await revokedConsent.json()).text_processing, false);
+    const blockedByConsent = await fetch(`${baseUrl}/api/v1/ai/generate-content`, {
+      method: 'POST', headers: activeAuthorization, body: JSON.stringify({ operation: 'grammar_quiz' }),
+    });
+    assert.equal(blockedByConsent.status, 403);
+    assert.equal((await blockedByConsent.json()).error.code, 'PRIVACY_CONSENT_REQUIRED');
+
+    const exported = await fetch(`${baseUrl}/api/v1/account/export`, { headers: activeAuthorization });
+    assert.equal(exported.status, 200);
+    assertNoStore(exported, 'account export success');
+    assert.match(exported.headers.get('content-disposition') || '', /easyboost-data\.json/u);
+    assert.equal((await exported.json()).account.username, 'active');
+
+    const moduleAttempt = { owner: 'active', id: '58ffc848-99ab-4a9d-99c4-f960558c1e51', module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6, durationMs: 45_000 };
+    const recordedAttempt = await fetch(`${baseUrl}/api/v1/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
+    assert.equal(recordedAttempt.status, 201);
+    assert.equal((await recordedAttempt.json()).created, true);
+    const duplicateAttempt = await fetch(`${baseUrl}/api/v1/module-attempts`, { method: 'POST', headers: activeAuthorization, body: JSON.stringify(moduleAttempt) });
+    assert.equal(duplicateAttempt.status, 200);
+    assert.equal((await duplicateAttempt.json()).created, false);
+    const wordSync = await fetch(`${baseUrl}/api/v1/word-progress`, {
+      method: 'PUT', headers: activeAuthorization,
+      body: JSON.stringify({ words: [{ word: 'achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: Date.now() + 60_000 }] }),
+    });
+    assert.equal(wordSync.status, 200);
+    assertNoStore(wordSync, 'word progress success');
+    assert.equal((await wordSync.json()).updated, 1);
+    const errorSync = await fetch(`${baseUrl}/api/v1/error-bank`, {
+      method: 'POST', headers: { ...activeAuthorization, 'X-EasyBoost-Expected-Owner': 'active' },
+      body: JSON.stringify({ errors: [{ module: 'grammar', itemKey: 'grammar_19_24:go', errorType: 'incorrect_form', details: { expected: 'went' } }] }),
+    });
+    assert.equal(errorSync.status, 200);
+    assert.equal(errorSync.headers.get('x-easyboost-response-owner'), 'active');
+    assert.equal((await errorSync.json()).updated, 1);
+
+    const studentAdminRequest = await fetch(`${baseUrl}/api/v1/admin/status`, { headers: activeAuthorization });
+    assert.equal(studentAdminRequest.status, 403);
+    assertNoStore(studentAdminRequest, 'admin authorization error');
+    assert.equal((await studentAdminRequest.json()).error.code, 'FORBIDDEN');
+    const adminAuthorization = { Authorization: `Bearer ${jwt.sign({ u: 'admin' }, jwtSecret)}` };
+    const adminRequest = await fetch(`${baseUrl}/api/v1/admin/status`, { headers: adminAuthorization });
+    assert.equal(adminRequest.status, 200);
+    assertNoStore(adminRequest, 'admin success');
+    assert.equal((await adminRequest.json()).role, 'admin');
+    const metricsRequest = await fetch(`${baseUrl}/api/v1/admin/metrics`, { headers: adminAuthorization });
+    assert.equal(metricsRequest.status, 200);
+    assert.match(metricsRequest.headers.get('cache-control') || '', /no-store/u);
+    const metrics = await metricsRequest.json();
+    assert.ok(metrics.http.requests > 0);
+    assert.equal(typeof metrics.http.serverErrorRate, 'number');
+    assert.equal(typeof metrics.http.p95DurationMs, 'number');
+    assert.deepEqual(metrics.aiUsage, {
+      windowHours: 24, requests: 2, promptTokens: 0, completionTokens: 0, estimatedCostMicrousd: 0,
+    });
+    assert.deepEqual(metrics.voiceTutorRecovery, {
+      open: 0, recovered: 0, relapsed: 0, numerator: 0, denominator: 0, error_recovery_rate: 0,
+      due_repeats: 0, overdue_repeats: 0, sessions: 0, voice_minutes: 0,
+      delivery: { voice: 0, text: 0, local: 0 }, fallback_rate: 0,
+      provider_errors: 0, estimated_cost_microusd: 0,
+      micro_check: { passed: 0, observed: 0, rate: 0 },
+      initial_transfer: { passed: 0, observed: 0, rate: 0 },
+      repeat_passes: {
+        day_1: { passed: 0, observed: 0, rate: 0 },
+        day_7: { passed: 0, observed: 0, rate: 0 },
+      },
+    });
+    assert.equal(metrics.adaptiveLearning.version, 'adaptive-metrics-v1');
+    assert.equal(metrics.adaptiveLearning.sessions.created, 0);
+    assert.equal(metrics.adaptiveLearning.sessions.startRate, 0);
+    assert.deepEqual(metrics.adaptiveLearning.adjustments.reasons, {
+      too_difficult: 0, too_easy: 0, not_relevant: 0, accessibility: 0, excluded: 0,
+    });
+    assert.ok(metrics.system.disk.totalBytes > 0);
+    assert.equal(metrics.system.backup.fresh, false);
+    const unauthorizedMetrics = await fetch(`${baseUrl}/internal/metrics`);
+    assert.equal(unauthorizedMetrics.status, 401);
+    assertNoStore(unauthorizedMetrics, 'internal metrics auth error');
+    const internalMetrics = await fetch(`${baseUrl}/internal/metrics`, {
+      headers: { Authorization: 'Bearer monitoring-test-token-with-32-characters' },
+    });
+    assert.equal(internalMetrics.status, 200);
+    assertNoStore(internalMetrics, 'internal metrics success');
+    assert.equal(typeof (await internalMetrics.json()).http.requests, 'number');
+
+    const revocableToken = jwt.sign({ u: 'sessionuser', sid: sessionId }, jwtSecret, { expiresIn: '1h' });
+    const sessionBeforeLogout = await fetch(`${baseUrl}/api/v1/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
+    assert.equal(sessionBeforeLogout.status, 200);
+    assertNoStore(sessionBeforeLogout, 'me success');
+    const logout = await fetch(`${baseUrl}/api/v1/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${revocableToken}` },
+    });
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get('set-cookie') || '', /Max-Age=0/u);
+    const sessionAfterLogout = await fetch(`${baseUrl}/api/v1/me`, { headers: { Authorization: `Bearer ${revocableToken}` } });
+    assert.equal(sessionAfterLogout.status, 401);
+    assertNoStore(sessionAfterLogout, 'me revoked-session error');
+    assert.equal((await sessionAfterLogout.json()).error.code, 'SESSION_REVOKED');
+
+    const unconfirmedDeletion = await fetch(`${baseUrl}/api/v1/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'NO' }),
+    });
+    assert.equal(unconfirmedDeletion.status, 400);
+    assert.equal((await unconfirmedDeletion.json()).error.code, 'CONFIRMATION_REQUIRED');
+
+    const ownerlessDeletion = await fetch(`${baseUrl}/api/v1/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'DELETE' }),
+    });
+    assert.equal(ownerlessDeletion.status, 400);
+    assert.equal((await ownerlessDeletion.json()).error.code, 'INVALID_OWNER');
+
+    const wrongOwnerDeletion = await fetch(`${baseUrl}/api/v1/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'DELETE', owner: 'sessionuser' }),
+    });
+    assert.equal(wrongOwnerDeletion.status, 409);
+    assert.equal((await wrongOwnerDeletion.json()).error.code, 'OWNER_CHANGED');
+    assert.equal((await fetch(`${baseUrl}/api/v1/me`, { headers: activeAuthorization })).status, 200,
+      'an owner mismatch must not delete the authenticated account');
+
+    const deletion = await fetch(`${baseUrl}/api/v1/account`, {
+      method: 'DELETE',
+      headers: activeAuthorization,
+      body: JSON.stringify({ confirmation: 'DELETE', owner: 'active' }),
+    });
+    assert.equal(deletion.status, 200);
+    assert.equal((await deletion.json()).ok, true);
+    const deletedSession = await fetch(`${baseUrl}/api/v1/me`, { headers: activeAuthorization });
+    assert.equal(deletedSession.status, 401);
+  } finally {
+    await stopProcess(child);
+    await new Promise((resolve, reject) => providerServer.close((error) => error ? reject(error) : resolve()));
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The full unit phase alone took about 31 minutes in the pre-freeze run. The rest of the release wrapper,
+    # PostgreSQL, Android/Firefox/WebKit, browser installation, quality checks and cold-run variance need margin.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Validate staging deployment
+        # Syntax/model validation must not discover or reuse a host image. The all-zero digest is
+        # a canonical-shaped, deliberately non-deployable CI-only authority.
+        env:
+          EASYBOOST_STAGING_POSTGRES_IMAGE_ID: sha256:0000000000000000000000000000000000000000000000000000000000000000
+        run: |
+          bash -n scripts/staging-deploy.sh scripts/staging-rollback.sh
+          cp .env.staging.example .env.staging
+          docker compose -f compose.staging.yml --env-file .env.staging config --quiet
+      - name: PostgreSQL repository integration
+        run: npm run test:postgres
+      - name: Run the canonical one-build release gate
+        # Process-authority and staging fault-injection suites deliberately use real deadlines and
+        # child groups. Serial CI execution prevents unrelated files from starving those proofs;
+        # ordinary local `npm test` remains parallel when this variable is absent.
+        env:
+          EASYBOOST_TEST_CONCURRENCY: 1
+        run: npm run test:release:aisy
+      - name: Chrome Android E2E
+        run: npm run test:e2e:android
+      - name: Install Firefox and WebKit for Playwright
+        run: npx playwright install --with-deps firefox webkit
+      - name: Firefox E2E
+        run: npm run test:e2e:firefox
+      - name: iPhone WebKit E2E
+        run: npm run test:e2e:iphone-webkit
+      - name: Validate AI quality tooling and engineering fixtures
+        run: npm run quality:check

@@ -1,6 +1,19 @@
 # не загружаем в git секреты и мусор
 node_modules/
 .env
+.env.staging
 data.json
+*.test-data.json
+tts-cache/
+coverage/
+dist/
+backups/
+soak-results/
 *.log
 .DS_Store
+quality/sources/
+# журналы платных прогонов ИИ: в набор они приезжают слиянием, сырой журнал остаётся у владельца
+quality/runs/*.jsonl
+# опросник разборов — то же самое в читаемом виде: он собирается из журнала, до прогона его не
+# существует, а ответы владельца приезжают в набор слиянием
+quality/review-worksheet.md

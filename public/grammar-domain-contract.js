@@ -1,0 +1,107 @@
+export const GRAMMAR_ERROR_CODES = Object.freeze([
+  'construction_choice', 'word_or_verb_form', 'auxiliary', 'agreement',
+  'word_order', 'negation_or_question', 'confusion_pair',
+]);
+
+export const GRAMMAR_ACTIVE_PRACTICE_TYPES = Object.freeze([
+  'choice', 'input', 'correction', 'transform',
+]);
+
+export const GRAMMAR_PRACTICE_MODES = Object.freeze([
+  'topic_practice', 'legacy_practice', 'mixed_practice', 'targeted_practice', 'exam_19_24',
+]);
+
+export const GRAMMAR_RECOMMENDATION_VERSION = 'grammar-focus-v1';
+export const GRAMMAR_TARGETED_MIN_EXACT_ITEMS = 2;
+export const GRAMMAR_TARGETED_MIN_ERROR_ITEMS = 4;
+
+export const GRAMMAR_ACTIVE_TOPIC_IDS = Object.freeze([
+  1, 2, 3, 13, 4, 5, 6, 7, 8, 9, 18, 10, 11, 12, 16, 17, 20,
+  14, 15, 19,
+]);
+
+export const GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS = Object.freeze([
+  10, 11, 12, 16, 17, 20, 14, 15, 19,
+]);
+
+export const GENERATED_GRAMMAR_REVISION = 1;
+
+const GENERATED_GRAMMAR_ITEM_ID = /^generated\.g\.q\.([a-f0-9]{64})\.([a-f0-9]{16})\.(c|f)([1-9]\d*)$/u;
+const GENERATED_GRAMMAR_EXAM_ITEM_ID = /^generated\.g\.e\.([a-f0-9]{64})\.([a-f0-9]{16})\.([1-9]\d*)$/u;
+const GRAMMAR_CONFUSION_PAIR = /^[a-z0-9]+(?:_[a-z0-9]+)*__(?:[a-z0-9]+(?:_[a-z0-9]+)*)$/u;
+const BUILTIN_GRAMMAR_DIAGNOSTIC_ID = /^core\.g\.([1-9]|1\d|20)\.c\.([1-9]\d*)\.diagnostic\.([1-9]\d*)$/u;
+
+export function isGrammarErrorCode(value) {
+  return GRAMMAR_ERROR_CODES.includes(value);
+}
+
+export function isBuiltinGrammarDiagnosticId(value) {
+  const match = BUILTIN_GRAMMAR_DIAGNOSTIC_ID.exec(String(value || ''));
+  return Boolean(match && GRAMMAR_ACTIVE_TOPIC_IDS.includes(Number(match[1])));
+}
+
+export function isGrammarConfusionPair(value) {
+  return typeof value === 'string' && GRAMMAR_CONFUSION_PAIR.test(value);
+}
+
+export function parseGrammarConfusionPair(value) {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  return isGrammarConfusionPair(normalized) ? normalized : null;
+}
+
+export function parseGeneratedGrammarItemId(value) {
+  const id = String(value || '');
+  const match = GENERATED_GRAMMAR_ITEM_ID.exec(id);
+  if (!match) {
+    const examMatch = GENERATED_GRAMMAR_EXAM_ITEM_ID.exec(id);
+    if (!examMatch) return null;
+    return Object.freeze({
+      id: examMatch[0],
+      groupId: `generated.g.e.${examMatch[1]}.${examMatch[2]}`,
+      requestHash: examMatch[1],
+      resultDigest: examMatch[2],
+      kind: 'exam',
+      index: Number(examMatch[3]),
+      type: 'input',
+      revision: GENERATED_GRAMMAR_REVISION,
+      operation: 'grammar_exam_19_24',
+    });
+  }
+  const kind = match[3];
+  return Object.freeze({
+    id: match[0],
+    groupId: `generated.g.q.${match[1]}.${match[2]}`,
+    requestHash: match[1],
+    resultDigest: match[2],
+    kind,
+    index: Number(match[4]),
+    type: kind === 'c' ? 'choice' : 'input',
+    revision: GENERATED_GRAMMAR_REVISION,
+  });
+}
+
+export function parseGeneratedGrammarItemReference(value) {
+  const parsed = parseGeneratedGrammarItemId(value?.id);
+  return parsed && Number(value?.revision) === GENERATED_GRAMMAR_REVISION ? parsed : null;
+}
+
+export const EasyBoostGrammarDomain = Object.freeze({
+  GRAMMAR_ERROR_CODES,
+  GRAMMAR_ACTIVE_PRACTICE_TYPES,
+  GRAMMAR_PRACTICE_MODES,
+  GRAMMAR_RECOMMENDATION_VERSION,
+  GRAMMAR_TARGETED_MIN_EXACT_ITEMS,
+  GRAMMAR_TARGETED_MIN_ERROR_ITEMS,
+  GRAMMAR_ACTIVE_TOPIC_IDS,
+  GRAMMAR_PREACTIVATION_LEGACY_TOPIC_IDS,
+  GENERATED_GRAMMAR_REVISION,
+  isGrammarConfusionPair,
+  isGrammarErrorCode,
+  isBuiltinGrammarDiagnosticId,
+  parseGrammarConfusionPair,
+  parseGeneratedGrammarItemId,
+  parseGeneratedGrammarItemReference,
+});
+
+if (typeof globalThis !== 'undefined') globalThis.EasyBoostGrammarDomain = EasyBoostGrammarDomain;

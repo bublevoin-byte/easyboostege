@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Aisy Today — prototype</title>
+  <link rel="icon" href="./assets/aisy-soft-study-cards.png" type="image/png">
+  <link rel="stylesheet" href="./visual-tokens.css">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="aisy-v2-canvas">
+  <a class="skip-link" href="#prototype-content">К концепту Today</a>
+  <header class="prototype-masthead aisy-v2-composition">
+    <a class="prototype-wordmark" href="?variant=A" aria-label="Aisy.space — открыть вариант A">
+      <span class="prototype-wordmark__signal" aria-hidden="true"></span>
+      Aisy.space
+    </a>
+    <span class="prototype-badge">PROTOTYPE · READ ONLY</span>
+  </header>
+
+  <main id="prototype-content" tabindex="-1">
+    <p id="prototype-notice" class="prototype-notice" role="status" aria-live="polite">PROTOTYPE · Данные не изменяются.</p>
+    <div id="prototype-variant"></div>
+  </main>
+
+  <nav class="prototype-switcher" aria-label="PROTOTYPE: варианты концепта Today">
+    <span class="prototype-switcher__flag">PROTOTYPE</span>
+    <div class="prototype-switcher__controls">
+      <button class="prototype-switcher__button" type="button" data-switch="previous" aria-label="Предыдущий вариант">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 6-6 6 6 6"></path></svg>
+      </button>
+      <span id="prototype-variant-label" class="prototype-switcher__label" aria-live="polite"></span>
+      <button class="prototype-switcher__button" type="button" data-switch="next" aria-label="Следующий вариант">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m10 6 6 6-6 6"></path></svg>
+      </button>
+    </div>
+  </nav>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

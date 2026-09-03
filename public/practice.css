@@ -1,0 +1,34 @@
+.practice{min-height:100%;padding:48px var(--aisy-space-2) 112px;background:var(--aisy-color-background);color:var(--aisy-color-text)}
+.practice__header{padding:0 0 var(--aisy-space-5)}
+.practice__eyebrow{margin:0;color:var(--aisy-color-primary);font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.practice__header h1{margin:var(--aisy-space-2) 0 0;font:800 clamp(30px,9vw,42px)/1.15 var(--aisy-font-friendly)}
+.practice__intro{max-width:60ch;margin:var(--aisy-space-2) 0 0;color:var(--aisy-color-text-muted);font-size:16px;line-height:1.55}
+.practice__network{margin:0 0 var(--aisy-space-4);border:1px solid var(--aisy-color-warning);border-radius:var(--aisy-radius-control);padding:var(--aisy-space-3) var(--aisy-space-4);background:var(--aisy-color-warning-soft);color:var(--aisy-color-text);font-size:16px;line-height:1.5}
+.practice__network[hidden]{display:none}
+.practice-recommendation{position:relative;display:grid;gap:var(--aisy-space-2);overflow:hidden;margin:0 0 var(--aisy-space-7);padding:var(--aisy-space-5)}
+.practice-recommendation::before{content:"";position:absolute;inset:0 auto 0 0;width:6px;background:var(--aisy-color-primary)}
+.practice-recommendation[hidden]{display:none}
+.practice-recommendation__eyebrow{margin:0;color:var(--aisy-color-primary);font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.practice-recommendation h2{margin:0;font:800 24px/1.2 var(--aisy-font-friendly)}
+.practice-recommendation__reason,.practice-recommendation__outcome,.practice-recommendation__availability{margin:0;color:var(--aisy-color-text-muted);font-size:16px;line-height:1.5}
+.practice-recommendation__reason{color:var(--aisy-color-text);font-weight:750}
+.practice-recommendation__availability{border-radius:var(--aisy-radius-control);background:var(--aisy-color-surface-muted);padding:var(--aisy-space-2) var(--aisy-space-3);font-size:14px;font-weight:700}
+.practice-recommendation__availability[data-availability="cache-required"]{background:var(--aisy-color-warning-soft);color:var(--aisy-color-text)}
+.practice-recommendation__action{margin-top:var(--aisy-space-3)}
+.practice__section-title{margin:0 0 var(--aisy-space-3);font:800 20px/1.25 var(--aisy-font-friendly)}
+.practice__list{display:grid;gap:var(--aisy-space-3);margin:0;padding:0;list-style:none}
+.practice-row{display:grid;grid-template-columns:44px minmax(0,1fr);gap:var(--aisy-space-3);padding:var(--aisy-space-4)}
+.practice-row__icon{display:grid;width:44px;height:44px;place-items:center;border-radius:var(--aisy-radius-control);background:var(--aisy-color-surface-muted);color:var(--aisy-color-primary)}
+.practice-row__copy{min-width:0}
+.practice-row__copy h2{margin:0;font:800 19px/1.3 var(--aisy-font-friendly)}
+.practice-row__copy p{margin:var(--aisy-space-1) 0 0;color:var(--aisy-color-text-muted);font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.practice-row__copy .practice-row__reason{color:var(--aisy-color-text);font-weight:700}
+.practice-row__copy .practice-row__outcome{color:var(--aisy-color-text)}
+.practice-row__copy .practice-row__availability{font-size:16px}
+.practice-row__controls{grid-column:1/-1;display:flex;min-width:0;align-items:center;justify-content:space-between;gap:var(--aisy-space-3)}
+.practice-row__state{display:inline-flex;min-height:32px;align-items:center;border:1px solid var(--aisy-color-border);border-radius:var(--aisy-radius-round);padding:4px var(--aisy-space-2);color:var(--aisy-color-text);font-size:12px;font-weight:800}
+.practice-row[data-state="recommended"] .practice-row__state{border-color:var(--aisy-color-primary);color:var(--aisy-color-primary)}
+.practice-row[data-state="continue"] .practice-row__state{border-color:var(--aisy-color-info);color:var(--aisy-color-info)}
+.practice-row[data-state="review"] .practice-row__state{border-color:var(--aisy-color-warning);color:var(--aisy-color-warning)}
+.practice-row__action{min-width:116px}
+@media(max-width:359px){.practice{padding-inline:var(--aisy-space-4)}.practice-row{padding:var(--aisy-space-3)}.practice-row__controls{align-items:stretch;flex-direction:column}.practice-row__action{width:100%}}

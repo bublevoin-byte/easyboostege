@@ -1,0 +1,55 @@
+name: easyboost-staging
+
+services:
+  postgres:
+    image: "${EASYBOOST_STAGING_POSTGRES_IMAGE_ID:?EASYBOOST_STAGING_POSTGRES_IMAGE_ID is required}"
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: easyboost_staging
+      POSTGRES_USER: easyboost_staging
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U easyboost_staging -d easyboost_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  app:
+    image: easyboost-staging-app:local
+    pull_policy: never
+    build:
+      context: ./.guarded-staging-build-context-required
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env.staging
+        required: true
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
+      DATABASE_PROVIDER: postgres
+      DATABASE_URL: postgresql://easyboost_staging:${POSTGRES_PASSWORD}@postgres:5432/easyboost_staging
+    ports:
+      - "127.0.0.1:${APP_PORT:-3001}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+        restart: false
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+    name: easyboost-staging_postgres-data
+
+networks:
+  backend:
+    name: easyboost-staging_backend

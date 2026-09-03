@@ -1,0 +1,155 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import test from 'node:test';
+import vm from 'node:vm';
+
+const rawSource = await fs.readFile(new URL('../public/screens/speaking.js', import.meta.url), 'utf8');
+const executableSource = `${rawSource
+  .replace(/^import[\s\S]*?from '[^']+';\r?\n/gmu, '')
+  .replace(/export \{[\s\S]*?\};\s*$/u, '')}
+window.__speakingScreen={spOpen,spMicCheck,spPrep,spRec,spFinish,spPlay,spCompleteTask1,spEval,speStart,getState:function(){return SP},getExamState:function(){return SPE}};`;
+
+test('speaking evaluation sends only a server reference and preserves needs_retry as unscored', () => {
+  const evaluation = rawSource.slice(rawSource.indexOf('async function spEval'), rawSource.indexOf('function spShowEval'));
+  assert.match(evaluation, /sessionId:evaluationSessionId/u);
+  assert.doesNotMatch(evaluation, /contentRef/u);
+  assert.match(evaluation, /evaluationView\.pronunciationUploadCache/u);
+  assert.match(evaluation, /cachedUpload\.key/u,
+    'an interrupted official upload must retry with the same idempotency key');
+  assert.doesNotMatch(evaluation, /assignment:spAssignment/u);
+  assert.ok(
+    evaluation.indexOf("d.status==='needs_retry'") < evaluation.indexOf('clampScore'),
+    'retry must be handled before a nullable score can be clamped to zero',
+  );
+  assert.match(evaluation, /d\.status==='needs_retry'.*evaluationView\.pronunciationUploadCache=null.*spFinishEvaluationView\(btn\)/su,
+    'a retry verdict requires a new recording instead of replaying the same evaluation');
+  assert.match(rawSource, /function spFinishEvaluationView\(btn\).*btn\.hidden=true/su,
+    'the spent assessment action is removed semantically without presentation style mutation');
+  assert.doesNotMatch(evaluation, /Оценить ещё раз/u);
+});
+
+test('speaking result disclosure names the acoustic evidence that actually affected the score', () => {
+  const presentation = rawSource.slice(rawSource.indexOf('function spShowEval'), rawSource.indexOf('function showAdaptiveSpeakingReturn'));
+  assert.match(presentation, /полноту чтения, беглость распознавания/u);
+  assert.match(presentation, /грубые ошибки в словах/u);
+  assert.match(presentation, /Интонация и отдельные фонемы в балл не входили/u);
+  assert.doesNotMatch(presentation, /Произношение, интонация, паузы и беглость не оценивались/u);
+});
+
+test('real Speaking screen posts task 1 completion metadata and offers explicit assessment upload', async () => {
+  const requests = [];
+  const area = { innerHTML: '' };
+  const elements = new Map([['s9_area', area], ['s9_today', { textContent: '' }]]);
+  const session = {
+    id: '71100000-0000-4000-8000-000000000001',
+    task: {
+      id: 'speaking-pilot-v1.task1.community-garden', revision: 1, taskType: 1,
+      cefr: 'B1', topic: 'Город и природа', preparationSeconds: 90, responseSeconds: 90,
+      maxScore: 1, instruction: 'Read aloud.', text: 'A server-owned reading text for the browser screen.',
+    },
+    pronunciationAssessment: { available: false, reason: 'provider_not_connected' },
+  };
+  const speakingModule = {
+    config: () => ({ name: 'Чтение вслух', prep: 90, rec: 90, max: 1, sub: 'задание 1 · 1 балл' }),
+    preferredMimeType: () => 'audio/webm', formatTime: (seconds) => `0:${seconds}`,
+    serverTask1Set(value) {
+      return value?.task?.preparationSeconds === 90 && value?.pronunciationAssessment?.available === false
+        ? { id: value.task.id, revision: 1, tx: value.task.text, topic: value.task.topic, cefr: value.task.cefr }
+        : null;
+    },
+    normalizeState: (value) => value || { t1: { n: 0 }, t2: { n: 0 }, t3: { n: 0 }, t4: { n: 0 } },
+    summary: () => ({ trainings: 0 }), pool: (base) => base, select: (items) => items[0],
+    sentences: () => [], TASKS: [1, 2, 3, 4], EXAM_MAX: 20,
+  };
+  const context = {
+    window: {}, document: { getElementById: (id) => elements.get(id) || null },
+    SPEAKING_TASK1_CATALOG: { tasks: [{ id: session.task.id, revision: 1, text: 'Full-exam fallback reading text.' }] },
+    SPEAKING_TASK2_CATALOG: { tasks: [] },
+    SPEAKING_TASK3_CATALOG: { tasks: [] },
+    registerRouteHook() {}, lPlayRaw() {}, lStop() {},
+    S: { spk: { t1: { n: 0 }, t2: { n: 0 }, t3: { n: 0 }, t4: { n: 0 } } },
+    SRV: true, TOKEN: 'cookie-session', WBTN: 'width:100%;',
+    apiMessage: (error) => error.message, apiPost: async (path, body) => {
+      requests.push({ path, body });
+      return path.endsWith('/complete') ? { ...session, status: 'completed', practice: body } : session;
+    },
+    apiPostBinary() {}, examModule: {}, generateAiContent() {}, save() {},
+    setTxt(id, text) { const element = elements.get(id); if (element) element.textContent = text; },
+    spSt() { return context.S.spk; }, spSync() {}, speakingModule, toast() {},
+    ui: { escapeHtml: (value) => String(value), animate() {}, AI_DISCLAIMER: '' }, wDeco: () => '',
+    adaptiveRuntimeSnapshot: () => ({ active: null }), completeAdaptiveServerAttempt() {}, openAdaptivePlan() {},
+    adaptiveSpeakingTask: (reference) => reference.includes(':2:')
+      ? { taskNumber: 2, assignment: { ad: 'ad', points: ['a', 'b', 'c', 'd'] } }
+      : { taskNumber: 4, assignment: { topic: 'topic', ph: ['one', 'two'], plan: ['a', 'b', 'c', 'd'] } },
+    voiceTutorButton: () => '',
+    createSpeakingTask1BrowserFlow({ api }) {
+      let recording = null;
+      return {
+        async loadAssignment() { return api.post('/api/v1/speaking/task-1/sessions', {}); },
+        async checkMicrophone() { return { status: 'passed', level: 0.2 }; },
+        async startRecording() {},
+        async stopRecording() { recording = { blob: { size: 11 }, url: 'blob:local', durationSeconds: 72 }; return recording; },
+        async playRecording() { return true; },
+        async complete(selfRating) {
+          return api.post(`/api/v1/speaking/task-1/sessions/${session.id}/complete`, {
+            recordingDurationSeconds: recording.durationSeconds,
+            micCheck: 'passed', localPlayback: true, selfRating,
+          });
+        },
+        dispose() {},
+      };
+    },
+    createSpeakingFullBrowserFlow() {
+      const fullSession = {
+        id: '75500000-0000-4000-8000-000000000001', status: 'in_progress', phase: 'ready',
+        current: { taskType: 1, responseNumber: 1 }, task: session.task,
+        progress: [
+          { taskType: 1, completedResponses: 0, responseCount: 1 },
+          { taskType: 2, completedResponses: 0, responseCount: 4 },
+          { taskType: 3, completedResponses: 0, responseCount: 5 },
+          { taskType: 4, completedResponses: 0, responseCount: 1 },
+        ],
+      };
+      return {
+        async loadAssignment() { return fullSession; },
+        state() { return { session: fullSession, micCheck: 'skipped', recording: null, isRecording: false }; },
+        dispose() {},
+      };
+    },
+    createSpeakingTask2BrowserFlow() { throw new Error('task 2 not used'); },
+    createSpeakingTask3BrowserFlow() { throw new Error('task 3 not used'); },
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 1,
+    URL: { revokeObjectURL() {} }, Blob, Audio: class {}, MediaRecorder: class {},
+    console, Object, Number, Math, Array, String, Boolean, Date, Promise,
+  };
+  vm.runInNewContext(executableSource, context);
+  const screen = context.window.__speakingScreen;
+
+  assert.equal(await screen.spOpen(1), true);
+  assert.match(area.innerHTML, /назначенный сервером текст/u);
+  await screen.spMicCheck({ disabled: false });
+  screen.spPrep();
+  await screen.spRec();
+  await screen.spFinish();
+  await screen.spPlay();
+  assert.doesNotMatch(area.innerHTML, /Оценить по критериям ЕГЭ/u,
+    'paid Task 1 assessment must stay hidden before canonical completion');
+  assert.equal(await screen.spEval({ dataset: {}, disabled: false }), false);
+  assert.equal(requests.length, 1, 'Task 1 cannot upload before the self-rating is persisted');
+  await screen.spCompleteTask1('steady', { disabled: false });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [
+    { path: '/api/v1/speaking/task-1/sessions', body: {} },
+    {
+      path: `/api/v1/speaking/task-1/sessions/${session.id}/complete`,
+      body: { recordingDurationSeconds: 72, micCheck: 'passed', localPlayback: true, selfRating: 'steady' },
+    },
+  ]);
+  assert.match(area.innerHTML, /Безопасная история тренировки сохранена/u);
+  assert.match(area.innerHTML, /Оценить по критериям ЕГЭ/u);
+  assert.equal(screen.getState().task1Completed, true);
+
+  await screen.speStart();
+  assert.match(screen.getExamState().session.task.text, /server-owned reading text/u);
+  assert.doesNotMatch(screen.getExamState().session.task.text, /Full-exam fallback/u);
+});

@@ -1,0 +1,422 @@
+/*
+ * Сборка frontend.
+ *
+ * `public/` остаётся каталогом исходников: сервер умеет отдавать его напрямую, `npm start` на
+ * чистом клоне работает без сборки, и все тесты читают именно эти файлы. Здесь из тех же исходников
+ * собирается `dist/public` — бандл с минификацией и хешированными именами, — который сервер
+ * предпочитает, если каталог существует.
+ *
+ * Скрипт делает три вещи, которые Vite сам не делает:
+ *
+ * 1. копирует статику, на которую никто не ссылается импортом (страницы offline и privacy, банк
+ *    заданий, иконки): publicDir у Vite отключён, потому что она лежит в самом root;
+ * 2. подставляет в service worker список оболочки по манифесту сборки — с хешированными именами
+ *    вести его руками нельзя;
+ * 3. проверяет целостность: отсутствующий или неверный импорт обязан валить сборку, а не
+ *    оставлять ученику молча неработающий экран.
+ */
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'vite';
+import { computePwaReleaseVersion, injectPwaReleaseVersion } from './pwa-release-version.js';
+import {
+  PREDECESSOR_COMMIT, compatibilityArtifactDirectory, verifyPredecessorCompatibility,
+} from './pwa-predecessor-compat.js';
+import { publishReleaseArtifact } from './verify-release-artifact.js';
+
+const projectDirectory = fileURLToPath(new URL('..', import.meta.url));
+const sourceDirectory = path.join(projectDirectory, 'public');
+const sharedSourceDirectory = path.join(projectDirectory, 'shared');
+const outputDirectory = path.join(projectDirectory, 'dist', 'public');
+const stagingDirectory = path.join(projectDirectory, 'dist', 'public.building');
+const configFile = path.join(projectDirectory, 'vite.config.js');
+const predecessorCompatibility = await verifyPredecessorCompatibility({
+  directory: compatibilityArtifactDirectory(projectDirectory, PREDECESSOR_COMMIT),
+  expectedCommit: PREDECESSOR_COMMIT,
+});
+
+const SHELL_MARKER_START = '/* build:app-shell */';
+const SHELL_MARKER_END = '/* end build:app-shell */';
+const EGE_MOCK_FORM_MARKER_START = '/* build:ege-mock-form */';
+const EGE_MOCK_FORM_MARKER_END = '/* end build:ege-mock-form */';
+const EGE_MOCK_EXEC_MARKER_START = '/* build:ege-mock-exec */';
+const EGE_MOCK_EXEC_MARKER_END = '/* end build:ege-mock-exec */';
+const PREDECESSOR_COMPAT_MARKER_START = '/* build:predecessor-compat */';
+const PREDECESSOR_COMPAT_MARKER_END = '/* end build:predecessor-compat */';
+
+/* ---------- исходники ---------- */
+
+async function listFiles(directory, prefix = '') {
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const relativePath = path.posix.join(prefix, entry.name);
+    if (entry.isDirectory()) files.push(...await listFiles(path.join(directory, entry.name), relativePath));
+    else if (entry.isFile()) files.push(relativePath);
+  }
+  return files;
+}
+
+const publicSourceFiles = (await listFiles(sourceDirectory)).sort();
+const sharedSourceFiles = (await listFiles(sharedSourceDirectory))
+  .map((name) => `../shared/${name}`);
+const sourceFiles = [...publicSourceFiles, ...sharedSourceFiles].sort();
+
+function sourceFilePath(name) {
+  return path.resolve(sourceDirectory, name);
+}
+
+function sourceUrl(name) {
+  return name.startsWith('../shared/') ? name.slice(2) : `/${name}`;
+}
+
+/*
+ * Импорт — всегда инструкция верхнего уровня, поэтому статические ищем от начала строки: иначе
+ * `from '…'` внутри учебного текста будет принят за зависимость. Экран приезжает динамическим
+ * import(): опечатка в его пути не сломает старт приложения, но ученик увидит пустой переход вместо
+ * экрана, поэтому такие пути проверяются наравне со статическими.
+ */
+function importsOf(source, name) {
+  const statics = [];
+  const dynamics = [];
+  const resolve = (specifier) => {
+    if (!specifier.startsWith('.')) throw new Error(`Frontend module ${name} imports outside the bundle: ${specifier}`);
+    return path.posix.normalize(path.posix.join(path.posix.dirname(name), specifier));
+  };
+  for (const statement of source.matchAll(/^import\s+[^;']*from\s*'([^']+)'|^import\s*'([^']+)'/gmu)) {
+    statics.push(resolve(statement[1] || statement[2]));
+  }
+  for (const statement of source.matchAll(/import\(\s*'([^']+)'\s*\)/gu)) dynamics.push(resolve(statement[1]));
+  return { statics, dynamics };
+}
+
+/*
+ * Обход module-графа от точки входа. `staticOnly` отделяет оболочку от чанков: то, до чего можно дойти
+ * только динамическим import(), при первой загрузке не приезжает и в APP_SHELL не входит.
+ */
+async function walkModuleGraph(entry, { staticOnly = false } = {}) {
+  const seen = new Set();
+  const queue = [entry];
+  while (queue.length) {
+    const name = queue.shift();
+    if (seen.has(name)) continue;
+    seen.add(name);
+    if (!sourceFiles.includes(name)) throw new Error(`Missing frontend module: ${name}`);
+    const source = await fs.readFile(sourceFilePath(name), 'utf8');
+    const { statics, dynamics } = importsOf(source, name);
+    queue.push(...statics);
+    if (!staticOnly) queue.push(...dynamics);
+  }
+  return seen;
+}
+
+const html = await fs.readFile(path.join(sourceDirectory, 'index.html'), 'utf8');
+const scriptEntries = [...html.matchAll(/<script([^>]*)src="\/([^"]+)"[^>]*>/gu)]
+  .map((match) => ({ attributes: match[1], name: match[2] }));
+const entryPoints = scriptEntries.filter((entry) => /\btype="module"/u.test(entry.attributes))
+  .map((entry) => entry.name);
+const classicScriptAssets = scriptEntries.filter((entry) => !/\btype="module"/u.test(entry.attributes))
+  .map((entry) => entry.name);
+if (!entryPoints.length) throw new Error('index.html подключает ноль скриптов — приложение не запустится');
+for (const entry of entryPoints) {
+  if (!sourceFiles.includes(entry)) throw new Error(`Missing frontend script: ${entry}`);
+}
+
+const reachable = new Set();
+const shellModules = new Set();
+for (const entry of entryPoints) {
+  for (const name of await walkModuleGraph(entry)) reachable.add(name);
+  for (const name of await walkModuleGraph(entry, { staticOnly: true })) shellModules.add(name);
+}
+const offlineEntryModules = [
+  'screens/grammar.js', 'screens/practice.js', 'screens/ege-hub.js', 'screens/progress.js', 'screens/profile.js',
+  'asya-assistant.js', 'privacy.js', 'adaptive-session-runtime.js',
+];
+const offlineLazyModules = [...new Set((await Promise.all(offlineEntryModules.map(
+  (entry) => walkModuleGraph(entry, { staticOnly: true }),
+))).flatMap((closure) => [...closure]))].filter((name) => !shellModules.has(name));
+const egeMockSourceEntry = 'screens/ege-mock.js';
+const egeMockStaticClosure = await walkModuleGraph(egeMockSourceEntry, { staticOnly: true });
+const sourceEgeMockExecModules = [
+  egeMockSourceEntry,
+  ...[...egeMockStaticClosure]
+    .filter((name) => name !== egeMockSourceEntry && !shellModules.has(name))
+    .sort(),
+];
+const sourceEgeMockExecPaths = sourceEgeMockExecModules.map(sourceUrl);
+
+/*
+ * Файл, до которого не дотягивается ни один импорт, не попадёт ни в бандл, ни в кэш оболочки —
+ * а выглядеть будет как рабочий код. Исключения — service worker и прямые classic scripts из
+ * index.html: их загружает браузер, а не module-точка входа.
+ */
+function previewOnlyAsset(name) {
+  return name.startsWith('prototypes/');
+}
+
+const orphaned = sourceFiles.filter((name) => name.endsWith('.js') && name !== 'service-worker.js'
+  && !classicScriptAssets.includes(name) && !previewOnlyAsset(name) && !reachable.has(name));
+if (orphaned.length) throw new Error(`Эти модули не подключены ни статически, ни динамически: ${orphaned.join(', ')}`);
+
+/* Статика, которую никто не импортирует: prototype-only файлы остаются только в исходном дереве. */
+function copiedStaticAsset(name) {
+  return !previewOnlyAsset(name) && (classicScriptAssets.includes(name) || !name.endsWith('.js')) && name !== 'index.html'
+    && name !== 'assets/opening/README.md';
+}
+const staticAssets = publicSourceFiles.filter(copiedStaticAsset);
+
+/*
+ * Большие listening MP3 — runtime-данные, а не оболочка приложения. Их всё равно нужно положить в
+ * dist и включить в итоговый asset-manifest, но service worker получает их по требованию и хранит
+ * в отдельном Range-aware runtime cache. Предзагрузка всего каталога сделала бы первый install
+ * тяжелее примерно на 55 MB и сломала бы честную прогрессивную offline-модель. Сам небольшой
+ * listening manifest остаётся частью APP_SHELL.
+ */
+function runtimeManagedAsset(name) {
+  return (name.startsWith('audio/listening/') && name.endsWith('.mp3'))
+    || (name.startsWith('assets/speaking/task4-v1/') && name.endsWith('.png'));
+}
+
+/* Prototype-only assets уже исключены; из production-оболочки остаётся отделить runtime-каталоги. */
+const shellStaticAssets = staticAssets.filter((name) => !runtimeManagedAsset(name));
+
+/* ---------- сборка ---------- */
+
+/*
+ * Собирается во временный каталог, а на место встаёт последним шагом. Сервер отдаёт `dist/public`
+ * по факту существования разметки в нём: недособранный каталог он бы отдал наравне с полным —
+ * без service worker и с недосчитанной целостностью.
+ */
+await fs.rm(stagingDirectory, { recursive: true, force: true });
+const result = await build({ configFile, logLevel: 'warn', build: { outDir: stagingDirectory } });
+const output = (Array.isArray(result) ? result[0] : result).output;
+
+/*
+ * Карта «исходный модуль → файл, в который он попал». Имена в сборке хешированные, и это
+ * единственный способ узнать, где оказался экран: по имени файла больше не видно.
+ */
+const chunks = output.filter((item) => item.type === 'chunk');
+const chunkByFile = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
+const modules = {};
+for (const chunk of chunks) {
+  for (const id of Object.keys(chunk.modules)) {
+    const normalized = path.resolve(id);
+    if (normalized.startsWith(sourceDirectory + path.sep)) {
+      modules[path.relative(sourceDirectory, normalized).split(path.sep).join('/')] = chunk.fileName;
+    } else if (normalized.startsWith(sharedSourceDirectory + path.sep)) {
+      const relative = path.relative(sharedSourceDirectory, normalized).split(path.sep).join('/');
+      modules[`../shared/${relative}`] = chunk.fileName;
+    }
+  }
+}
+
+for (const name of reachable) {
+  if (!modules[name]) throw new Error(`Модуль ${name} не попал в сборку — проверьте импорты`);
+}
+const builtEgeMockFormModule = modules['ege-mock-form-1-v1.js'];
+if (!builtEgeMockFormModule) throw new Error('Exact EGE mock form module не попал в сборку');
+const builtEgeMockFormPath = `/${builtEgeMockFormModule}`;
+const builtEgeMockScreenModule = modules['screens/ege-mock.js'];
+if (!builtEgeMockScreenModule) throw new Error('Lazy EGE mock executable не попал в сборку');
+const builtEgeMockExecPaths = [...new Set(
+  sourceEgeMockExecModules.map((name) => `/${modules[name]}`),
+)].sort();
+
+const entryChunk = chunks.find((chunk) => chunk.isEntry);
+if (!entryChunk) throw new Error('Сборка не дала точки входа');
+
+/* Оболочка — точка входа и то, что она тянет статически. Чанки экранов сюда не входят. */
+const shellChunks = new Set();
+const pending = [entryChunk.fileName];
+while (pending.length) {
+  const fileName = pending.shift();
+  if (shellChunks.has(fileName)) continue;
+  shellChunks.add(fileName);
+  pending.push(...(chunkByFile.get(fileName)?.imports || []));
+}
+const dynamicChunks = chunks.map((chunk) => chunk.fileName).filter((fileName) => !shellChunks.has(fileName));
+
+for (const name of shellModules) {
+  if (!shellChunks.has(modules[name])) {
+    throw new Error(`${name} импортируется статически, но оказался в чанке ${modules[name]} — оболочка разъехалась с первой загрузкой`);
+  }
+}
+
+/* ---------- статика и service worker ---------- */
+
+const emitted = new Set(output.map((item) => item.fileName));
+for (const name of staticAssets) {
+  if (emitted.has(name)) continue;
+  const destination = path.join(stagingDirectory, name);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(path.join(sourceDirectory, name), destination);
+}
+
+/* All 26 exact predecessor executables are packaged at their original content-hashed URLs and are
+ * installed into the predecessor cache only during an update. Every truly predecessor-only file
+ * must stay outside current APP_SHELL. Exactly two digest-identical current emissions are shell
+ * members; the other 24 compatibility entries stay outside shell (including unchanged lazy outputs). */
+const predecessorArtifactDirectory = compatibilityArtifactDirectory(projectDirectory, PREDECESSOR_COMMIT);
+for (const file of predecessorCompatibility.files) {
+  const name = file.path.slice(1);
+  const source = path.join(predecessorArtifactDirectory, 'files', name);
+  const destination = path.join(stagingDirectory, name);
+  try {
+    const current = await fs.readFile(destination);
+    const currentDigest = crypto.createHash('sha256').update(current).digest('hex');
+    if (current.length !== file.bytes || currentDigest !== file.sha256) {
+      throw new Error(`Predecessor compatibility collides with different current bytes: ${file.path}`);
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.copyFile(source, destination);
+  }
+}
+
+function shellFrom(files) {
+  return ['/', ...files.map(sourceUrl).sort()];
+}
+
+const workerSource = await fs.readFile(path.join(sourceDirectory, 'service-worker.js'), 'utf8');
+const shellStart = workerSource.indexOf(SHELL_MARKER_START);
+const shellEnd = workerSource.indexOf(SHELL_MARKER_END);
+if (shellStart === -1 || shellEnd === -1) {
+  throw new Error('public/service-worker.js потерял маркеры build:app-shell — сборке некуда подставить список оболочки');
+}
+
+/*
+ * Список в исходнике ведётся руками только потому, что сервер отдаёт `public/`, когда сборки нет.
+ * Чтобы он не разъехался с реальной initial closure, сборка сверяет module-граф, прямые classic
+ * scripts из index.html и обязательные static assets: набор тот же, что в dist, только без хешей.
+ */
+const sourceShell = shellFrom([...shellModules, ...offlineLazyModules, ...shellStaticAssets]);
+const declaredShell = JSON.parse(workerSource.slice(shellStart, shellEnd).match(/const APP_SHELL=(\[[^\]]*\]);/u)[1].replaceAll("'", '"'));
+const declaredSorted = [...declaredShell].sort();
+const expectedSorted = [...sourceShell].sort();
+if (declaredSorted.join('\n') !== expectedSorted.join('\n')) {
+  const missing = expectedSorted.filter((name) => !declaredSorted.includes(name));
+  const extra = declaredSorted.filter((name) => !expectedSorted.includes(name));
+  throw new Error(`APP_SHELL в public/service-worker.js разошёлся с initial frontend closure.${missing.length ? `\n  не хватает: ${missing.join(', ')}` : ''}${extra.length ? `\n  лишнее: ${extra.join(', ')}` : ''}`);
+}
+
+const offlineLazyChunks = new Set(offlineLazyModules.map((name) => modules[name]));
+/* Vite folds every stylesheet linked by index.html into one hashed CSS asset. The source CSS
+ * copies remain useful for source-mode/offline compatibility, but the production document no
+ * longer requests them. Cache the emitted stylesheet too or an offline reload gets unstyled UI. */
+const builtStyles = output.filter((item) => item.type === 'asset' && item.fileName.endsWith('.css'))
+  .map((item) => item.fileName);
+const builtShell = shellFrom([...new Set([
+  ...shellChunks, ...offlineLazyChunks, ...shellStaticAssets, ...builtStyles,
+])]);
+let workerBuilt = `${workerSource.slice(0, shellStart)}${SHELL_MARKER_START}\nconst APP_SHELL=${JSON.stringify(builtShell).replaceAll('"', "'")};\n${workerSource.slice(shellEnd)}`;
+const egeMockFormStart = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_START);
+const egeMockFormEnd = workerBuilt.indexOf(EGE_MOCK_FORM_MARKER_END);
+if (egeMockFormStart === -1 || egeMockFormEnd === -1) {
+  throw new Error('public/service-worker.js потерял exact EGE form markers');
+}
+const sourceEgeMockFormBlock = workerBuilt.slice(egeMockFormStart, egeMockFormEnd);
+if (!sourceEgeMockFormBlock.includes("const EGE_MOCK_FORM_PATH='/ege-mock-form-1-v1.js';")) {
+  throw new Error('Source service worker потерял exact EGE form path');
+}
+workerBuilt = `${workerBuilt.slice(0, egeMockFormStart)}${EGE_MOCK_FORM_MARKER_START}\nconst EGE_MOCK_FORM_PATH='${builtEgeMockFormPath}';\n${workerBuilt.slice(egeMockFormEnd)}`;
+const egeMockExecStart = workerBuilt.indexOf(EGE_MOCK_EXEC_MARKER_START);
+const egeMockExecEnd = workerBuilt.indexOf(EGE_MOCK_EXEC_MARKER_END);
+if (egeMockExecStart === -1 || egeMockExecEnd === -1) {
+  throw new Error('public/service-worker.js потерял markers build:ege-mock-exec');
+}
+const sourceEgeMockExecBlock = workerBuilt.slice(egeMockExecStart, egeMockExecEnd);
+const sourceEgeMockExecDeclaration = `const EGE_MOCK_EXEC_PATHS=${JSON.stringify(sourceEgeMockExecPaths).replaceAll('"', "'")};`;
+if (!sourceEgeMockExecBlock.includes(sourceEgeMockExecDeclaration)) {
+  throw new Error(`Source service worker потерял EGE executable paths: ${sourceEgeMockExecDeclaration}`);
+}
+workerBuilt = `${workerBuilt.slice(0, egeMockExecStart)}${EGE_MOCK_EXEC_MARKER_START}\nconst EGE_MOCK_EXEC_PATHS=${JSON.stringify(builtEgeMockExecPaths).replaceAll('"', "'")};\n${workerBuilt.slice(egeMockExecEnd)}`;
+const predecessorCompatStart = workerBuilt.indexOf(PREDECESSOR_COMPAT_MARKER_START);
+const predecessorCompatEnd = workerBuilt.indexOf(PREDECESSOR_COMPAT_MARKER_END);
+if (predecessorCompatStart === -1 || predecessorCompatEnd === -1) {
+  throw new Error('public/service-worker.js потерял markers build:predecessor-compat');
+}
+const predecessorWorkerContract = {
+  schemaVersion: predecessorCompatibility.schemaVersion,
+  baseCommit: predecessorCompatibility.baseCommit,
+  cacheName: predecessorCompatibility.cacheName,
+  contentSha256: predecessorCompatibility.contentSha256,
+  files: predecessorCompatibility.files,
+};
+workerBuilt = `${workerBuilt.slice(0, predecessorCompatStart)}${PREDECESSOR_COMPAT_MARKER_START}\nconst PREDECESSOR_COMPATIBILITY=${JSON.stringify(predecessorWorkerContract)};\n${workerBuilt.slice(predecessorCompatEnd)}`;
+const releaseVersion = await computePwaReleaseVersion({
+  directory: stagingDirectory,
+  shell: builtShell,
+  workerSource: workerBuilt,
+});
+workerBuilt = injectPwaReleaseVersion(workerBuilt, releaseVersion);
+await fs.writeFile(path.join(stagingDirectory, 'service-worker.js'), workerBuilt, 'utf8');
+
+/* ---------- целостность ---------- */
+
+const builtHtml = await fs.readFile(path.join(stagingDirectory, 'index.html'), 'utf8');
+const builtFiles = (await listFiles(stagingDirectory)).sort();
+const assets = {};
+for (const name of builtFiles) {
+  const content = await fs.readFile(path.join(stagingDirectory, name));
+  assets[name] = { bytes: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex') };
+}
+
+const builtScripts = [...builtHtml.matchAll(/<script[^>]+src="\/([^"]+)"/gu)].map((match) => match[1]);
+if (!builtScripts.length) throw new Error('Собранный index.html подключает ноль скриптов');
+for (const name of builtScripts) {
+  if (!assets[name]) throw new Error(`Собранный index.html подключает отсутствующий файл: ${name}`);
+}
+if (!assets[builtEgeMockFormPath.slice(1)]) {
+  throw new Error(`Exact EGE mock form module отсутствует в dist: ${builtEgeMockFormPath}`);
+}
+for (const pathname of builtEgeMockExecPaths) {
+  if (!assets[pathname.slice(1)]) {
+    throw new Error(`Derived EGE executable отсутствует в dist: ${pathname}`);
+  }
+}
+if (!builtScripts.includes(entryChunk.fileName)) {
+  throw new Error(`Собранный index.html не подключает точку входа ${entryChunk.fileName}`);
+}
+/* Собранная разметка не должна приносить инлайновых скриптов: CSP держит script-src как 'self'. */
+if (/<script(?![^>]*\bsrc\s*=)(?:\s[^>]*)?>/iu.test(builtHtml)) {
+  throw new Error('Сборка добавила инлайновый <script> — CSP считается по этой же разметке и разъедется с ней');
+}
+for (const name of builtShell.slice(1)) {
+  if (!assets[name.slice(1)]) throw new Error(`APP_SHELL ссылается на отсутствующий файл: ${name}`);
+}
+for (const file of predecessorCompatibility.files) {
+  const name = file.path.slice(1);
+  if (!assets[name] || assets[name].bytes !== file.bytes || assets[name].sha256 !== file.sha256) {
+    throw new Error(`Packaged predecessor executable failed final integrity: ${file.path}`);
+  }
+  if (builtShell.includes(file.path) && !emitted.has(name)) {
+    throw new Error(`Predecessor-only executable leaked into current APP_SHELL: ${file.path}`);
+  }
+}
+
+await fs.writeFile(
+  path.join(stagingDirectory, 'asset-manifest.json'),
+  `${JSON.stringify({
+    generatedBy: 'npm run build:frontend',
+    entry: entryChunk.fileName,
+    releaseVersion,
+    shell: builtShell,
+    dynamicChunks: dynamicChunks.sort(),
+    predecessorCompatibility: predecessorWorkerContract,
+    modules,
+    assets,
+  }, null, 2)}\n`,
+  'utf8',
+);
+
+/*
+ * Staging проверяется до публикации; прежнее поколение сохраняется до повторной проверки уже
+ * опубликованного каталога и автоматически восстанавливается при ошибке rename/verification.
+ */
+const verifiedArtifact = await publishReleaseArtifact({ stagingDirectory, publicDirectory: outputDirectory });
+
+const shellBytes = [...shellChunks].reduce((total, name) => total + assets[name].bytes, 0);
+console.log(`Frontend build created ${builtFiles.length} verified assets in dist/public: оболочка — ${shellChunks.size} файлов и ${(shellBytes / 1024).toFixed(1)} КБ JavaScript, ленивых чанков ${dynamicChunks.length}; artifact ${verifiedArtifact.aggregateSha256}.`);

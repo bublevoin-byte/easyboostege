@@ -1,88 +1,205 @@
-// Простое файловое хранилище (JSON). Для старта на 1–несколько пользователей.
-// Для роста замените на PostgreSQL — интерфейс функций тот же.
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { config } from './config.js';
+import { createFileRepository } from './storage/file-repository.js';
+import { createPostgresRepository } from './storage/postgres-repository.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FILE = path.join(__dirname, 'data.json');
+const repository = config.database.provider === 'postgres'
+  ? createPostgresRepository(config.database.url)
+  : createFileRepository(config.database.file);
 
-let db = { users: {}, progress: {} };
-try {
-  db = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-} catch (e) {
-  // файла ещё нет — начнём с пустой базы
-}
-
-let saving = false;
-function persist() {
-  if (saving) return;
-  saving = true;
-  setTimeout(() => {
-    fs.writeFileSync(FILE, JSON.stringify(db, null, 2));
-    saving = false;
-  }, 200);
-}
-
-export function getUser(username) {
-  return db.users[username] || null;
-}
-export function createUser(username, hash) {
-  db.users[username] = { hash, created: Date.now() };
-  db.progress[username] = db.progress[username] || {};
-  persist();
-}
-export function getProgress(username) {
-  return db.progress[username] || {};
-}
-export function saveProgress(username, data) {
-  db.progress[username] = data;
-  persist();
-}
-
-// --- Telegram-вход ---
-export function getUserByTelegram(tgId) {
-  for (const [name, u] of Object.entries(db.users)) {
-    if (u.telegram_id === tgId) return { username: name, ...u };
-  }
-  return null;
-}
-export function createTelegramUser(tgId, displayName) {
-  let base = (displayName || ('tg' + tgId)).replace(/[^A-Za-zА-Яа-я0-9_]+/g, '_').slice(0, 20) || ('tg' + tgId);
-  let uname = base, i = 1;
-  while (db.users[uname]) uname = base + '_' + (i++);
-  db.users[uname] = { telegram_id: tgId, created: Date.now() };
-  db.progress[uname] = db.progress[uname] || {};
-  persist();
-  return uname;
-}
-
-// --- Подписка / доступ ---
-export function ensureTelegramUser(tgId, displayName) {
-  const ex = getUserByTelegram(tgId);
-  if (ex) return ex.username;
-  return createTelegramUser(tgId, displayName);
-}
-// Продлить доступ на N дней (от текущего конца подписки, если он в будущем).
-export function grantDays(tgId, days, displayName) {
-  const uname = ensureTelegramUser(tgId, displayName);
-  const u = db.users[uname];
-  const now = Date.now();
-  const base = (u.sub_until && u.sub_until > now) ? u.sub_until : now;
-  u.sub_until = base + days * 86400000;
-  persist();
-  return { username: uname, sub_until: u.sub_until };
-}
-export function markTrialUsed(tgId, displayName) {
-  const uname = ensureTelegramUser(tgId, displayName);
-  db.users[uname].trial_used = true;
-  persist();
-  return uname;
-}
-// Статус доступа по имени пользователя (для приложения).
-export function getSub(username) {
-  const u = db.users[username];
-  if (!u) return { sub_until: 0, active: false, trial_used: false };
-  const su = u.sub_until || 0;
-  return { sub_until: su, active: su > Date.now(), trial_used: !!u.trial_used };
-}
+export const getUser = (...args) => repository.getUser(...args);
+export const createUser = (...args) => repository.createUser(...args);
+export const findOrCreateProviderUser = (...args) => repository.findOrCreateProviderUser(...args);
+export const createOAuthTransaction = (...args) => repository.createOAuthTransaction(...args);
+export const consumeOAuthTransaction = (...args) => repository.consumeOAuthTransaction(...args);
+export const purgeOAuthTransactions = (...args) => repository.purgeOAuthTransactions(...args);
+export const getProgress = (...args) => repository.getProgress(...args);
+export const saveProgress = (...args) => repository.saveProgress(...args);
+export const mergeProgress = (...args) => repository.mergeProgress(...args);
+export const migrateGrammarMastery = (...args) => repository.migrateGrammarMastery(...args);
+export const applyGrammarMasteryEvent = (...args) => repository.applyGrammarMasteryEvent(...args);
+export const applyGrammarMasteryEvents = (...args) => repository.applyGrammarMasteryEvents(...args);
+export const getUserByTelegram = (...args) => repository.getUserByTelegram(...args);
+export const createTelegramUser = (...args) => repository.createTelegramUser(...args);
+export const ensureTelegramUser = (...args) => repository.ensureTelegramUser(...args);
+export const grantDays = (...args) => repository.grantDays(...args);
+export const markTrialUsed = (...args) => repository.markTrialUsed(...args);
+export const getSub = (...args) => repository.getSub(...args);
+export const setEntitlement = (...args) => repository.setEntitlement(...args);
+export const getVoiceTutorAccess = (...args) => repository.getVoiceTutorAccess(...args);
+export const reserveVoiceTutorSession = (...args) => repository.reserveVoiceTutorSession(...args);
+export const issueVoiceTutorProxyTicket = (...args) => repository.issueVoiceTutorProxyTicket(...args);
+export const reissueVoiceTutorFallbackNonce = (...args) => repository.reissueVoiceTutorFallbackNonce(...args);
+export const consumeVoiceTutorProxyTicket = (...args) => repository.consumeVoiceTutorProxyTicket(...args);
+export const activateVoiceTutorProxySession = (...args) => repository.activateVoiceTutorProxySession(...args);
+export const finalizeVoiceTutorProxySession = (...args) => repository.finalizeVoiceTutorProxySession(...args);
+export const finishVoiceTutorSession = (...args) => repository.finishVoiceTutorSession(...args);
+export const getVoiceTutorSession = (...args) => repository.getVoiceTutorSession(...args);
+export const activateVoiceTutorSession = (...args) => repository.activateVoiceTutorSession(...args);
+export const advanceVoiceTutorSession = (...args) => repository.advanceVoiceTutorSession(...args);
+export const clarifyVoiceTutorSession = (...args) => repository.clarifyVoiceTutorSession(...args);
+export const setVoiceTutorSessionDelivery = (...args) => repository.setVoiceTutorSessionDelivery(...args);
+export const switchVoiceTutorSessionDelivery = (...args) => repository.switchVoiceTutorSessionDelivery(...args);
+export const submitVoiceTutorRepeat = (...args) => repository.submitVoiceTutorRepeat(...args);
+export const getVoiceTutorRecoveryMap = (...args) => repository.getVoiceTutorRecoveryMap(...args);
+export const getVoiceTutorRecoveryMetrics = (...args) => repository.getVoiceTutorRecoveryMetrics(...args);
+export const createRuleCard = (...args) => repository.createRuleCard(...args);
+export const claimVoiceTutorRuleDiscovery = (...args) => repository.claimVoiceTutorRuleDiscovery(...args);
+export const failVoiceTutorRuleDiscovery = (...args) => repository.failVoiceTutorRuleDiscovery(...args);
+export const createRuleCardForVoiceTutorSession = (...args) => repository.createRuleCardForVoiceTutorSession(...args);
+export const getRuleCard = (...args) => repository.getRuleCard(...args);
+export const listRuleCards = (...args) => repository.listRuleCards(...args);
+export const reviewRuleCard = (...args) => repository.reviewRuleCard(...args);
+export const getApprovedRuleCard = (...args) => repository.getApprovedRuleCard(...args);
+export const createVoiceTutorReport = (...args) => repository.createVoiceTutorReport(...args);
+export const listVoiceTutorReports = (...args) => repository.listVoiceTutorReports(...args);
+export const reviewVoiceTutorReport = (...args) => repository.reviewVoiceTutorReport(...args);
+export const setUserRole = (...args) => repository.setUserRole(...args);
+export const createPaymentRequest = (...args) => repository.createPaymentRequest(...args);
+export const createPaymentRequestForUser = (...args) => repository.createPaymentRequestForUser(...args);
+export const getPaymentRequestForUser = (...args) => repository.getPaymentRequestForUser(...args);
+export const listPaymentRequests = (...args) => repository.listPaymentRequests(...args);
+export const resolvePaymentRequest = (...args) => repository.resolvePaymentRequest(...args);
+export const revokeEntitlement = (...args) => repository.revokeEntitlement(...args);
+export const activateTrial = (...args) => repository.activateTrial(...args);
+export const getPrivacyConsent = (...args) => repository.getPrivacyConsent(...args);
+export const setPrivacyConsent = (...args) => repository.setPrivacyConsent(...args);
+export const createTelegramAuthCode = (...args) => repository.createTelegramAuthCode(...args);
+export const confirmTelegramAuthCode = (...args) => repository.confirmTelegramAuthCode(...args);
+export const consumeTelegramAuthCode = (...args) => repository.consumeTelegramAuthCode(...args);
+export const createWritingAttempt = (...args) => repository.createWritingAttempt(...args);
+export const claimWritingEvaluation = (...args) => repository.claimWritingEvaluation(...args);
+export const getWritingEvaluationClaim = (...args) => repository.getWritingEvaluationClaim(...args);
+export const markWritingEvaluationAmbiguous = (...args) => repository.markWritingEvaluationAmbiguous(...args);
+export const finishWritingAttempt = (...args) => repository.finishWritingAttempt(...args);
+export const getWritingAttempt = (...args) => repository.getWritingAttempt(...args);
+export const getWritingProgressSummary = (...args) => repository.getWritingProgressSummary(...args);
+export const createSpeakingAttempt = (...args) => repository.createSpeakingAttempt(...args);
+export const claimSpeakingEvaluation = (...args) => repository.claimSpeakingEvaluation(...args);
+export const getSpeakingEvaluationClaim = (...args) => repository.getSpeakingEvaluationClaim(...args);
+export const finishSpeakingAttempt = (...args) => repository.finishSpeakingAttempt(...args);
+export const getSpeakingAttempt = (...args) => repository.getSpeakingAttempt(...args);
+export const getSpeakingAccentProfile = (...args) => repository.getSpeakingAccentProfile(...args);
+export const getSpeakingAccentHistory = (...args) => repository.getSpeakingAccentHistory(...args);
+export const setSpeakingAccentProfile = (...args) => repository.setSpeakingAccentProfile(...args);
+export const startSpeakingAccentCalibration = (...args) => repository.startSpeakingAccentCalibration(...args);
+export const getSpeakingAccentCalibration = (...args) => repository.getSpeakingAccentCalibration(...args);
+export const getPendingSpeakingAccentCalibration = (...args) => repository.getPendingSpeakingAccentCalibration(...args);
+export const completeSpeakingAccentCalibration = (...args) => repository.completeSpeakingAccentCalibration(...args);
+export const getSpeakingCalibrationConsent = (...args) => repository.getSpeakingCalibrationConsent(...args);
+export const setSpeakingCalibrationConsent = (...args) => repository.setSpeakingCalibrationConsent(...args);
+export const createSpeakingCalibrationSample = (...args) => repository.createSpeakingCalibrationSample(...args);
+export const purgeExpiredSpeakingCalibrationSamples = (...args) => repository.purgeExpiredSpeakingCalibrationSamples(...args);
+export const claimSpeakingCalibrationSample = (...args) => repository.claimSpeakingCalibrationSample(...args);
+export const getSpeakingCalibrationAudio = (...args) => repository.getSpeakingCalibrationAudio(...args);
+export const submitSpeakingCalibrationReview = (...args) => repository.submitSpeakingCalibrationReview(...args);
+export const listSpeakingCalibrationSamplesForOwner = (...args) => repository.listSpeakingCalibrationSamplesForOwner(...args);
+export const listAnonymousSpeakingCalibrationLabels = (...args) => repository.listAnonymousSpeakingCalibrationLabels(...args);
+export const assignSpeakingTask1Session = (...args) => repository.assignSpeakingTask1Session(...args);
+export const getSpeakingTask1Session = (...args) => repository.getSpeakingTask1Session(...args);
+export const completeSpeakingTask1Session = (...args) => repository.completeSpeakingTask1Session(...args);
+export const assignSpeakingTask2Session = (...args) => repository.assignSpeakingTask2Session(...args);
+export const getSpeakingTask2Session = (...args) => repository.getSpeakingTask2Session(...args);
+export const completeSpeakingTask2Question = (...args) => repository.completeSpeakingTask2Question(...args);
+export const assignSpeakingTask3Session = (...args) => repository.assignSpeakingTask3Session(...args);
+export const getSpeakingTask3Session = (...args) => repository.getSpeakingTask3Session(...args);
+export const completeSpeakingTask3Answer = (...args) => repository.completeSpeakingTask3Answer(...args);
+export const assignSpeakingTask4Session = (...args) => repository.assignSpeakingTask4Session(...args);
+export const getSpeakingTask4Session = (...args) => repository.getSpeakingTask4Session(...args);
+export const completeSpeakingTask4Session = (...args) => repository.completeSpeakingTask4Session(...args);
+export const getSpeakingAssessmentQuota = (...args) => repository.getSpeakingAssessmentQuota(...args);
+export const getSpeakingAssessmentReservation = (...args) => repository.getSpeakingAssessmentReservation(...args);
+export const reserveSpeakingAssessment = (...args) => repository.reserveSpeakingAssessment(...args);
+export const dispatchSpeakingAssessment = (...args) => repository.dispatchSpeakingAssessment(...args);
+export const startSpeakingAssessment = (...args) => repository.startSpeakingAssessment(...args);
+export const finalizeSpeakingAssessment = (...args) => repository.finalizeSpeakingAssessment(...args);
+export const releaseSpeakingAssessment = (...args) => repository.releaseSpeakingAssessment(...args);
+export const assignFullSpeakingSession = (...args) => repository.assignFullSpeakingSession(...args);
+export const getFullSpeakingSession = (...args) => repository.getFullSpeakingSession(...args);
+export const advanceFullSpeakingSessionStage = (...args) => repository.advanceFullSpeakingSessionStage(...args);
+export const completeFullSpeakingSessionResponse = (...args) => repository.completeFullSpeakingSessionResponse(...args);
+export const claimFullSpeakingSessionAssessment = (...args) => repository.claimFullSpeakingSessionAssessment(...args);
+export const submitFullSpeakingSessionResult = (...args) => repository.submitFullSpeakingSessionResult(...args);
+export const completeFullSpeakingSessionEvaluation = (...args) => repository.completeFullSpeakingSessionEvaluation(...args);
+export const getGeneratedTask = (...args) => repository.getGeneratedTask(...args);
+export const getSharedGeneratedTask = (...args) => repository.getSharedGeneratedTask(...args);
+export const saveGeneratedTask = (...args) => repository.saveGeneratedTask(...args);
+export const upsertBankTask = (...args) => repository.upsertBankTask(...args);
+export const getBankTask = (...args) => repository.getBankTask(...args);
+export const getBankTaskByExternalId = (...args) => repository.getBankTaskByExternalId(...args);
+export const claimUnseenBankTask = (...args) => repository.claimUnseenBankTask(...args);
+export const recordTaskDelivery = (...args) => repository.recordTaskDelivery(...args);
+export const listBankTaskContents = (...args) => repository.listBankTaskContents(...args);
+export const saveAdaptiveLearningGoal = (...args) => repository.saveAdaptiveLearningGoal(...args);
+export const getAdaptiveLearningGoal = (...args) => repository.getAdaptiveLearningGoal(...args);
+export const getAdaptiveLearningEvidenceSources = (...args) => repository.getAdaptiveLearningEvidenceSources(...args);
+export const saveAdaptiveLearningProfile = (...args) => repository.saveAdaptiveLearningProfile(...args);
+export const getAdaptiveLearningProfile = (...args) => repository.getAdaptiveLearningProfile(...args);
+export const saveAdaptiveLearningPlan = (...args) => repository.saveAdaptiveLearningPlan(...args);
+export const getCurrentAdaptiveLearningPlan = (...args) => repository.getCurrentAdaptiveLearningPlan(...args);
+export const getAdaptiveLearningPlanRevision = (...args) => repository.getAdaptiveLearningPlanRevision(...args);
+export const getAdaptiveLearningSessionCreateReplay = (...args) => repository.getAdaptiveLearningSessionCreateReplay(...args);
+export const createAdaptiveLearningSession = (...args) => repository.createAdaptiveLearningSession(...args);
+export const getCurrentAdaptiveLearningSession = (...args) => repository.getCurrentAdaptiveLearningSession(...args);
+export const getAdaptiveLearningSessionCommercialScope = (...args) => repository.getAdaptiveLearningSessionCommercialScope(...args);
+export const getAdaptiveLearningSessionReplacementReplay = (...args) => repository.getAdaptiveLearningSessionReplacementReplay(...args);
+export const replaceAdaptiveLearningSessionBlock = (...args) => repository.replaceAdaptiveLearningSessionBlock(...args);
+export const getAdaptiveLearningSessionMutationReplay = (...args) => repository.getAdaptiveLearningSessionMutationReplay(...args);
+export const startAdaptiveLearningSessionBlock = (...args) => repository.startAdaptiveLearningSessionBlock(...args);
+export const getAdaptiveLearningSessionExecution = (...args) => repository.getAdaptiveLearningSessionExecution(...args);
+export const getAdaptiveLearningSessionAdvanceContext = (...args) => repository.getAdaptiveLearningSessionAdvanceContext(...args);
+export const advanceAdaptiveLearningSession = (...args) => repository.advanceAdaptiveLearningSession(...args);
+export const getAdaptiveLearningSessionFinishContext = (...args) => repository.getAdaptiveLearningSessionFinishContext(...args);
+export const finishAdaptiveLearningSession = (...args) => repository.finishAdaptiveLearningSession(...args);
+export const getAdaptiveLearningWeekUsage = (...args) => repository.getAdaptiveLearningWeekUsage(...args);
+export const getAdaptiveLearningCommercialUsage = (...args) => repository.getAdaptiveLearningCommercialUsage(...args);
+export const getAdaptiveLearningCompletedSessionReports = (...args) => repository.getAdaptiveLearningCompletedSessionReports(...args);
+export const getAdaptiveLearningMetrics = (...args) => repository.getAdaptiveLearningMetrics(...args);
+export const startAdaptiveDiagnostic = (...args) => repository.startAdaptiveDiagnostic(...args);
+export const getAdaptiveDiagnosticStartClaim = (...args) => repository.getAdaptiveDiagnosticStartClaim(...args);
+export const getCurrentAdaptiveDiagnostic = (...args) => repository.getCurrentAdaptiveDiagnostic(...args);
+export const getAdaptiveDiagnostic = (...args) => repository.getAdaptiveDiagnostic(...args);
+export const getAdaptiveDiagnosticCompletionReplay = (...args) => repository.getAdaptiveDiagnosticCompletionReplay(...args);
+export const answerAdaptiveDiagnostic = (...args) => repository.answerAdaptiveDiagnostic(...args);
+export const completeAdaptiveDiagnostic = (...args) => repository.completeAdaptiveDiagnostic(...args);
+export const startEgeMockAttempt = (...args) => repository.startEgeMockAttempt(...args);
+export const getCurrentEgeMockAttempt = (...args) => repository.getCurrentEgeMockAttempt(...args);
+export const getEgeMockAttempt = (...args) => repository.getEgeMockAttempt(...args);
+export const beginEgeMockAssessmentRun = (...args) => repository.beginEgeMockAssessmentRun(...args);
+export const settleEgeMockAssessmentRun = (...args) => repository.settleEgeMockAssessmentRun(...args);
+export const claimEgeMockWritingAssessment = (...args) => repository.claimEgeMockWritingAssessment(...args);
+export const renewEgeMockWritingAssessmentClaim = (...args) => repository.renewEgeMockWritingAssessmentClaim(...args);
+export const prepareEgeMockWritingAssessmentItemOutcome = (...args) => repository.prepareEgeMockWritingAssessmentItemOutcome(...args);
+export const recordEgeMockWritingAssessmentItemOutcome = (...args) => repository.recordEgeMockWritingAssessmentItemOutcome(...args);
+export const completeEgeMockWritingAssessmentItem = (...args) => repository.completeEgeMockWritingAssessmentItem(...args);
+export const failEgeMockWritingAssessment = (...args) => repository.failEgeMockWritingAssessment(...args);
+export const saveEgeMockDraft = (...args) => repository.saveEgeMockDraft(...args);
+export const submitEgeMockWritten = (...args) => repository.submitEgeMockWritten(...args);
+export const startEgeMockOral = (...args) => repository.startEgeMockOral(...args);
+export const advanceEgeMockOralStage = (...args) => repository.advanceEgeMockOralStage(...args);
+export const submitEgeMockOral = (...args) => repository.submitEgeMockOral(...args);
+export const syncEgeMockSpeakingBridge = (...args) => repository.syncEgeMockSpeakingBridge(...args);
+export const getEgeMockResult = (...args) => repository.getEgeMockResult(...args);
+export const getEgeMockHistory = (...args) => repository.getEgeMockHistory(...args);
+export const markEgeMockAssessmentRetryable = (...args) => repository.markEgeMockAssessmentRetryable(...args);
+export const retryEgeMockAssessment = (...args) => repository.retryEgeMockAssessment(...args);
+export const recordModuleAttempt = (...args) => repository.recordModuleAttempt(...args);
+export const recordModuleAttemptWithAdaptiveClaim = (...args) => repository.recordModuleAttemptWithAdaptiveClaim(...args);
+export const bindAdaptiveLearningServerAttempt = (...args) => repository.bindAdaptiveLearningServerAttempt(...args);
+export const getModuleAttempt = (...args) => repository.getModuleAttempt(...args);
+export const getReadingCompletedAttempts = (...args) => repository.getReadingCompletedAttempts(...args);
+export const upsertWordProgress = (...args) => repository.upsertWordProgress(...args);
+export const getWordProgress = (...args) => repository.getWordProgress(...args);
+export const upsertErrorBank = (...args) => repository.upsertErrorBank(...args);
+export const logAiRequest = (...args) => repository.logAiRequest(...args);
+export const claimAiOperationSlot = (...args) => repository.claimAiOperationSlot(...args);
+export const settleAiOperationSlot = (...args) => repository.settleAiOperationSlot(...args);
+export const countAiRequestsSince = (...args) => repository.countAiRequestsSince(...args);
+export const countAiOperationRequestsSince = (...args) => repository.countAiOperationRequestsSince(...args);
+export const getAiUsageMetrics = (...args) => repository.getAiUsageMetrics(...args);
+export const createSession = (...args) => repository.createSession(...args);
+export const isSessionActive = (...args) => repository.isSessionActive(...args);
+export const revokeSession = (...args) => repository.revokeSession(...args);
+export const exportUserData = (...args) => repository.exportUserData(...args);
+export const deleteUserData = (...args) => repository.deleteUserData(...args);
+export const healthCheck = (...args) => repository.healthCheck(...args);
+export const closeDatabase = () => repository.close();

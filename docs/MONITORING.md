@@ -1,0 +1,104 @@
+# Мониторинг
+
+## Полный пробник ЕГЭ
+
+Выпускной контур, нормализованные HTTP routes, incident/recovery procedure и локальные
+gates описаны в `docs/EGE_MOCK_OPERATIONS.md`. UUID попытки в process metrics заменяется
+на `:id`, поэтому route cardinality остаётся ограниченной. Специальный error log writing
+dispatch содержит только bounded request/attempt id и error code. Полный текст ответа и
+исходное аудио ученика не попадают в логи или метрики; transcript, prompt, provider body,
+ключи и idempotency values также исключены. `GET .../result` остаётся observational и не
+используется как способ повторить платную оценку.
+
+## Pronunciation provider
+
+`/api/v1/speaking/pronunciation-assessments/status` is the authenticated product truth for provider availability and the learner's authoritative monthly quota. Process metrics include a fixed-cardinality `speaking_pronunciation` dependency aggregate for completed/failed provider calls. Logs remain redacted: monitor event/code/locale/segment count and HTTP status only, never audio, transcript/reference text, provider JSON, keys, or idempotency values. For repeated 5xx/provider failures, use `SPEAKING_PRONUNCIATION_ENABLED=false` as the cost/incident kill switch; local recording remains functional. See `docs/SPEAKING_PRONUNCIATION_OPERATIONS.md`.
+
+`GET /api/v1/admin/metrics` доступен только пользователю с ролью `admin` и возвращает:
+
+- uptime процесса;
+- общее число HTTP-запросов;
+- количество и долю ответов 5xx;
+- среднюю и p95 задержку;
+- распределение кодов ответа и маршрутов.
+- успешные и ошибочные обращения к БД, Telegram, AI, STT и TTS;
+- количество фактических переключений на резервный AI/TTS-провайдер.
+- число AI-запросов, prompt/completion tokens и оценочную стоимость за последние 24 часа.
+- вызовы `voice_tutor_rule_extract` видны в том же AI-журнале без fetched page text; HTTP-метрики отдельно показывают fail-closed 422/503 на discovery route;
+- агрегат Voice Tutor recovery без PII: `open`, `recovered`, `relapsed`, due/overdue, session count, billable voice minutes, numerator/denominator и `error_recovery_rate`;
+- экономика и доставка Voice Tutor: счётчики `delivery.voice|text|local`, `fallback_rate`, `provider_errors` и `estimated_cost_microusd` по фактически billable voice-секундам; стоимость сохраняется и после voice→text/local fallback благодаря сохранённому `provider` provenance;
+- использование диска в байтах и процентах;
+- имя, размер, возраст и свежесть последней резервной копии (порог 36 часов).
+
+Метрики хранятся в памяти процесса и сбрасываются при перезапуске. Буфер задержек
+ограничен последними 1000 запросами. В метрики не попадают имена, ответы учеников,
+токены и другие персональные данные.
+
+`error_recovery_rate = recovered / (recovered + relapsed)`: `recovered` требует проверенного
+исходного transfer и успешных новых аналогов day-1/day-7; `relapsed` требует проверенного неверного
+ответа хотя бы на один новый repeat item. `open`, upcoming и overdue без ответа не входят в
+denominator. Для пустой наблюдаемой когорты API явно возвращает numerator `0`, denominator `0` и rate `0`.
+
+Агрегаты `micro_check`, `initial_transfer` и `repeat_passes.day_1/day_7` публикуют только
+`passed`, `observed` и вычисленный rate. Идентификаторы ученика, задания, попытки и свободный ответ в метрики не входят;
+для пустой выборки каждый счётчик и rate равен `0`.
+
+Voice Tutor metrics не содержат username, capsule, skill/rule/task/session ids, реплики, аудио,
+субтитры, transcript, credential или ключи. `provider_errors` считает только заранее ограниченные
+контрактные/transport-коды; внутренний текст ошибки провайдера не публикуется. Оценка стоимости
+использует операторский тариф из `VOICE_TUTOR_COST_MICROUSD_PER_MINUTE`, а не provider invoice.
+`fallback_rate = (delivery.text + delivery.local) / (delivery.voice + delivery.text + delivery.local)`;
+legacy quota-only строки без delivery mode остаются в `sessions` и квотном учёте, но не искажают
+долю fallback, voice minutes или оценку provider cost.
+
+При всплеске `provider_errors` или `fallback_rate` оператор включает
+`VOICE_TUTOR_COST_KILL_SWITCH`, проверяет ZDR/configuration и оставляет text/local fallback
+доступным. Возврат voice разрешён только после bounded fake-provider E2E и human release gate;
+сырые payload провайдера и пользовательские реплики в evidence не копируются.
+
+Этот endpoint предназначен для диагностики и подключения внешнего сборщика. Он не
+заменяет внешний uptime-monitor и оповещения: они должны проверять `/health/ready`
+и формировать алерты независимо от процесса приложения. Поэтому доступность ещё
+не считается закрытым требованием до подключения внешней проверки.
+
+Проверка `npm run db:verify-backup` восстанавливает последний архив в изолированную временную БД. Мониторинг считает результат свежим 35 дней и создаёт алерт, если проверка отсутствует, просрочена или завершилась ошибкой.
+
+## Host-monitor и Telegram
+
+В production задайте случайный `MONITORING_TOKEN` длиной не менее 32 символов.
+Скрипт `npm run monitor` независимо проверяет `/health/ready`, получает технические
+метрики через `/internal/metrics`, применяет пороги и отправляет сообщения через
+существующие `TELEGRAM_BOT_TOKEN` и `ADMIN_TELEGRAM_ID`.
+
+Состояние активных проблем сохраняется в `MONITORING_STATE_FILE`: повторные
+сообщения подавляются, а после нормализации отправляется recovery-уведомление.
+При недоступности приложения прежние проблемы не считаются устранёнными.
+
+Production cron запускается каждые пять минут:
+
+```cron
+*/5 * * * * root cd /opt/easyboost-next && MONITORING_URL=http://127.0.0.1:3000 MONITORING_APP_DIR=/opt/easyboost-next MONITORING_STATE_FILE=/var/lib/easyboost-monitor/state.json /usr/bin/npm run monitor >> /var/log/easyboost-monitor.log 2>&1
+```
+
+Проверка доставки сообщения:
+
+```bash
+cd /opt/easyboost-next
+MONITORING_STATE_FILE=/var/lib/easyboost-monitor/state.json npm run monitor -- --test-alert
+```
+
+## Персональный план обучения
+
+Оба защищённых metrics endpoint возвращают агрегат `adaptiveLearning` версии
+`adaptive-metrics-v1`. Его точные denominator, фиксированные duration/commercial/reason/evidence
+категории, минимальные выборки и incident procedure описаны в
+`docs/ADAPTIVE_LEARNING_OPERATIONS.md`. Агрегат не содержит идентификаторы владельца, сессии,
+попытки или навыка и не содержит учебные ответы, prompt, transcript, audio или credentials.
+Каждый snapshot содержит явное скользящее окно `window.days=90` с UTC `from/to`; алерты применяются
+к rates этого окна, поэтому lifetime-история не разбавляет свежую регрессию. PostgreSQL вычисляет
+фиксированные aggregate rows по timestamp predicates, не материализуя lifetime sessions/blocks/events.
+
+Host-monitor предупреждает о start rate ниже 50% после 20 созданных сессий, completion rate ниже
+50% после 10 стартовавших, выполнении менее 50% запланированных минут после 20 созданных и day-7
+retention ниже 50% после 10 наблюдаемых проверок. До достижения минимальной выборки сигнал не
+создаётся. Пустой denominator публикуется как rate `0` и не является доказательством деградации.

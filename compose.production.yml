@@ -1,0 +1,51 @@
+name: easyboost-production
+
+services:
+  postgres:
+    image: ${EASYBOOST_POSTGRES_EXPECTED_IMAGE_ID:?set the owner-approved PostgreSQL sha256 image ID}
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: easyboost
+      POSTGRES_USER: easyboost
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U easyboost -d easyboost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
+  app:
+    image: ${EASYBOOST_PRODUCTION_APP_IMAGE_ID:?set the canonical production app image ID}
+    pull_policy: never
+    build:
+      context: ./.guarded-production-build-context-required
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      APP_URL: ${APP_URL:?APP_URL is required}
+      DATABASE_PROVIDER: postgres
+      DATABASE_URL: postgresql://easyboost:${POSTGRES_PASSWORD}@postgres:5432/easyboost
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+
+networks:
+  backend:

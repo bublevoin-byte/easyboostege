@@ -1,0 +1,1015 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { buildAdaptiveLearningProfile } from '../adaptive-learning/profile.js';
+import { adaptivePlanInputFingerprint, buildAdaptiveLearningPlan } from '../adaptive-learning/plan.js';
+import { createFileRepository } from '../storage/file-repository.js';
+import { publicSpeakingReview, scoreSpeakingTask } from '../speaking/fipi-scoring.js';
+import {
+  assertAdaptiveProfileAppendOnlyOrdering,
+  assertAdaptiveProfileRejectsStale,
+  assertAdaptiveProfileRepositoryContract,
+} from './support/adaptive-profile-contract.js';
+import { assertAdaptiveGoalRepositoryContract } from './support/adaptive-goal-contract.js';
+import { assertAdaptiveDiagnosticRepositoryContract } from './support/adaptive-diagnostic-contract.js';
+import { assertAdaptivePlanRepositoryContract } from './support/adaptive-plan-contract.js';
+import { assertWordProgressRepositoryContract } from './support/word-progress-contract.js';
+import { assertPersonalWordsProgressRepositoryContract } from './support/personal-words-progress-contract.js';
+import { assertVocabularyAttemptRepositoryContract } from './support/vocabulary-attempt-contract.js';
+import { assertWritingEvaluationClaimContract } from './support/writing-evaluation-claim-contract.js';
+
+async function withRepository(run) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-db-'));
+  const file = path.join(directory, 'data.json');
+  const repository = createFileRepository(file);
+  try {
+    await run(repository, file);
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+}
+
+test('file repository persists progress atomically', async () => {
+  await withRepository(async (repository, file) => {
+    const username = await repository.createTelegramUser(1001, 'Test User');
+    await Promise.all([
+      repository.saveProgress(username, { value: 1 }),
+      repository.saveProgress(username, { value: 2 }),
+    ]);
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(parsed.progress[username].value, 2);
+  });
+});
+
+test('file repository upgrade revokes legacy adaptive bearers and removes plaintext start replay', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-legacy-adaptive-'));
+  const file = path.join(directory, 'data.json');
+  const claimId = '10000000-0000-4000-8000-000000000001';
+  const hmacClaimId = '10000000-0000-4000-8000-000000000002';
+  const legacyBearer = 'legacy-plaintext-adaptive-execution-bearer';
+  await fs.writeFile(file, JSON.stringify({
+    users: { legacy: { created: Date.now() } },
+    adaptive_learning_execution_claims: [{
+      id: claimId, username: 'legacy', session_id: '20000000-0000-4000-8000-000000000001',
+      block_id: 'asb_aaaaaaaaaaaaaaaa_01', consumed_at: Date.now(), revoked_at: null,
+      attempt_type: 'speaking', attempt_ref: '41',
+    }, {
+      id: hmacClaimId, username: 'legacy', session_id: '20000000-0000-4000-8000-000000000002',
+      block_id: 'asb_bbbbbbbbbbbbbbbb_01', consumed_at: null, revoked_at: null,
+    }],
+    adaptive_learning_session_mutations: [{
+      username: 'legacy', operation: 'start', idempotency_key: 'legacy-start-key',
+      response_snapshot: { executionClaim: legacyBearer },
+    }, {
+      username: 'legacy', operation: 'start', idempotency_key: 'hmac-start-key',
+      response_snapshot: { executionClaimId: hmacClaimId },
+    }, {
+      username: 'legacy', operation: 'start', idempotency_key: 'recovery-start-key',
+      session_id: '20000000-0000-4000-8000-000000000002', request_hash: 'b'.repeat(64),
+      response_snapshot: {
+        session: { id: '20000000-0000-4000-8000-000000000002' },
+        execution: { revision: 1 }, block: { id: 'asb_bbbbbbbbbbbbbbbb_01' },
+        launch: { kind: 'grammar_practice' }, evidenceContext: 'planned_practice',
+        recoveryAttempt: { type: 'module', id: '30000000-0000-4000-8000-000000000003' },
+      },
+    }],
+  }), 'utf8');
+  const repository = createFileRepository(file);
+  try {
+    assert.equal((await repository.getUser('legacy')).username, 'legacy');
+    const upgradedText = await fs.readFile(file, 'utf8');
+    const upgraded = JSON.parse(upgradedText);
+    assert.equal(upgradedText.includes(legacyBearer), false);
+    assert.ok(upgraded.adaptive_learning_execution_claims[0].revoked_at);
+    assert.equal(upgraded.adaptive_learning_execution_claims[0].consumed_at, null);
+    assert.equal(upgraded.adaptive_learning_execution_claims[0].attempt_type, null);
+    assert.equal(upgraded.adaptive_learning_execution_claims[0].attempt_ref, null);
+    assert.equal(upgraded.adaptive_learning_execution_claims[1].revoked_at, null);
+    assert.equal(upgraded.adaptive_learning_session_mutations.length, 2);
+    assert.equal(upgraded.adaptive_learning_session_mutations[0].idempotency_key, 'hmac-start-key');
+    assert.equal(upgraded.adaptive_learning_session_mutations[1].idempotency_key, 'recovery-start-key');
+    assert.deepEqual(upgraded.adaptive_learning_session_mutations[1].response_snapshot.recoveryAttempt, {
+      type: 'module', id: '30000000-0000-4000-8000-000000000003',
+    });
+    const recoveryReplay = await repository.getAdaptiveLearningSessionMutationReplay('legacy', {
+      operation: 'start', sessionId: '20000000-0000-4000-8000-000000000002',
+      idempotencyKey: 'recovery-start-key', requestHash: 'b'.repeat(64),
+    });
+    assert.deepEqual(recoveryReplay.recoveryAttempt, {
+      type: 'module', id: '30000000-0000-4000-8000-000000000003',
+    });
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file adaptive profile save/get expose the shared allowlisted repository DTO', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1099, 'Adaptive DTO');
+    await assertAdaptiveProfileRepositoryContract(
+      assert,
+      repository,
+      username,
+      buildAdaptiveLearningProfile(),
+      new Date('2026-08-04T06:00:00.000Z'),
+    );
+  });
+});
+
+test('file evidence reader never coerces malformed JSON into eligible evidence', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-corrupt-evidence-'));
+  const file = path.join(directory, 'data.json');
+  const username = 'corrupt-evidence-owner';
+  const diagnosticId = '10000000-0000-4000-8000-000000000011';
+  await fs.writeFile(file, JSON.stringify({
+    users: { [username]: { created: Date.now() } },
+    module_attempts: [{
+      id: '10000000-0000-4000-8000-000000000012', username,
+      module: 'grammar', activity: 'grammar_19_24', score: '4', max_score: '5',
+      evidence_quality: 'server_verified_unassisted', created_at: '2026-08-04T08:00:00.000Z',
+    }],
+    writing_attempts: [{
+      id: 1, username, status: 'completed', task_type: 37,
+      review: { overall_got: '4', overall_max: '6' },
+      evaluated_at: '2026-08-04T08:01:00.000Z', created_at: '2026-08-04T08:01:00.000Z',
+    }],
+    voice_tutor_recoveries: [{
+      id: '10000000-0000-4000-8000-000000000013', username,
+      module: 'grammar', skill_id: 'ege.grammar.forms',
+      initial_micro_check_passed: 'false', initial_transfer_passed: 'true',
+      terminal_outcome: 'resolved', observed_at: '2026-08-04T08:02:00.000Z',
+    }],
+    adaptive_diagnostic_sessions: [{
+      id: diagnosticId, username, status: 'completed', catalog_version: 'ege-short-diagnostic-v1',
+      completed_at: '2026-08-04T08:03:00.000Z',
+    }],
+    adaptive_diagnostic_responses: [{
+      id: '10000000-0000-4000-8000-000000000014', diagnostic_id: diagnosticId,
+      item_id: 'grammar-forms-present-perfect-1', skill_id: 'ege.grammar.forms', module: 'grammar',
+      evidence_quality: 'independent', correct: 'false', answered_at: '2026-08-04T08:03:00.000Z',
+    }],
+  }), 'utf8');
+  const repository = createFileRepository(file);
+  try {
+    const sources = await repository.getAdaptiveLearningEvidenceSources(username);
+    assert.equal(sources.attempts.some((entry) => entry.module === 'writing'), false);
+    assert.equal(sources.attempts.find((entry) => entry.module === 'grammar').score, '4');
+    assert.equal(sources.diagnosticResponses[0].correct, 'false');
+    assert.equal(sources.recoveries[0].initial_micro_check_passed, 'false');
+    const malformed = buildAdaptiveLearningProfile(sources);
+    const empty = buildAdaptiveLearningProfile({
+      diagnosticCompletions: sources.diagnosticCompletions,
+    });
+    assert.equal(malformed.evidenceSourceCount, empty.evidenceSourceCount);
+    assert.equal(malformed.evidenceFingerprint, empty.evidenceFingerprint);
+    assert.equal(malformed.evidenceCount, empty.evidenceCount);
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file adaptive evidence hydrates only the newest 120 Speaking attempts', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-speaking-evidence-bound-'));
+  const file = path.join(directory, 'data.json');
+  const username = 'speaking-evidence-owner';
+  const semanticFacts = {
+    confidence: 0.95, verdict: 'Scored.', evidence: ['Read aloud.'], issues: [],
+  };
+  const acousticFacts = {
+    available: true, recognitionConfidence: 0.96, signalQuality: 'good',
+    recordingDurationSeconds: 30, itemDurations: [], completenessScore: 95,
+    fluencyScore: 90, wordAccuracyScore: 94, phonemeAccuracyScore: 93, wordEvents: [],
+  };
+  const review = {
+    ...publicSpeakingReview(scoreSpeakingTask({ taskType: 1, semantic: semanticFacts, acoustic: acousticFacts }), semanticFacts),
+    semanticFacts, acousticFacts,
+  };
+  const speakingAttempts = Array.from({ length: 125 }, (_, index) => ({
+    id: index + 1, username, task_type: 1, transcript: `Attempt ${index + 1}`,
+    review, status: 'completed', source_session_id: crypto.randomUUID(),
+    source_task_ref: `task-${index + 1}`, source_task_revision: 1,
+    source_catalog_id: 'speaking-pilot-v1', source_catalog_revision: 1,
+    assistance_used: false, accent_locale: 'en-GB', targeted_practice: null,
+    created_at: new Date(Date.UTC(2026, 7, 1, 0, index)).toISOString(),
+    evaluated_at: new Date(Date.UTC(2026, 7, 1, 0, index)).toISOString(),
+  }));
+  await fs.writeFile(file, JSON.stringify({
+    users: { [username]: { created: Date.now() } }, speaking_attempts: speakingAttempts,
+  }), 'utf8');
+  const repository = createFileRepository(file);
+  try {
+    const sources = await repository.getAdaptiveLearningEvidenceSources(username);
+    const speakingSourceIds = [...new Set(sources.attempts
+      .filter((entry) => entry.module === 'speaking')
+      .map((entry) => entry.metadata.source_attempt_id))];
+    assert.equal(speakingSourceIds.length, 120);
+    assert.equal(speakingSourceIds[0], 'speaking:125');
+    assert.equal(speakingSourceIds.at(-1), 'speaking:6');
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file adaptive profile watermark rejects reverse-order and same-time stale saves', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1100, 'Adaptive Race');
+    const attempt = (id, createdAt) => ({
+      id, module: 'grammar', activity: 'grammar_19_24', score: 8, max_score: 10,
+      evidence_quality: 'server_verified_unassisted', created_at: createdAt,
+    });
+    const first = attempt('10000000-0000-4000-8000-000000000001', '2026-08-04T05:00:00.000Z');
+    const latest = attempt('10000000-0000-4000-8000-000000000002', '2026-08-04T06:00:00.000Z');
+    const backfill = attempt('10000000-0000-4000-8000-000000000003', '2026-08-04T04:00:00.000Z');
+    await assertAdaptiveProfileRejectsStale(assert, repository, username, {
+      older: buildAdaptiveLearningProfile({ attempts: [first] }),
+      newer: buildAdaptiveLearningProfile({ attempts: [first, latest] }),
+      backfilled: buildAdaptiveLearningProfile({ attempts: [backfill, first, latest] }),
+    });
+  });
+});
+
+test('file adaptive profile ordering is append-only and calculation-revision aware', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1101, 'Adaptive Ordering');
+    await assertAdaptiveProfileAppendOnlyOrdering(
+      assert, repository, username, buildAdaptiveLearningProfile,
+    );
+  });
+});
+
+test('file adaptive goal uses the shared allowlisted ISO timestamp DTO', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1102, 'Adaptive Goal DTO');
+    await assertAdaptiveGoalRepositoryContract(assert, repository, username, {
+      id: '30000000-0000-4000-8000-000000000001',
+      idempotencyKey: 'file-goal-contract-0001',
+      requestHash: 'a'.repeat(64),
+      targetExam: 'ege_english',
+      targetScore: 85,
+      examDate: '2027-06-01',
+      weeklyMinutes: 300,
+      now: new Date('2026-08-04T08:00:00.000Z'),
+    });
+  });
+});
+
+test('file adaptive diagnostic uses the shared owner-bound persistence and export contract', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1103, 'Adaptive Diagnostic DTO');
+    await assertAdaptiveDiagnosticRepositoryContract(assert, repository, username);
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.exportUserData(username), null);
+  });
+});
+
+test('file adaptive plan revisions use the shared owner-bound persistence and export contract', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1104, 'Adaptive Plan DTO');
+    await assertAdaptivePlanRepositoryContract(assert, repository, username);
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.getCurrentAdaptiveLearningPlan(username), null);
+  });
+});
+
+test('file repository upgrades a realistically persisted v1 plan to v2 without a stability 500', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-plan-taxonomy-upgrade-'));
+  const file = path.join(directory, 'data.json');
+  let repository = createFileRepository(file);
+  try {
+    const username = await repository.createTelegramUser(1_106, 'Legacy plan owner');
+    const goal = (await repository.saveAdaptiveLearningGoal(username, {
+      id: crypto.randomUUID(), idempotencyKey: 'legacy-plan-goal-0001', requestHash: 'e'.repeat(64),
+      targetExam: 'ege_english', targetScore: 85, examDate: '2027-06-01', weeklyMinutes: 300,
+      now: new Date('2026-08-04T08:00:00.000Z'),
+    })).goal;
+    const profile = buildAdaptiveLearningProfile();
+    await repository.saveAdaptiveLearningProfile(username, profile, {
+      now: new Date('2026-08-04T08:30:00.000Z'),
+    });
+    const firstNow = new Date('2026-08-04T09:00:00.000Z');
+    const firstPlan = buildAdaptiveLearningPlan({ goal, profile, now: firstNow });
+    await repository.saveAdaptiveLearningPlan(username, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({ goal, profile, basePlanRevision: null, now: firstNow }),
+      basePlanRevision: null, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
+      recalculationBucket: firstPlan.recalculationBucket, plan: firstPlan, now: firstNow,
+    });
+    await repository.close();
+
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    const legacy = stored.adaptive_learning_plan_revisions[0];
+    legacy.taxonomy_version = 'ege-en-v1';
+    delete legacy.profile_evidence_fingerprint;
+    const speakingPercentage = legacy.allocation.modules.find((item) => item.id === 'speaking').percentage;
+    legacy.allocation.skills = legacy.allocation.skills.filter((item) => item.module !== 'speaking').concat([
+      { id: 'ege.speaking.interaction', label: 'Interaction', module: 'speaking', percentage: Math.floor(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+      { id: 'ege.speaking.monologue', label: 'Monologue', module: 'speaking', percentage: Math.ceil(speakingPercentage / 2), activityType: 'practice', reasonCodes: [] },
+    ]);
+    await fs.writeFile(file, JSON.stringify(stored), 'utf8');
+
+    repository = createFileRepository(file);
+    const previousPlan = await repository.getCurrentAdaptiveLearningPlan(username);
+    assert.equal(previousPlan.profile_evidence_fingerprint, null,
+      'migration 052 keeps legacy file plans readable without a fingerprint');
+    const nextNow = new Date('2026-08-05T09:00:00.000Z');
+    const nextPlan = buildAdaptiveLearningPlan({ goal, profile, previousPlan, now: nextNow });
+    const saved = await repository.saveAdaptiveLearningPlan(username, {
+      id: crypto.randomUUID(),
+      inputFingerprint: adaptivePlanInputFingerprint({ goal, profile, basePlanRevision: 1, now: nextNow }),
+      basePlanRevision: 1, goalId: goal.id, goalRevision: goal.revision,
+      taxonomyVersion: profile.taxonomyVersion,
+      profileCalculationRevision: profile.profileCalculationRevision,
+      profileEvidenceWatermarkVersion: profile.evidenceWatermarkVersion,
+      profileEvidenceObservedAt: profile.evidenceObservedAt,
+      profileEvidenceSourceCount: profile.evidenceSourceCount,
+      profileEvidenceFingerprint: profile.evidenceFingerprint,
+      recalculationBucket: nextPlan.recalculationBucket, plan: nextPlan, now: nextNow,
+    });
+    assert.equal(saved.created, true);
+    assert.equal(saved.plan.taxonomy_version, 'ege-en-v2');
+    assert.equal(saved.plan.profile_evidence_fingerprint, profile.evidenceFingerprint);
+    assert.equal(saved.plan.stability.bypassReason, 'taxonomy_changed');
+    assert.equal(saved.plan.allocation.skills.every((item) => Number.isFinite(item.percentage)), true);
+  } finally {
+    await repository.close().catch(() => {});
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file repository merges progress modules without replacing siblings', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(1005, 'Merge User');
+    await repository.saveProgress(username, { words: { learned: 3 }, grammar: { score: 4 } });
+    const merged = await repository.mergeProgress(username, { words: { learned: 5 }, reading: { score: 2 } });
+    assert.deepEqual(merged, { words: { learned: 5 }, grammar: { score: 4 }, reading: { score: 2 } });
+  });
+});
+
+test('trial and subscription status are persisted', async () => {
+  await withRepository(async (repository) => {
+    const result = await repository.activateTrial(1002, 30, 'Student');
+    assert.equal(result.applied, true);
+    assert.equal((await repository.activateTrial(1002, 30, 'Student')).applied, false);
+    const subscription = await repository.getSub(result.username);
+    assert.equal(subscription.active, true);
+    assert.equal(subscription.trial_used, true);
+    assert.equal((await repository.exportUserData(result.username)).subscription_events.length, 1);
+  });
+});
+
+test('payment approval is idempotent and records its actor and result', async () => {
+  await withRepository(async (repository) => {
+    const request = await repository.createPaymentRequest('b82c0a3f-1800-4b04-b573-4bb23bdf5b5a', 1012, 'Paying Student');
+    const duplicate = await repository.createPaymentRequest('4c9c0821-6894-47eb-9f5d-a2cf1ef95073', 1012, 'Paying Student');
+    assert.equal(duplicate.id, request.id);
+    const approved = await repository.resolvePaymentRequest(request.id, 'approved', 9001, 30);
+    assert.equal(approved.applied, true);
+    const subscriptionAfterFirstClick = (await repository.getUser(request.username)).sub_until;
+    const repeated = await repository.resolvePaymentRequest(request.id, 'approved', 9001, 30);
+    assert.equal(repeated.applied, false);
+    assert.equal((await repository.getUser(request.username)).sub_until, subscriptionAfterFirstClick);
+    const exported = await repository.exportUserData(request.username);
+    assert.equal(exported.payment_requests[0].status, 'approved');
+    assert.equal(exported.payment_requests[0].actor_telegram_id, 9001);
+    assert.equal(exported.subscription_events.length, 1);
+    assert.equal(exported.audit_log.length, 1);
+    assert.equal(exported.audit_log[0].action, 'payment.resolve');
+  });
+});
+
+test('telegram user creation is idempotent', async () => {
+  await withRepository(async (repository) => {
+    const first = await repository.createTelegramUser(1003, 'Same User');
+    const second = await repository.createTelegramUser(1003, 'Changed Name');
+    assert.equal(second, first);
+  });
+});
+
+test('telegram auth code is pending until confirmed and can be consumed once', async () => {
+  await withRepository(async (repository) => {
+    await repository.createTelegramAuthCode('secret-code', Date.now() + 60_000);
+    assert.equal(await repository.consumeTelegramAuthCode('secret-code'), null);
+    assert.equal(await repository.confirmTelegramAuthCode('secret-code', 2001, 'Student'), true);
+    assert.deepEqual(await repository.consumeTelegramAuthCode('secret-code'), {
+      telegram_id: 2001,
+      name: 'Student',
+    });
+    assert.equal(await repository.consumeTelegramAuthCode('secret-code'), null);
+  });
+});
+
+test('expired telegram auth code cannot be confirmed', async () => {
+  await withRepository(async (repository) => {
+    await repository.createTelegramAuthCode('expired-code', Date.now() - 1);
+    assert.equal(await repository.confirmTelegramAuthCode('expired-code', 2002, 'Student'), false);
+    assert.equal(await repository.consumeTelegramAuthCode('expired-code'), null);
+  });
+});
+
+test('sessions can be validated and revoked server-side', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(2010, 'Session User');
+    const sessionId = '4f24a754-d25a-49ab-8182-111c02ef225d';
+    await repository.createSession(sessionId, username, Date.now() + 60_000);
+    assert.equal(await repository.isSessionActive(sessionId, username), true);
+    assert.equal(await repository.isSessionActive(sessionId, 'another-user'), false);
+    assert.equal(await repository.revokeSession(sessionId, username), true);
+    assert.equal(await repository.isSessionActive(sessionId, username), false);
+    assert.equal(await repository.revokeSession(sessionId, username), false);
+  });
+});
+
+test('user roles are validated and persisted', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(2020, 'Role User');
+    assert.equal((await repository.getUser(username)).role, 'student');
+    assert.equal(await repository.setUserRole(username, 'admin'), 'admin');
+    assert.equal((await repository.getUser(username)).role, 'admin');
+    await assert.rejects(repository.setUserRole(username, 'owner'), /INVALID_ROLE/u);
+  });
+});
+
+test('writing attempt and AI metadata are persisted without prompt text in the AI log', async () => {
+  await withRepository(async (repository, file) => {
+    const username = await repository.createTelegramUser(3001, 'Writer');
+    const attemptId = await repository.createWritingAttempt(username, {
+      taskType: 'writing_37',
+      assignment: { from: 'Ben', stimulus: 'Three questions from a friend.', questionsTopic: 'his dog' },
+      answer: 'Student answer text',
+      evaluatedAnswer: 'Student answer',
+    }, 'writing-v1');
+    await repository.finishWritingAttempt(attemptId, {
+      status: 'failed',
+      provider: 'groq',
+      model: 'test-model',
+      errorCode: 'AI_UNAVAILABLE',
+    });
+    await repository.logAiRequest({
+      username,
+      operation: 'writing_37',
+      provider: 'groq',
+      model: 'test-model',
+      promptVersion: 'writing-v1',
+      status: 'failed',
+      durationMs: 123,
+      errorCode: 'AI_UNAVAILABLE',
+      promptTokens: 42,
+      completionTokens: 17,
+      estimatedCostMicrousd: 25,
+    });
+    assert.equal(await repository.countAiRequestsSince(new Date(Date.now() - 60_000)), 1);
+    assert.equal(await repository.countAiRequestsSince(new Date(Date.now() + 60_000)), 0);
+    assert.deepEqual(await repository.getAiUsageMetrics(24), {
+      windowHours: 24, requests: 1, promptTokens: 42, completionTokens: 17, estimatedCostMicrousd: 25,
+    });
+
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(stored.writing_attempts[0].status, 'failed');
+    assert.equal(stored.writing_attempts[0].provider, 'groq');
+    assert.equal(stored.writing_attempts[0].model, 'test-model');
+    assert.equal(stored.writing_attempts[0].prompt_version, 'writing-v1');
+    assert.equal(stored.writing_attempts[0].error_code, 'AI_UNAVAILABLE');
+    assert.equal(stored.writing_attempts[0].answer, 'Student answer text');
+    assert.equal(stored.writing_attempts[0].evaluated_answer, 'Student answer');
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.writing_attempts[0].model, 'test-model');
+    assert.equal(exported.writing_attempts[0].evaluated_answer, 'Student answer');
+    assert.equal(stored.ai_requests[0].durationMs, 123);
+    assert.equal(stored.ai_requests[0].promptTokens, 42);
+    assert.equal(stored.ai_requests[0].completionTokens, 17);
+    assert.equal(stored.ai_requests[0].estimatedCostMicrousd, 25);
+    assert.equal(JSON.stringify(stored.ai_requests).includes('Student answer text'), false);
+  });
+});
+
+test('file Writing evaluation claims are atomic, owner-bound and privacy-safe on export', async () => {
+  await withRepository(async (repository, file) => {
+    const owner = await repository.createTelegramUser(3002, 'Writing Claim Owner');
+    const otherOwner = await repository.createTelegramUser(3003, 'Writing Claim Other');
+    await assertWritingEvaluationClaimContract(assert, repository, owner, otherOwner);
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.ok(stored.writing_evaluation_aliases.length >= 2);
+    assert.equal(stored.writing_evaluation_aliases.every((alias) => (
+      alias.username === owner && Number.isSafeInteger(alias.attempt_id)
+        && !Object.hasOwn(alias, 'answer') && !Object.hasOwn(alias, 'request_fingerprint')
+    )), true, 'durable losing-key aliases contain only owner/key/canonical-attempt metadata');
+    const reopened = createFileRepository(file);
+    try {
+      const alias = stored.writing_evaluation_aliases[0];
+      assert.equal((await reopened.getWritingEvaluationClaim(owner, alias.idempotency_key)).id, alias.attempt_id,
+        'a process restart resolves the losing UUID to its durable canonical attempt');
+    } finally { await reopened.close(); }
+  });
+});
+
+test('file Writing settlement is acknowledged only after durable persistence and the write queue recovers', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-writing-durability-'));
+  const file = path.join(directory, 'data.json');
+  let rejectWrites = false;
+  let blockNextWrite = false;
+  let releaseBlockedWrite;
+  let blockedWriteStarted;
+  const fileSystem = {
+    readFile: (...args) => fs.readFile(...args),
+    mkdir: (...args) => fs.mkdir(...args),
+    rename: (...args) => fs.rename(...args),
+    async writeFile(...args) {
+      if (blockNextWrite) {
+        blockNextWrite = false;
+        blockedWriteStarted?.();
+        await new Promise((resolve) => { releaseBlockedWrite = resolve; });
+      }
+      if (rejectWrites) throw Object.assign(new Error('INJECTED_WRITE_FAILURE'), { code: 'EIO' });
+      return fs.writeFile(...args);
+    },
+  };
+  const repository = createFileRepository(file, { fileSystem });
+  try {
+    const owner = await repository.createTelegramUser(3004, 'Writing durable owner');
+    await repository.activateTrial(3004, 30, 'Writing durable owner');
+    await repository.setPrivacyConsent(owner, {
+      text_processing: true, voice_processing: false, policy_version: 'writing-durable-v1',
+    });
+    const key = crypto.randomUUID();
+    const claim = await repository.claimWritingEvaluation(owner, {
+      taskType: 'writing_37', sourceTaskRef: 'durable-task',
+      assignment: { from: 'Emily', stimulus: 'Three questions?', questionsTopic: 'school' },
+      answer: 'A sufficiently long answer for durable settlement.',
+      evaluatedAnswer: 'A sufficiently long answer for durable settlement.',
+    }, 'writing-v9', 'e'.repeat(64), key, { consentPolicyVersion: 'writing-durable-v1' });
+
+    const writeStarted = new Promise((resolve) => { blockedWriteStarted = resolve; });
+    blockNextWrite = true;
+    const settlement = repository.finishWritingAttempt(claim.attempt.id, {
+      status: 'completed', provider: 'test', model: 'test', review: { overall_got: 4 },
+      responseSnapshot: { attemptId: claim.attempt.id, review: { overall_got: 4 } },
+    });
+    const rejectedSettlement = assert.rejects(settlement, /INJECTED_WRITE_FAILURE/u);
+    await writeStarted;
+    let concurrentReadSettled = false;
+    const concurrentRead = repository.getWritingEvaluationClaim(owner, key)
+      .then((value) => { concurrentReadSettled = true; return value; });
+    let voiceTutorReadSettled = false;
+    const voiceTutorRead = repository.getWritingAttempt(owner, claim.attempt.id)
+      .then((value) => { voiceTutorReadSettled = true; return value; });
+    let progressReadSettled = false;
+    const progressRead = repository.getProgress(owner)
+      .then((value) => { progressReadSettled = true; return value; });
+    let writingSummaryReadSettled = false;
+    const writingSummaryRead = repository.getWritingProgressSummary(owner)
+      .then((value) => { writingSummaryReadSettled = true; return value; });
+    await new Promise((resolve) => setImmediate(resolve));
+    const replayWasSpeculative = concurrentReadSettled;
+    const voiceTutorWasSpeculative = voiceTutorReadSettled;
+    const progressWasSpeculative = progressReadSettled;
+    const writingSummaryWasSpeculative = writingSummaryReadSettled;
+    rejectWrites = true;releaseBlockedWrite();
+    assert.equal(replayWasSpeculative, false,
+      'replay reads wait behind an uncommitted settlement instead of publishing mutable memory');
+    assert.equal(voiceTutorWasSpeculative, false,
+      'Voice Tutor reads wait behind an uncommitted settlement instead of seeing a speculative review');
+    assert.equal(progressWasSpeculative, false,
+      'the learner progress response waits behind an uncommitted Writing settlement');
+    assert.equal(writingSummaryWasSpeculative, false,
+      'the Writing summary response waits behind an uncommitted settlement');
+    await rejectedSettlement;
+    assert.equal((await concurrentRead).status, 'pending',
+      'a read queued during the failed settlement observes the durable rollback');
+    assert.equal((await voiceTutorRead).status, 'pending',
+      'Voice Tutor cannot derive a capsule from a review whose persistence rolled back');
+    assert.equal((await progressRead).essays, undefined,
+      'learner progress cannot publish a completed attempt whose persistence rolled back');
+    assert.equal((await writingSummaryRead).attemptCount, 0,
+      'Writing summary cannot publish a completed attempt whose persistence rolled back');
+    assert.equal((await repository.getWritingEvaluationClaim(owner, key)).status, 'pending',
+      'a rejected write must roll back the in-memory settlement too');
+
+    const diskAfterFailure = createFileRepository(file);
+    assert.equal((await diskAfterFailure.getWritingEvaluationClaim(owner, key)).status, 'pending');
+    await diskAfterFailure.close();
+
+    rejectWrites = false;
+    assert.equal(await repository.finishWritingAttempt(claim.attempt.id, {
+      status: 'completed', provider: 'test', model: 'test', review: { overall_got: 4 },
+      responseSnapshot: { attemptId: claim.attempt.id, review: { overall_got: 4 } },
+    }), true, 'a later persist runs after the injected failure instead of inheriting a rejected queue');
+    const diskAfterRecovery = createFileRepository(file);
+    assert.equal((await diskAfterRecovery.getWritingEvaluationClaim(owner, key)).status, 'completed');
+    await diskAfterRecovery.close();
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('file write recovery cannot commit a rejected non-Writing mutation later', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-write-rollback-'));
+  const file = path.join(directory, 'data.json');
+  let rejectWrites = false;
+  const fileSystem = {
+    readFile: (...args) => fs.readFile(...args),
+    mkdir: (...args) => fs.mkdir(...args),
+    rename: (...args) => fs.rename(...args),
+    writeFile: (...args) => (rejectWrites
+      ? Promise.reject(Object.assign(new Error('INJECTED_WRITE_FAILURE'), { code: 'EIO' }))
+      : fs.writeFile(...args)),
+  };
+  const repository = createFileRepository(file, { fileSystem });
+  try {
+    const owner = await repository.createTelegramUser(3005, 'Global rollback owner');
+    await repository.saveProgress(owner, { durable: true });
+
+    rejectWrites = true;
+    await assert.rejects(
+      repository.saveProgress(owner, { rejected: true }),
+      /INJECTED_WRITE_FAILURE/u,
+    );
+    assert.deepEqual(await repository.getProgress(owner), { durable: true });
+
+    rejectWrites = false;
+    await repository.mergeProgress(owner, { recovered: true });
+    const reopened = createFileRepository(file);
+    try {
+      assert.deepEqual(await reopened.getProgress(owner), { durable: true, recovered: true });
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('speaking attempts persist transcript review metadata but never audio', async () => {
+  await withRepository(async (repository, file) => {
+    const username = await repository.createTelegramUser(3010, 'Speaker');
+    const attemptId = await repository.createSpeakingAttempt(username, {
+      taskType: 2,
+      assignment: { ad: 'Ask about a course.', points: ['price', 'place', 'time', 'equipment'] },
+      transcript: 'How much does it cost?',
+    }, 'speaking-eval-v1');
+    await repository.finishSpeakingAttempt(attemptId, {
+      status: 'completed', provider: 'test', model: 'speaking-test-model', review: { got: 1, max: 4 },
+    });
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.speaking_attempts[0].transcript, 'How much does it cost?');
+    assert.equal(exported.speaking_attempts[0].review.got, 1);
+    assert.equal(exported.speaking_attempts[0].provider, 'test');
+    assert.equal(exported.speaking_attempts[0].model, 'speaking-test-model');
+    assert.equal(exported.speaking_attempts[0].prompt_version, 'speaking-eval-v1');
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(JSON.stringify(stored.speaking_attempts).includes('audio'), false);
+  });
+});
+
+test('speaking evaluation claims are owner-bound and replay one canonical attempt', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3011, 'Speaking Claim Owner');
+    const other = await repository.createTelegramUser(3012, 'Speaking Claim Other');
+    const input = {
+      taskType: 2,
+      assignment: { ad: 'Ask about a course.', points: ['price', 'place', 'time', 'equipment'] },
+      transcript: 'How much does it cost?',
+    };
+    const fingerprint = 'd'.repeat(64);
+    const [first, duplicate] = await Promise.all([
+      repository.claimSpeakingEvaluation(owner, input, 'speaking-semantic-v4', fingerprint),
+      repository.claimSpeakingEvaluation(owner, input, 'speaking-semantic-v4', fingerprint),
+    ]);
+    assert.equal([first, duplicate].filter((claim) => claim.created).length, 1);
+    assert.equal(first.attempt.id, duplicate.attempt.id);
+    assert.equal(first.attempt.evaluation_fingerprint, fingerprint);
+
+    await repository.finishSpeakingAttempt(first.attempt.id, {
+      status: 'failed', provider: 'grok', model: 'temporary-model',
+      errorCode: 'AI_PROVIDER_UNAVAILABLE',
+    });
+    const recoveryNow = new Date('2026-08-06T11:00:00.000Z');
+    const [recovered, recoveryRace] = await Promise.all([
+      repository.claimSpeakingEvaluation(
+        owner, input, 'speaking-semantic-v4', fingerprint, { now: recoveryNow },
+      ),
+      repository.claimSpeakingEvaluation(
+        owner, input, 'speaking-semantic-v4', fingerprint, { now: recoveryNow },
+      ),
+    ]);
+    assert.equal([recovered, recoveryRace].filter((claim) => claim.created).length, 1,
+      'only one caller may recover a transient failed claim');
+    assert.equal(recovered.attempt.id, recoveryRace.attempt.id);
+
+    const staleFingerprint = 'e'.repeat(64);
+    const stale = await repository.claimSpeakingEvaluation(
+      owner, input, 'speaking-semantic-v4', staleFingerprint,
+      { now: new Date('2026-08-06T11:10:00.000Z') },
+    );
+    const earlyReplay = await repository.claimSpeakingEvaluation(
+      owner, input, 'speaking-semantic-v4', staleFingerprint,
+      { now: new Date('2026-08-06T11:14:59.999Z') },
+    );
+    const staleRecovery = await repository.claimSpeakingEvaluation(
+      owner, input, 'speaking-semantic-v4', staleFingerprint,
+      { now: new Date('2026-08-06T11:15:00.001Z') },
+    );
+    assert.equal(earlyReplay.created, false);
+    assert.equal(staleRecovery.created, true);
+    assert.equal(staleRecovery.attempt.id, stale.attempt.id);
+    assert.ok(staleRecovery.attempt.evaluation_claim_generation
+      > stale.attempt.evaluation_claim_generation);
+    await assert.rejects(
+      repository.finishSpeakingAttempt(stale.attempt.id, {
+        status: 'completed', review: { stale: true }, provider: 'grok', model: 'stale-model',
+      }, { claimGeneration: stale.attempt.evaluation_claim_generation }),
+      /SPEAKING_EVALUATION_CLAIM_LOST/u,
+    );
+    await repository.finishSpeakingAttempt(staleRecovery.attempt.id, {
+      status: 'completed', review: { current: true }, provider: 'grok', model: 'current-model',
+    }, { claimGeneration: staleRecovery.attempt.evaluation_claim_generation });
+    assert.deepEqual(
+      (await repository.getSpeakingAttempt(owner, stale.attempt.id)).review,
+      { current: true },
+    );
+
+    const isolated = await repository.claimSpeakingEvaluation(
+      other, input, 'speaking-semantic-v4', fingerprint,
+    );
+    assert.equal(isolated.created, true);
+    assert.notEqual(isolated.attempt.id, first.attempt.id);
+    const exported = await repository.exportUserData(owner);
+    assert.equal('evaluation_fingerprint' in exported.speaking_attempts[0], false);
+    assert.equal('evaluation_claimed_at' in exported.speaking_attempts[0], false);
+    assert.equal('evaluation_claim_generation' in exported.speaking_attempts[0], false);
+  });
+});
+
+test('attempts saved before model provenance export an explicit unknown model', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-legacy-attempts-'));
+  const file = path.join(directory, 'data.json');
+  await fs.writeFile(file, JSON.stringify({
+    users: { legacy: { created: Date.now() } },
+    writing_attempts: [{ id: 1, username: 'legacy', answer: 'Legacy full answer', prompt_version: 'writing-v3', status: 'completed' }],
+    speaking_attempts: [{ id: 1, username: 'legacy', prompt_version: 'speaking-eval-v1', status: 'failed' }],
+  }));
+  const repository = createFileRepository(file);
+  try {
+    const exported = await repository.exportUserData('legacy');
+    assert.equal(exported.writing_attempts[0].model, null);
+    assert.equal(exported.writing_attempts[0].evaluated_answer, 'Legacy full answer');
+    assert.equal(Object.hasOwn(exported.writing_attempts[0], 'assistance_used'), false);
+    assert.equal(exported.speaking_attempts[0].model, null);
+  } finally {
+    await repository.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('generated tasks are reused by request hash and exported without internal hashes', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3020, 'Generator');
+    const entry = { operation: 'grammar_quiz', requestHash: 'a'.repeat(64), request: { operation: 'grammar_quiz' }, result: [{ q: 'One' }], provider: 'test', promptVersion: 'content-v1' };
+    const firstId = await repository.saveGeneratedTask(username, entry);
+    assert.equal(await repository.saveGeneratedTask(username, entry), firstId);
+    const cached = await repository.getGeneratedTask(username, entry.requestHash);
+    assert.deepEqual(cached.result, entry.result);
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.generated_tasks.length, 1);
+    assert.equal('request_hash' in exported.generated_tasks[0], false);
+  });
+});
+
+test('concurrent generated-task writers converge on one canonical stored result', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3021, 'Concurrent Generator');
+    const requestHash = 'b'.repeat(64);
+    const base = { operation: 'vocabulary_cards', requestHash, request: { operation: 'vocabulary_cards', count: 1, exclude: [] }, promptVersion: 'content-v1' };
+    const [firstId, secondId] = await Promise.all([
+      repository.saveGeneratedTask(username, { ...base, result: [{ w: 'first' }], provider: 'first' }),
+      repository.saveGeneratedTask(username, { ...base, result: [{ w: 'second' }], provider: 'second' }),
+    ]);
+    assert.equal(firstId, secondId);
+    const stored = await repository.getGeneratedTask(username, requestHash);
+    assert.ok(['first', 'second'].includes(stored.result[0].w));
+    assert.equal(stored.provider, stored.result[0].w);
+  });
+});
+
+test('module attempts are idempotent and included in user export', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3030, 'Module Student');
+    const attempt = { id: '222b90b8-0f21-481c-b606-5211b2c65754', module: 'exam', activity: 'grammar_19_24', score: 4, maxScore: 6, durationMs: 60_000, metadata: { source: 'builtin' } };
+    assert.equal((await repository.recordModuleAttempt(username, attempt)).created, true);
+    assert.equal((await repository.recordModuleAttempt(username, attempt)).created, false);
+    assert.equal((await repository.getModuleAttempt(username, attempt.id)).evidence_quality, 'client_reported');
+    const verified = { ...attempt, id: '4ec99215-2354-4c05-b68a-07910f8e898a', activity: 'grammar_25_29' };
+    assert.equal((await repository.recordModuleAttempt(username, verified, {
+      evidenceQuality: 'server_verified_unassisted',
+    })).created, true);
+    assert.equal((await repository.getModuleAttempt(username, verified.id)).evidence_quality, 'server_verified_unassisted');
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.module_attempts.length, 2);
+    assert.equal(exported.module_attempts[0].score, 4);
+    assert.equal(exported.module_attempts[0].evidence_quality, 'client_reported');
+    assert.equal(exported.progress_summary.length, 1);
+    assert.equal(exported.progress_summary[0].attempt_count, 2);
+    assert.equal(exported.progress_summary[0].best_score, 4);
+  });
+});
+
+test('a module evidence write invalidates an older adaptive profile snapshot', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(30301, 'Adaptive module CAS');
+    const staleProfile = buildAdaptiveLearningProfile(
+      await repository.getAdaptiveLearningEvidenceSources(username),
+    );
+    await repository.recordModuleAttempt(username, {
+      id: '0aeab55d-c78c-43a8-ab52-8670fb57ac2f',
+      module: 'exam', activity: 'grammar_19_24', score: 5, maxScore: 6,
+      durationMs: 45_000, metadata: { source: 'builtin' },
+    }, { evidenceQuality: 'server_verified_unassisted' });
+    await assert.rejects(repository.saveAdaptiveLearningProfile(username, staleProfile, {
+      now: new Date('2026-08-07T11:00:00.000Z'), verifyCurrentEvidence: true,
+    }), /ADAPTIVE_PROFILE_EVIDENCE_STALE/u);
+  });
+});
+
+test('every file and PostgreSQL adaptive evidence writer uses the owner coordination boundary', async () => {
+  const [fileSource, postgresSource] = await Promise.all([
+    fs.readFile(new URL('../storage/file-repository.js', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../storage/postgres-repository.js', import.meta.url), 'utf8'),
+  ]);
+  const body = (source, name) => {
+    const start = source.indexOf(`  async function ${name}`);
+    assert.notEqual(start, -1, `${name} must exist`);
+    const end = source.indexOf('\n  async function ', start + 10);
+    return source.slice(start, end < 0 ? source.length : end);
+  };
+  for (const name of [
+    'advanceVoiceTutorSession', 'submitVoiceTutorRepeat', 'finishWritingAttempt',
+    'finishSpeakingAttempt', 'answerAdaptiveDiagnostic', 'completeAdaptiveDiagnostic',
+    'recordModuleAttempt',
+  ]) {
+    assert.match(body(fileSource, name), /serialize(?:Coordinated|VoiceTutor)Mutation/u,
+      `${name} must share the file owner mutation queue`);
+    assert.match(body(postgresSource, name),
+      /SELECT username FROM users WHERE username = \$1 FOR UPDATE/u,
+      `${name} must lock the PostgreSQL evidence owner`);
+  }
+  assert.match(body(fileSource, 'setEntitlement'), /serializeCoordinatedMutation/u);
+  assert.match(fileSource.slice(
+    fileSource.indexOf('  function serializePaymentMutation'),
+    fileSource.indexOf('\n  function paymentRequestView'),
+  ), /return serializeCoordinatedMutation\(run\)/u,
+  'file payment approval and revocation must share the assignment queue');
+  for (const name of ['setEntitlement', 'revokeEntitlement', 'assignSpeakingCatalogSession']) {
+    assert.match(body(postgresSource, name),
+      /SELECT username(?:, subscription_until)? FROM users WHERE username = \$1 FOR UPDATE/u,
+      `${name} must use the shared PostgreSQL owner lock`);
+  }
+});
+
+test('file vocabulary summaries match the shared idempotency and ownership contract', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3031, 'Vocabulary owner');
+    const other = await repository.createTelegramUser(3032, 'Vocabulary other');
+    await assertVocabularyAttemptRepositoryContract(assert, repository, owner, other);
+  });
+});
+
+test('word progress upserts normalized SRS state', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3040, 'Words Student');
+    await repository.upsertWordProgress(username, [{ word: 'Achievement', stage: 2, errorCount: 1, reviewCount: 3, dueAt: 1000 }]);
+    await repository.upsertWordProgress(username, [{ word: 'achievement', stage: 3, errorCount: 1, reviewCount: 4, dueAt: 2000 }]);
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.word_progress.length, 1);
+    assert.equal(exported.word_progress[0].word, 'achievement');
+    assert.equal(exported.word_progress[0].stage, 3);
+  });
+});
+
+test('file word mastery matches the shared persistence, export and deletion contract', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3041, 'Mastery Owner');
+    const other = await repository.createTelegramUser(3042, 'Mastery Other');
+    await assertWordProgressRepositoryContract(assert, repository, owner, other);
+  });
+});
+
+test('file personal words match the shared persistence, export and deletion contract', async () => {
+  await withRepository(async (repository) => {
+    const owner = await repository.createTelegramUser(3043, 'Personal words owner');
+    const other = await repository.createTelegramUser(3044, 'Personal words other');
+    await assertPersonalWordsProgressRepositoryContract(assert, repository, owner, other);
+  });
+});
+
+test('file storage rewrites legacy word progress once without inventing independent evidence', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-legacy-words-'));
+  const file = path.join(directory, 'data.json');
+  await fs.writeFile(file, JSON.stringify({
+    users: { legacy: { created: 1 } },
+    word_progress: {
+      legacy: {
+        achievement: {
+          word: 'Achievement', stage: 5, error_count: 1, review_count: 8,
+          due_at: 2_000, updated_at: 1_000,
+        },
+      },
+    },
+  }), 'utf8');
+
+  const firstRepository = createFileRepository(file);
+  const first = await firstRepository.getWordProgress('legacy');
+  await firstRepository.close();
+  assert.equal(first[0].stage, 5);
+  assert.equal(first[0].dimensions.meaning.evidence, 'preliminary');
+  assert.equal(first[0].dimensions.context.independentSuccesses, 0);
+  const migratedText = await fs.readFile(file, 'utf8');
+  assert.equal(JSON.parse(migratedText).word_progress.legacy.achievement.mastery_version, 1);
+
+  const secondRepository = createFileRepository(file);
+  assert.deepEqual(await secondRepository.getWordProgress('legacy'), first);
+  await secondRepository.close();
+  assert.equal(await fs.readFile(file, 'utf8'), migratedText);
+  await fs.rm(directory, { recursive: true, force: true });
+});
+
+test('error bank aggregates repeated learning errors', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(3050, 'Error Student');
+    const error = { module: 'grammar', itemKey: 'grammar_19_24:go', errorType: 'incorrect_form', details: { expected: 'went' } };
+    await repository.upsertErrorBank(username, [error]);
+    await repository.upsertErrorBank(username, [error]);
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.error_bank.length, 1);
+    assert.equal(exported.error_bank[0].occurrence_count, 2);
+    assert.equal(exported.error_bank[0].details.expected, 'went');
+  });
+});
+
+test('file repository readiness check succeeds after pending writes', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(4001, 'Health User');
+    const save = repository.saveProgress(username, { ready: true });
+    assert.equal(await repository.healthCheck(), true);
+    await save;
+  });
+});
+
+test('user data can be exported and deleted with all related records', async () => {
+  await withRepository(async (repository) => {
+    const username = await repository.createTelegramUser(5001, 'Privacy User');
+    await repository.saveProgress(username, { words: { learned: 7 } });
+    const consent = await repository.setPrivacyConsent(username, { text_processing: true, voice_processing: false, policy_version: 'test-v1' });
+    assert.equal(consent.text_processing, true);
+    const attemptId = await repository.createWritingAttempt(username, {
+      taskType: 'writing_37',
+      assignment: { from: 'Ben', stimulus: 'Questions', questionsTopic: 'school' },
+      answer: 'Private answer',
+      evaluatedAnswer: 'Private evaluated answer',
+    }, 'writing-v1');
+    await repository.finishWritingAttempt(attemptId, { status: 'failed', errorCode: 'TEST' });
+    await repository.logAiRequest({ username, operation: 'writing_37', status: 'failed' });
+
+    const exported = await repository.exportUserData(username);
+    assert.equal(exported.account.username, username);
+    assert.equal(exported.account.telegram_id, 5001);
+    assert.deepEqual(exported.progress, { words: { learned: 7 } });
+    assert.equal(exported.writing_attempts.length, 1);
+    assert.equal(exported.writing_attempts[0].answer, 'Private answer');
+    assert.equal(exported.writing_attempts[0].evaluated_answer, 'Private evaluated answer');
+    assert.equal(exported.ai_requests.length, 1);
+    assert.equal(exported.privacy_consent.policy_version, 'test-v1');
+    assert.equal('hash' in exported.account, false);
+
+    assert.equal(await repository.deleteUserData(username), true);
+    assert.equal(await repository.getUser(username), null);
+    assert.deepEqual(await repository.getProgress(username), {});
+    assert.equal(await repository.exportUserData(username), null);
+    assert.equal(await repository.deleteUserData(username), false);
+  });
+});
+
+test('account deletion anonymizes retained administrative audit', async () => {
+  await withRepository(async (repository, file) => {
+    const request = await repository.createPaymentRequest('77e30d65-c90e-49a2-8d17-e08b5958c310', 5002, 'Deleted Payer');
+    await repository.resolvePaymentRequest(request.id, 'rejected', 9001, 30);
+    await repository.deleteUserData(request.username);
+    const stored = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(stored.audit_log.length, 1);
+    assert.equal(stored.audit_log[0].metadata.username, undefined);
+    assert.equal(stored.audit_log[0].metadata.account_deleted, true);
+  });
+});

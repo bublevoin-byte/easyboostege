@@ -1,0 +1,69 @@
+{
+  "status": "PASS",
+  "date": "2026-08-26",
+  "scope": "isolated-style-lab-prototype",
+  "productionChanged": false,
+  "independentCritics": {
+    "round": 3,
+    "spec": "PASS",
+    "system": "PASS",
+    "craft": "PASS"
+  },
+  "openingReview": {
+    "directStep": "Шаг 4 — вход",
+    "outerScrollY": 66,
+    "stickyNoteTop": 8,
+    "stickyNoteBottom": 78,
+    "disclosureVisibleBeforeVkInteraction": true,
+    "learnerPhoneChanged": false
+  },
+  "flowMatrix": {
+    "checked": 24,
+    "viewports": ["360x720", "390x844"],
+    "horizontalOverflowFailures": 0,
+    "targetFailures": 0,
+    "ctaOrNavigationFailures": 0,
+    "compactVerticalScroll": [
+      { "direction": "a", "screen": "today", "pixels": 17 },
+      { "direction": "a", "screen": "task", "pixels": 3 },
+      { "direction": "a", "screen": "progress", "pixels": 18 }
+    ]
+  },
+  "journeys": {
+    "checkedSettledStates": 15,
+    "directions": ["a", "b", "c"],
+    "failures": 0,
+    "verified": ["forward-flow", "back", "url", "focus", "one-cta", "one-current-screen"]
+  },
+  "decisionWorksheet": {
+    "baseLimit": 1,
+    "borrowingLimit": 2,
+    "verified": [
+      "same-base-rejection",
+      "unknown-value-rejection",
+      "deduplication",
+      "third-borrowing-rejection",
+      "base-change-reconciliation",
+      "reload",
+      "keyboard-radio-navigation",
+      "reset"
+    ],
+    "failures": 0
+  },
+  "renders": {
+    "count": 26,
+    "format": "png",
+    "dimensions": ["360x720", "390x844"],
+    "metadataMismatches": 0
+  },
+  "gates": {
+    "staticStyleLabQa": "PASS",
+    "rawComponentColors": 0,
+    "desktopSideRail": false,
+    "lint": "PASS",
+    "syntaxCheck": "PASS (475 JavaScript files)",
+    "inlineHandlers": "PASS (209 handlers, 125 names)",
+    "unit": "PASS (1914 total, 1866 pass, 48 skip, 0 fail)",
+    "diffCheck": "PASS"
+  }
+}

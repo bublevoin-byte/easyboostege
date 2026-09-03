@@ -1,0 +1,1215 @@
+﻿/* legacy block 1 */
+import {back,cur,nav,prepareScreen,registerRouteHook,show,tab} from './router.js';
+import {configureTts,lStop} from './tts.js';
+import {decorateCoreVocabulary} from './modules/core-voice-catalog.js';
+import {clearAdaptiveOverviewCache} from './adaptive-overview-cache.js';
+import {clearAdaptiveRuntime} from './adaptive-session-loader.js';
+import {classifyLearningAccess,LEARNING_ACCESS_STATES} from './access.js';
+import {presentProfilePlan} from './commercial-copy.js';
+import {
+  EGE_MOCK_PUBLIC_FORM_FINGERPRINT,EGE_MOCK_PUBLIC_FORM_ID,EGE_MOCK_PUBLIC_FORM_REVISION,
+} from './ege-mock-catalog-contract.js';
+import {egeMockLocalContinuation} from './ege-mock-written-continuation.js';
+import {
+  createFirstLaunchController,
+  FIRST_LAUNCH_REQUEST_TIMEOUT_MS,
+  runWithAbortDeadline,
+} from './first-launch.js';
+import {
+  applyVocabularyOutcome,
+  localVocabularyProgress,
+  mergeLegacyVocabularyProgress,
+  migrateLocalVocabularyProgress,
+  migrateVocabularyProgress,
+  normalizePersonalVocabularyCards,
+} from './vocabulary-domain.js';
+/*
+ * Оболочка не знает, что умеет экран: она знает только, что его код приезжает отдельным чанком.
+ * Реестр чанков живёт в screens.js и подключается к маршрутизатору сам — здесь достаточно того,
+ * что модуль выполнен до первого перехода.
+ */
+import './screens.js';
+
+/* ---------- STATE ---------- */
+const todayStr=()=>new Date().toISOString().slice(0,10);
+const INITIAL_OWNER_MARKER=window.EasyBoostStore?.readCurrentOwner?.()||null;
+let currentUser=INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner||null,currentDisplayName=null,S=null;
+let OFFLINE_EGE_MOCK_CONTINUATION=false;
+let AUTH_SESSION_GENERATION=0;
+const AUTHORITY_RESET_HOOKS=new Set();
+function registerAuthorityReset(hook){if(typeof hook!=='function')return function(){};AUTHORITY_RESET_HOOKS.add(hook);return function(){AUTHORITY_RESET_HOOKS.delete(hook)}}
+async function notifyAuthorityReset(authority){for(const hook of AUTHORITY_RESET_HOOKS){try{await hook(authority)}catch(error){console.error('Authority reset hook failed',error)}}}
+const OWNER_SESSION_GENERATION_KEY='eb_owner_generation_session_v1';
+function readSessionOwnerGeneration(owner){try{const parsed=JSON.parse(sessionStorage.getItem(OWNER_SESSION_GENERATION_KEY)||'null');
+  return parsed&&parsed.owner===owner&&Number.isSafeInteger(parsed.generation)&&parsed.generation>=0?parsed.generation:null}catch(_){return null}}
+function rememberSessionOwnerGeneration(owner,generation){try{if(owner&&Number.isSafeInteger(generation))sessionStorage.setItem(OWNER_SESSION_GENERATION_KEY,JSON.stringify({owner:owner,generation:generation}));
+  else sessionStorage.removeItem(OWNER_SESSION_GENERATION_KEY)}catch(_){}}
+let ADOPTED_OWNER_GENERATION=readSessionOwnerGeneration(currentUser);
+if(ADOPTED_OWNER_GENERATION==null&&INITIAL_OWNER_MARKER&&INITIAL_OWNER_MARKER.owner===currentUser)
+  ADOPTED_OWNER_GENERATION=INITIAL_OWNER_MARKER.ownerGeneration;
+function normalizedAuthOwner(value){var owner=String(value||'').trim();return owner||null}
+const store=window.EasyBoostStore;
+const ui=window.EasyBoostComponents;
+const txt=ui.elementText;
+const makeInteractive=ui.makeInteractive;
+const bindText=ui.bindText;
+const setTxt=ui.setText;
+const ringOff=ui.setRingOffset;
+const toast=ui.notify;
+const wordModule=window.EasyBoostWords;
+const grammarModule=window.EasyBoostGrammar;
+function lazyLegacyModule(name){return new Proxy({}, {get:function(_target,key){return window[name]?.[key]}})}
+const readingModule=lazyLegacyModule('EasyBoostReading');
+const listeningModule=lazyLegacyModule('EasyBoostListening');
+const writingModule=lazyLegacyModule('EasyBoostWriting');
+const speakingModule=lazyLegacyModule('EasyBoostSpeaking');
+const examModule=lazyLegacyModule('EasyBoostExam');
+const progressModule=lazyLegacyModule('EasyBoostProgress');
+const profileModule=window.EasyBoostProfile;
+function applySyncedGrammarMastery(update){
+  if(!S||!update||update.owner!==currentUser||!Array.isArray(update.records))return false;
+  if(update.ownerGeneration!==ADOPTED_OWNER_GENERATION)return false;
+  if(!currentOwnerAuthorityCurrent(update.owner))return false;
+  S.grammarMastery=S.grammarMastery||{};let changed=false;
+  update.records.forEach(function(item){
+    const topicId=Number(item&&item.topicId);if(!Number.isInteger(topicId)||topicId<1||topicId>20||!item.record)return;
+    const incoming=grammarModule.migrateMasteryRecord(item.record);
+    const current=grammarModule.migrateMasteryRecord(S.grammarMastery[topicId]);
+    if(incoming.masteryRevision<=current.masteryRevision)return;
+    S.grammarMastery[topicId]=incoming;changed=true
+  });
+  if(changed){store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);gSync()}
+  return changed
+}
+store.sync.onGrammarMasterySync?.(applySyncedGrammarMastery);
+function applyDeletedOwner(update){
+  if(!update||!update.owner)return false;
+  if(update.owner!==currentUser)return false;
+  const resetAuthority={owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION};
+  const deletedGeneration=Number(update.ownerGeneration);
+  if(Number.isSafeInteger(deletedGeneration)&&Number.isSafeInteger(ADOPTED_OWNER_GENERATION)
+    &&deletedGeneration<=ADOPTED_OWNER_GENERATION&&update.deleted!==true)return false;
+  AUTH_SESSION_GENERATION+=1;OFFLINE_EGE_MOCK_CONTINUATION=false;
+  TOKEN='';currentUser=null;currentDisplayName=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  void notifyAuthorityReset(resetAuthority);
+  try{localStorage.removeItem('eb_tg_code')}catch(_){}
+  hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}
+  return true
+}
+store.sync.onOwnerDeleted?.(applyDeletedOwner);
+/* ---------- DATA ---------- */
+
+
+
+/* ---------- NAV WIRING (tabs/back/tiles/flows) ---------- */
+const TABROUTE={'Главная':'scr1','Учить':'scr2','Прогресс':'scr10','Профиль':'scr11'};
+function wire(){
+  document.querySelectorAll('.screen').forEach(scr=>{
+    scr.querySelectorAll('div,span,a').forEach(el=>{const t=txt(el);if(TABROUTE[t]&&el.children.length<=1&&t.length<11){const control=el.closest('.navit')||el;makeInteractive(control,t,()=>nav(TABROUTE[t]))}});
+    scr.querySelectorAll('svg').forEach(sv=>{const h=(sv.innerHTML||'').toLowerCase();if(h.includes('14 6 8 12 14 18')){const p=sv.parentElement||sv;makeInteractive(p,'Назад',()=>back())}});
+  });
+  bindText('scr14','Повторить',()=>tab('scr8'));bindText('scr14','Учить офлайн',()=>tab('scr2'));
+}
+
+document.addEventListener('DOMContentLoaded',()=>{wire();
+});
+wire();
+S=currentUser?store.loadLocal(currentUser,ADOPTED_OWNER_GENERATION):null;
+
+/* ===== READING ===== */
+/* Последнее слово, по которому кликнули в тексте: его показывает всплывающая карточка перевода
+   и озвучивает кнопка из разметки, поэтому имя живёт в оболочке, а не в чанке чтения. */
+let lastWord="",lastWordContext="",readingWordPopoverTrigger=null;
+let readingDictionaryRequestSequence=0,readingDictionaryRequest=null;
+
+/* ===== ROBUSTNESS + OFFLINE FALLBACKS ===== */
+const DICT={
+ many:{ipa:'/ˈmeni/',tr:'многие'},students:{ipa:'/ˈstjuːdnts/',tr:'студенты'},take:{ipa:'/teɪk/',tr:'брать, взять'},
+ gap:{ipa:'/ɡæp/',tr:'промежуток, разрыв'},year:{ipa:'/jɪə/',tr:'год'},before:{ipa:'/bɪˈfɔː/',tr:'перед, до'},
+ university:{ipa:'/ˌjuːnɪˈvɜːsəti/',tr:'университет'},they:{ipa:'/ðeɪ/',tr:'они'},travel:{ipa:'/ˈtrævl/',tr:'путешествовать'},
+ work:{ipa:'/wɜːk/',tr:'работать, работа'},volunteering:{ipa:'/ˌvɒlənˈtɪərɪŋ/',tr:'волонтёрство'},
+ valuable:{ipa:'/ˈvæljuəbl/',tr:'ценный, полезный'},experience:{ipa:'/ɪkˈspɪəriəns/',tr:'опыт'},
+ helps:{ipa:'/helps/',tr:'помогает'},become:{ipa:'/bɪˈkʌm/',tr:'становиться'},more:{ipa:'/mɔː/',tr:'больше, более'},
+ independent:{ipa:'/ˌɪndɪˈpendənt/',tr:'независимый, самостоятельный'},confident:{ipa:'/ˈkɒnfɪdənt/',tr:'уверенный'},
+ experience_:{}
+};
+/* translate: AI first, else offline dictionary */
+function readingDictionaryRequestCurrent(request){const authority=currentOwnerBinding();return Boolean(request&&readingDictionaryRequest===request&&authority&&request.authority.username===authority.username&&request.authority.generation===authority.generation)}
+function invalidateReadingDictionaryLookup(){readingDictionaryRequestSequence+=1;readingDictionaryRequest=null}
+function readingDictionarySelection(){const request=readingDictionaryRequest,pop=document.getElementById('r_pop');if(!readingDictionaryRequestCurrent(request)||!pop||!['online','builtin'].includes(pop.dataset.lookupState))return null;return Object.freeze({word:request.word,context:request.context,owner:request.authority.username,ownerGeneration:request.authority.generation})}
+function closeReadingWordPopover(restoreFocus=true){const pop=document.getElementById('r_pop'),trigger=readingWordPopoverTrigger;invalidateReadingDictionaryLookup();if(pop){if(pop.open&&typeof pop.close==='function')pop.close();else pop.hidden=true}readingWordPopoverTrigger=null;if(restoreFocus&&trigger&&trigger.isConnected)trigger.focus()}
+function readingWordPopoverFocusableControls(pop){return [...pop.querySelectorAll('button:not([disabled])')].filter((control)=>!control.hidden&&control.getAttribute('aria-hidden')!=='true'&&control.getClientRects().length>0)}
+function trapReadingWordPopoverTab(event){if(event.key!=='Tab'||event.altKey||event.ctrlKey||event.metaKey)return;const pop=event.currentTarget,controls=readingWordPopoverFocusableControls(pop);if(!controls.length){event.preventDefault();pop.focus();return}const activeIndex=controls.indexOf(document.activeElement);if(event.shiftKey&&(document.activeElement===pop||activeIndex<=0)){event.preventDefault();controls.at(-1).focus()}else if(!event.shiftKey&&(document.activeElement===pop||activeIndex<0||activeIndex===controls.length-1)){event.preventDefault();controls[0].focus()}}
+function wireReadingWordPopover(){const pop=document.getElementById('r_pop');if(!pop||pop.dataset.focusWired)return;pop.dataset.focusWired='true';pop.addEventListener('cancel',function(event){event.preventDefault();closeReadingWordPopover()});pop.addEventListener('keydown',trapReadingWordPopoverTab)}
+function setReadingDictionaryState(request,state,ipa,translation){if(!readingDictionaryRequestCurrent(request))return false;const pop=document.getElementById('r_pop');if(!pop)return false;pop.dataset.lookupState=state;pop.dataset.lookupSequence=String(request.sequence);const canSave=state==='online'||state==='builtin';pop.querySelectorAll('.reading-word-popover__action').forEach(button=>{button.disabled=!canSave});document.getElementById('r_ipa').textContent=ipa||'';document.getElementById('r_tr').textContent=translation;return true}
+function dictionaryLookupMessage(error){const common=apiMessage(error,'dictionary'),status=Number(error&&error.status)||0,code=String(error&&error.code||'REQUEST_FAILED');
+  if(code==='SESSION_REVOKED'||status===401)return 'Сессия истекла. Войдите снова.';
+  if(code==='PRIVACY_CONSENT_REQUIRED')return common;
+  if(code==='SUBSCRIPTION_REQUIRED'||status===403)return 'Для онлайн-перевода нужен активный доступ.';
+  if(code==='RATE_LIMITED'||status===429)return 'Лимит запросов исчерпан. Попробуйте позже.';
+  if(code==='AI_BUDGET_EXHAUSTED')return 'Дневной лимит онлайн-переводов исчерпан. Попробуйте завтра.';
+  if(code==='AI_NOT_CONFIGURED')return 'Онлайн-перевод пока не настроен. Попробуйте позже.';
+  if(code==='AI_RESPONSE_INVALID')return 'Не удалось получить корректный перевод. Попробуйте ещё раз.';
+  if(code==='AI_PROVIDER_UNAVAILABLE')return 'Онлайн-перевод временно недоступен. Попробуйте позже.';
+  if(code==='VALIDATION_ERROR'||status===400)return 'Не удалось распознать слово для перевода. Выберите другое слово.';
+  if(code==='NETWORK_ERROR'||status===0)return 'Нет подключения к интернету. Проверьте сеть и повторите попытку.';
+  if(status>=500)return 'Сервис онлайн-перевода временно недоступен. Попробуйте позже.';
+  return 'Не удалось получить перевод. Попробуйте ещё раз.'}
+async function trWord(w,encodedContext=''){const authority=currentOwnerBinding(),word=String(w||'').trim();if(!authority||!word)return;let context='';try{context=decodeURIComponent(encodedContext||'')}catch(_){context=''}const request=Object.freeze({sequence:++readingDictionaryRequestSequence,word:word,context:context,authority:authority});readingDictionaryRequest=request;lastWord=request.word;lastWordContext=request.context;const pop=document.getElementById('r_pop');if(!pop){invalidateReadingDictionaryLookup();return}wireReadingWordPopover();const active=document.activeElement;if(active&&active!==document.body&&(!pop.contains||!pop.contains(active)))readingWordPopoverTrigger=active;
+  document.getElementById('r_word').textContent=request.word;setReadingDictionaryState(request,'loading','','перевод…');pop.hidden=false;if(typeof pop.showModal==='function'&&!pop.open)pop.showModal();pop.focus({preventScroll:true});
+  try{const d=await generateAiContent('dictionary_lookup',{word:request.word},{'X-EasyBoost-Expected-Owner':request.authority.username});if(!readingDictionaryRequestCurrent(request))return;
+    if(apiResponseOwner(d)!==request.authority.username){closeReadingWordPopover(false);await invalidateLearningAuthority({owner:request.authority.username,ownerGeneration:request.authority.generation});return}
+    setReadingDictionaryState(request,'online',d.ipa||'',d.tr)}
+  catch(e){if(apiIsAuthorityFailure(e)){
+      if(readingDictionaryRequestCurrent(request))closeReadingWordPopover(false);
+      await invalidateLearningAuthority({owner:request.authority.username,ownerGeneration:request.authority.generation});return}
+    if(!readingDictionaryRequestCurrent(request))return;
+    const off=DICT[request.word];
+    if(off&&apiCanUseOfflineFallback(e))setReadingDictionaryState(request,'builtin',off.ipa||'',off.tr+'  · офлайн-словарь');
+    else setReadingDictionaryState(request,'error','',dictionaryLookupMessage(e))}}
+registerAuthorityReset(function(authority){const request=readingDictionaryRequest;if(request&&authority?.owner===request.authority.username&&authority?.ownerGeneration===request.authority.generation)closeReadingWordPopover(false)});
+
+
+
+/* ===== PROGRESS / PROFILE (real data) ===== */
+const PROFILE_HOOKS=[];
+function registerProfileHook(hook){PROFILE_HOOKS.push(hook)}
+function profileHookFailed(error){console.error('Profile hook failed',error)}
+function runProfileHooks(){return Promise.all(PROFILE_HOOKS.map(function(hook){
+  try{return Promise.resolve(hook()).catch(profileHookFailed)}catch(error){profileHookFailed(error);return Promise.resolve()}
+}))}
+/* Сегодня, прогресс и профиль регистрируют свои route hooks в модулях экранов. */
+
+
+/* ===== FIX TABBAR HIT-AREA + LEARN SHEET ===== */
+const LEARN_MODS=[
+ ['📇','Слова','лексика · карточки','scr2','linear-gradient(135deg,#FFA570,#F2683F)'],
+ ['📐','Грамматика','правила + тесты','scr3','linear-gradient(135deg,#6FC2B0,#1F9E5A)'],
+ ['📖','Чтение','перевод по клику','scr7','linear-gradient(135deg,#FFC861,#E8730A)'],
+ ['🎧','Аудирование','слушай и отвечай','scr4','linear-gradient(135deg,#5FB6C9,#3E93A8)'],
+ ['✍️','Письмо','задания 37 / 38 + ИИ','scr8','linear-gradient(135deg,#FF9E8A,#E26A56)'],
+ ['🎤','Говорение','таймер + запись','scr9','linear-gradient(135deg,#FFB07A,#F2683F)'],
+ ['⏱','Пробный ЕГЭ','полный вариант · итог и повтор','scr16','linear-gradient(135deg,#F47C55,#C94628)']
+];
+const EXAM_TRAININGS=[
+ {screen:'scr3',start:'gExam',icon:'✎',label:'Грамматика · задания 19–24',background:'#FFEDE4'},
+ {screen:'scr4',start:'lExam',icon:'🎧',label:'Аудирование · раздел целиком',background:'#E3F1F5'},
+ {screen:'scr7',start:'rExam',icon:'📖',label:'Чтение · раздел целиком',background:'#FFF4DE'},
+ {screen:'scr8',start:null,icon:'✍️',label:'Письмо · задания 37 и 38',background:'#FCEEEC'},
+ {screen:'scr9',start:'spExam',icon:'🎤',label:'Говорение · устная часть',background:'#EAF7F0'}
+];
+function buildExamTrainingLinks(){
+  const root=document.getElementById('exam_training_links');if(!root||root.childElementCount)return;
+  EXAM_TRAININGS.forEach(function(training){
+    const button=document.createElement('button');button.type='button';button.className='exam-training';
+    const icon=document.createElement('span');icon.className='exam-training__icon';icon.setAttribute('aria-hidden','true');icon.style.background=training.background;icon.textContent=training.icon;
+    const label=document.createElement('span');label.className='exam-training__label';label.textContent=training.label;
+    const chevron=document.createElement('span');chevron.className='exam-training__chevron';chevron.setAttribute('aria-hidden','true');chevron.textContent='›';
+    button.append(icon,label,chevron);button.addEventListener('click',function(){
+      if(!training.start){tab(training.screen);return}
+      tab(training.screen,function(){window[training.start]()});
+    });root.appendChild(button);
+  });
+}
+function buildLearnSheet(){
+  if(document.getElementById('learnSheet'))return;
+  const w=document.createElement('div');w.id='learnSheet';
+  const rows=LEARN_MODS.map(m=>'<button type="button" class="lm cardbtn" onclick="learnGo(\''+m[3]+'\')"><span class="ic" aria-hidden="true" style="background:'+m[4]+'">'+m[0]+'</span><span class="tx"><b>'+m[1]+'</b><span>'+m[2]+'</span></span><span class="ch" aria-hidden="true">›</span></button>').join('');
+  w.innerHTML='<button type="button" class="bd" aria-label="Закрыть список модулей" onclick="closeLearn()"></button><div class="sheet"><div class="grip"></div><h3>Учить</h3>'+rows+'</div>';
+  document.body.appendChild(w);
+}
+function openLearn(){buildLearnSheet();document.getElementById('learnSheet').classList.add('open')}
+function closeLearn(){const e=document.getElementById('learnSheet');if(e)e.classList.remove('open')}
+function learnGo(id){closeLearn();nav(id)}
+
+function wireTabs(){
+  const R={'Главная':'scr1','Прогресс':'scr10','Профиль':'scr11'};
+  document.querySelectorAll('.screen').forEach(scr=>{
+    scr.querySelectorAll('span').forEach(sp=>{
+      const t=(sp.textContent||'').trim();
+      if(t==='Главная'||t==='Учить'||t==='Прогресс'||t==='Профиль'){
+        const fresh=sp.cloneNode(true);sp.replaceWith(fresh);       // strip old text-only listener
+        const col=fresh.parentElement;if(!col)return;col.style.cursor='pointer';
+        makeInteractive(col,t,()=>{if(t==='Учить')openLearn();else nav(R[t])});
+      }
+    });
+  });
+}
+document.addEventListener('DOMContentLoaded',()=>{buildLearnSheet();buildExamTrainingLinks();wireTabs()});
+buildLearnSheet();buildExamTrainingLinks();wireTabs();
+
+
+/* ===== AI CONTENT GENERATION ===== */
+
+
+/* -- toast + FAB -- */
+function parseJSON(s){try{return JSON.parse(s.replace(/```json|```/g,'').trim())}catch(e){const m=s.match(/[\[{][\s\S]*[\]}]/);if(m){try{return JSON.parse(m[0])}catch(e2){}}return null}}
+const GEN_STATE_ID='genstate';
+function genStateHost(){var el=document.getElementById(GEN_STATE_ID);
+  if(!el){el=document.createElement('div');el.id=GEN_STATE_ID;document.body.appendChild(el)}
+  return el}
+function genState(options){ui.renderState(genStateHost(),options)}
+function genStateClear(){genStateHost().innerHTML=''}
+/*
+ * Генерацию задания умеет только сам экран, а его код приезжает чанком. Кнопка живёт в оболочке
+ * и видна лишь на уже открытом экране, поэтому чанк успевает зарегистрировать свою генерацию.
+ */
+const SCREEN_GENERATORS={};
+function registerScreenGenerator(id,generate){SCREEN_GENERATORS[id]=generate}
+async function genForCurrent(){const id=cur();const fab=document.getElementById('genfab');fab.disabled=true;
+  genState({kind:'loading',title:'ИИ придумывает задание',description:'Обычно это занимает несколько секунд'});
+  try{
+    const generate=SCREEN_GENERATORS[id];
+    if(generate)await generate();
+    genState({kind:'success',title:'Готово — новое задание',description:'Можно продолжать занятие'});
+    setTimeout(genStateClear,2600);
+  }catch(e){
+    genState({kind:'error',title:'ИИ недоступен',description:apiMessage(e,'ai')+' Встроенное задание осталось на месте.',
+      actionLabel:'Повторить',onAction:function(){genStateClear();genForCurrent()}});
+  }
+  fab.disabled=false}
+
+/* -- FAB visibility -- */
+(function(){
+  const fab=document.createElement('button');fab.id='genfab';fab.innerHTML='✨ ИИ: новое';fab.onclick=genForCurrent;document.body.appendChild(fab);
+  ui.ensureLiveRegion('toast');
+  registerRouteHook(function(id){const show=['scr2','scr3','scr4','scr7'].includes(id);fab.style.display=show?'inline-flex':'none';if(!show)genStateClear()});
+})();
+
+
+/* ===== SERVER CONNECT (Этап 5) ===== */
+const auth=window.EasyBoostAuth;
+const SRV=auth.isServerMode;
+const FIRST_LAUNCH_SESSION_TIMEOUT_MS=FIRST_LAUNCH_REQUEST_TIMEOUT_MS;
+const firstLaunch=createFirstLaunchController({
+  document:document,location:window.location,history:window.history,storage:window.localStorage,
+  fetchImpl:window.fetch.bind(window),showScreen:tab,matchMedia:window.matchMedia?.bind(window),
+});
+let TOKEN=''; // маркер активной cookie-сессии; сам JWT недоступен JavaScript
+const apiPost=EasyBoostApi.post;
+const apiPostIdempotent=EasyBoostApi.postIdempotent;
+const apiPut=EasyBoostApi.put;
+const apiGet=EasyBoostApi.get;
+const apiGetBlob=EasyBoostApi.getBlob;
+const apiPostBinary=EasyBoostApi.postBinary;
+const apiMessage=EasyBoostApi.messageFor;
+const apiResponseOwner=EasyBoostApi.responseOwner;
+const apiResponseServerTime=EasyBoostApi.responseServerTime;
+const apiIsAuthorityFailure=EasyBoostApi.isAuthorityFailure;
+const apiCanUseOfflineFallback=EasyBoostApi.canUseOfflineFallback;
+function syncModuleAttempt(attempt,guard){return store.sync.saveModuleAttempt(attempt,guard)}
+let authTransition=Promise.resolve();
+function runAuthTransition(action){
+  const pending=authTransition.then(action,action);authTransition=pending.catch(function(){});return pending;
+}
+
+function hideLearningShell(){
+  document.body.dataset.learningAccess='locked';
+  document.querySelectorAll('#aisy-shell-nav,#aisy-shell-back,#asya-launcher,#tabbar').forEach(function(element){
+    element.hidden=true;element.inert=true
+  });
+}
+function authorizeLearningShell(){
+  document.body.dataset.learningAccess='active';
+}
+function setAccessBackgroundInert(inert){
+  document.querySelectorAll('.screen,#tabbar,#genfab,#learnSheet,#aisy-shell-nav,#aisy-shell-back,#asya-launcher').forEach(function(element){
+    const privateControl=element.matches('#tabbar,#aisy-shell-nav,#aisy-shell-back,#asya-launcher');
+    element.inert=Boolean(inert||privateControl&&document.body.dataset.learningAccess!=='active'
+      ||!inert&&privateControl&&element.hidden
+      ||!inert&&element.matches('[data-first-launch-screen][hidden]'))
+  });
+}
+function closeAccessGate(focusLogin=false){
+  document.getElementById('access_gate')?.remove();setAccessBackgroundInert(false);
+  if(focusLogin)queueMicrotask(function(){document.querySelector('#scr5 input, #scr5 button, #scr5 a')?.focus()});
+}
+function focusTodayHeading(){requestAnimationFrame(function(){
+  const heading=document.getElementById('today-title');
+  if(heading&&!heading.closest('[hidden]'))heading.focus()
+})}
+function accessGate(){
+  let gate=document.getElementById('access_gate');if(gate)return gate;
+  gate=document.createElement('section');gate.id='access_gate';gate.setAttribute('role','dialog');gate.setAttribute('aria-modal','true');gate.setAttribute('aria-labelledby','access_gate_title');gate.setAttribute('aria-describedby','access_gate_copy');
+  gate.className='aisy-access-gate';
+  const card=document.createElement('div');card.className='aisy-access-gate__card';
+  const title=document.createElement('h1');title.id='access_gate_title';title.className='aisy-access-gate__title';
+  const copy=document.createElement('p');copy.id='access_gate_copy';copy.className='aisy-access-gate__copy';
+  const status=document.createElement('p');status.id='access_gate_status';status.className='aisy-visually-hidden';status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');
+  const privacy=document.createElement('button');privacy.id='access_gate_privacy';privacy.type='button';privacy.className='aisy-button aisy-button--secondary aisy-access-gate__privacy';privacy.hidden=true;privacy.textContent='Настройки приватности и данных';privacy.addEventListener('click',function(){window.openCalibrationPrivacy?.()});
+  const retry=document.createElement('button');retry.id='access_gate_retry';retry.type='button';retry.className='aisy-button aisy-access-gate__retry';retry.textContent='Повторить проверку';retry.addEventListener('click',function(){pwCheck()});
+  card.append(title,copy,status,privacy,retry);gate.appendChild(card);gate.addEventListener('keydown',function(event){
+    if(event.key!=='Tab')return;const controls=[privacy,retry].filter(function(control){return control.offsetParent!==null});
+    if(!controls.length)return;const first=controls[0],last=controls[controls.length-1];
+    if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
+    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
+  });document.body.appendChild(gate);return gate;
+}
+function applyLearningAccess(result){
+  const state=result.state;hideLearningShell();
+  if(state===LEARNING_ACCESS_STATES.ACTIVE){closeAccessGate();return}
+  if(state===LEARNING_ACCESS_STATES.NO_SESSION){
+    firstLaunch.showLogin();closeAccessGate(true);const login=document.getElementById('scr5');if(login)login.dataset.accessState=state;return
+  }
+  firstLaunch.showLogin();const gate=accessGate();setAccessBackgroundInert(true);const previousState=gate.dataset.state||'';gate.dataset.state=state;
+  const title=document.getElementById('access_gate_title');const copy=document.getElementById('access_gate_copy');const privacy=document.getElementById('access_gate_privacy');
+  if(state===LEARNING_ACCESS_STATES.INACTIVE){
+    title.textContent='Нужен активный доступ';copy.textContent='Сессия подтверждена, но подписка неактивна или закончилась. Обратитесь к оператору, который выдал доступ, и затем повторите проверку.';
+    privacy.hidden=false;
+  }else{
+    title.textContent='Не удалось проверить доступ';copy.textContent='Сейчас нет связи с сервером, поэтому мы не можем подтвердить подписку. Учебные разделы не открыты. Проверьте сеть и повторите попытку.';privacy.hidden=true;
+  }if(previousState){const status=document.getElementById('access_gate_status');if(status){
+    const announcement=title.textContent+'. '+copy.textContent;status.textContent='';
+    requestAnimationFrame(function(){if(status.isConnected&&gate.dataset.state===state)status.textContent=announcement})
+  }}
+  queueMicrotask(function(){document.getElementById('access_gate_retry')?.focus()})
+}
+function adoptServerSession(session,ownerGeneration){
+  const sessionOwner=normalizedAuthOwner(session&&session.username);
+  if(!session||session.authenticated!==true||!sessionOwner||!Number.isSafeInteger(ownerGeneration)||ownerGeneration<0)return false;
+  const authority=store.sync.ownerAuthSnapshot?.(sessionOwner)||{ownerGeneration:0,deleted:false};
+  if(authority.deleted||authority.ownerGeneration!==ownerGeneration)return false;
+  AUTH_SESSION_GENERATION+=1;
+  TOKEN='cookie';OFFLINE_EGE_MOCK_CONTINUATION=false;window.__sub=session;currentUser=sessionOwner;
+  currentDisplayName=String(session.displayName||'').trim()||null;ADOPTED_OWNER_GENERATION=ownerGeneration;
+  rememberSessionOwnerGeneration(currentUser,ADOPTED_OWNER_GENERATION);
+  return true
+}
+function currentOwnerAuthorityCurrent(owner=currentUser){
+  if(!owner||owner!==currentUser||!Number.isSafeInteger(ADOPTED_OWNER_GENERATION))return false;
+  const authority=store.sync.ownerAuthSnapshot?.(owner)||{ownerGeneration:0,deleted:false};
+  if(authority.ownerGeneration===ADOPTED_OWNER_GENERATION&&!authority.deleted)return true;
+  applyDeletedOwner({owner:owner,ownerGeneration:authority.ownerGeneration,deleted:authority.deleted});return false
+}
+function currentOwnerBinding(){
+  return TOKEN&&currentOwnerAuthorityCurrent()
+    ?Object.freeze({username:currentUser,generation:ADOPTED_OWNER_GENERATION}):null
+}
+function offlineEgeMockContinuation(){
+  if(!currentUser||!Number.isSafeInteger(ADOPTED_OWNER_GENERATION))return null;
+  const authority=store.sync.ownerAuthSnapshot?.(currentUser)||{ownerGeneration:0,deleted:false};
+  if(authority.deleted||authority.ownerGeneration!==ADOPTED_OWNER_GENERATION)return null;
+  const owner={username:currentUser,generation:ADOPTED_OWNER_GENERATION};
+  const form={identity:EGE_MOCK_PUBLIC_FORM_ID+'@'+EGE_MOCK_PUBLIC_FORM_REVISION,fingerprint:EGE_MOCK_PUBLIC_FORM_FINGERPRINT};
+  return egeMockLocalContinuation(localStorage,owner,form)?owner:null
+}
+function currentEgeMockOwnerBinding(){return currentOwnerBinding()||(OFFLINE_EGE_MOCK_CONTINUATION?offlineEgeMockContinuation():null)}
+function startOfflineEgeMockContinuation(){
+  const owner=offlineEgeMockContinuation();if(!owner)return false;
+  OFFLINE_EGE_MOCK_CONTINUATION=true;store.sync.setOwner(owner.username);
+  /* The exact attempt may resume, but cached learner navigation and Asya stay unavailable
+     until the subscription can be confirmed again. */
+  hideLearningShell();document.body.dataset.learningAccess='exam-only';
+  closeAccessGate();firstLaunch.release();nav('scr16');return true
+}
+function exitOfflineEgeMockContinuation(){
+  if(!OFFLINE_EGE_MOCK_CONTINUATION)return false;
+  OFFLINE_EGE_MOCK_CONTINUATION=false;
+  applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null});return true
+}
+async function commitEgeMockOwnerMutation(owner,canCommit,commit){
+  const changed=()=>Object.assign(new Error('EGE_MOCK_OWNER_AUTHORITY_CHANGED'),{code:'EGE_MOCK_OWNER_AUTHORITY_CHANGED'});
+  if(!owner||typeof canCommit!=='function'||typeof commit!=='function')throw changed();
+  const result=await store.sync.withDurableOwnerIncarnationLock({owner:owner.username,ownerGeneration:owner.generation},()=>{
+    if(canCommit()!==true)throw changed();
+    commit();return{egeMockCommit:true}
+  });
+  if(result?.egeMockCommit!==true)throw changed();
+}
+async function clearNoSessionAuthority(authGuard){
+  if(!authGuard||authGuard.sessionGeneration!==AUTH_SESSION_GENERATION)return false;
+  const previousOwner=authGuard.owner,previousGeneration=authGuard.ownerGeneration;
+  const previousAuthority=previousOwner&&Number.isSafeInteger(previousGeneration)
+    ?{owner:previousOwner,ownerGeneration:previousGeneration}:null;
+  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;currentDisplayName=null;S=null;window.__sub=null;
+  ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  hideLearningShell();
+  if(previousAuthority)await notifyAuthorityReset(previousAuthority);
+  if(!authGuard.deferPresentation)try{firstLaunch.showLogin()}catch(_){show('scr5')}
+  if(previousOwner&&Number.isSafeInteger(previousGeneration))await store.clearCurrentOwner?.(previousOwner,previousGeneration);
+  return true
+}
+async function checkLearningAccess(session=null,{preserveActiveShell=false,deferPresentation=false,signal=null}={}){
+  if(!SRV){const result=classifyLearningAccess(null,new Error('server mode required'));if(!deferPresentation)applyLearningAccess(result);return result}
+  const authGuard={sessionGeneration:AUTH_SESSION_GENERATION,owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION,deferPresentation,
+    globalGeneration:store.sync.ownerAuthSnapshot?.()?.globalGeneration??0};
+  async function failClosedStaleAuthority(){
+    const result={state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+    if(authGuard.sessionGeneration!==AUTH_SESSION_GENERATION)return result;
+    if(authGuard.owner&&Number.isSafeInteger(authGuard.ownerGeneration))await invalidateLearningAuthority({
+      owner:authGuard.owner,ownerGeneration:authGuard.ownerGeneration,
+    },{deferPresentation});
+    else await clearNoSessionAuthority(authGuard);
+    if(!deferPresentation)applyLearningAccess(result);return result
+  }
+  try{
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    const current=session||await auth.currentSession({signal,cache:'no-store'});
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    if(authGuard.sessionGeneration!==AUTH_SESSION_GENERATION){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true}}
+    const result=classifyLearningAccess(current);
+    if(current&&current.authenticated===true){
+      const sessionOwner=normalizedAuthOwner(current.username);let generation=authGuard.ownerGeneration;
+      if(Number.isSafeInteger(generation)){
+        if(sessionOwner!==authGuard.owner||store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration!==generation)return failClosedStaleAuthority()
+      }else{
+        if(authGuard.owner&&sessionOwner!==authGuard.owner)return failClosedStaleAuthority();
+        if(store.sync.ownerAuthSnapshot?.()?.globalGeneration!==authGuard.globalGeneration)return failClosedStaleAuthority();
+        generation=store.sync.ownerAuthSnapshot?.(sessionOwner)?.ownerGeneration??0
+      }
+      const adopted=await store.sync.adoptOwner?.(sessionOwner,generation,{
+        canCommit:function(){return authGuard.sessionGeneration===AUTH_SESSION_GENERATION&&signal?.aborted!==true},
+        commit:function(committedGeneration){return adoptServerSession(current,committedGeneration)},
+      });
+      if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+      if(adopted!==sessionOwner)return failClosedStaleAuthority()
+    }else if(!await clearNoSessionAuthority(authGuard))return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    if(!deferPresentation){if(preserveActiveShell&&result.state===LEARNING_ACCESS_STATES.ACTIVE)closeAccessGate();else applyLearningAccess(result)}return result;
+  }catch(error){
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    const result=classifyLearningAccess(null,error);
+    if(result.state===LEARNING_ACCESS_STATES.NO_SESSION&&!await clearNoSessionAuthority(authGuard))return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,stale:true};
+    if(signal?.aborted)return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,aborted:true};
+    if(!deferPresentation)applyLearningAccess(result);return result;
+  }
+}
+async function verifyLearningAccessForLaunch({signal=null}={}){
+  return runAuthTransition(async function(){
+    const access=await checkLearningAccess(null,{preserveActiveShell:true,signal});
+    return signal?.aborted!==true&&access.state===LEARNING_ACCESS_STATES.ACTIVE;
+  });
+}
+
+/* save/load через сервер (или локально) */
+let _saveT=null;
+const START_HOOKS=[];
+function registerStartHook(hook){START_HOOKS.push(hook)}
+function save(options={}){
+  if(SRV&&(!TOKEN||!currentOwnerAuthorityCurrent())||!SRV&&store.sync.isOwnerDeleted?.(currentUser))return false;
+  /* локальный снимок держит слова, SRS, грамматику и прогресс доступными без сети */
+  const stored=store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
+  if(SRV){clearTimeout(_saveT);if(options.queueNow)store.sync.queueProgress(S);_saveT=setTimeout(()=>{if(currentOwnerAuthorityCurrent())store.sync.saveProgress(S)},600)}
+  return stored;
+}
+async function invalidateLearningAuthority(authority,{deferPresentation=false}={}){
+  var owner=authority&&authority.owner,ownerGeneration=authority&&authority.ownerGeneration;
+  if(currentUser!==owner||ADOPTED_OWNER_GENERATION!==ownerGeneration)return false;
+  AUTH_SESSION_GENERATION+=1;TOKEN='';OFFLINE_EGE_MOCK_CONTINUATION=false;currentUser=null;currentDisplayName=null;S=null;window.__sub=null;ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+  hideLearningShell();if(!deferPresentation)try{firstLaunch.showLogin()}catch(_){show('scr5')}
+  await notifyAuthorityReset(authority);
+  await Promise.all([
+    store.clearCurrentOwner?.(owner,ownerGeneration),
+    clearAdaptiveRuntime({owner:owner,ownerGeneration:ownerGeneration}),
+    clearAdaptiveOverviewCache(localStorage,{owner:owner,ownerGeneration:ownerGeneration}),
+  ]);
+  return true;
+}
+window.EasyBoostAuthority=Object.freeze({invalidate:invalidateLearningAuthority});
+async function startLearningWithVerifiedSession(session,{signal=null}={}){
+  if(signal?.aborted)return false;
+  const access=classifyLearningAccess(session);
+  if(access.state!==LEARNING_ACCESS_STATES.ACTIVE){applyLearningAccess(access);return false}
+  if(normalizedAuthOwner(session&&session.username)!==currentUser||!currentOwnerAuthorityCurrent())return false;
+  var startOwner=currentUser,startGeneration=AUTH_SESSION_GENERATION,startOwnerGeneration=ADOPTED_OWNER_GENERATION;
+  function startStillCurrent(){return Boolean(signal?.aborted!==true&&TOKEN&&currentUser===startOwner
+    &&AUTH_SESSION_GENERATION===startGeneration&&currentOwnerAuthorityCurrent(startOwner))}
+  /* Встроенные задания нужны до первого экрана письма и должны быть доступны офлайн,
+     поэтому банк загружается из закэшированного /task-bank.json на старте. */
+  await loadTaskBank(signal);
+  if(!startStillCurrent())return false;
+  store.sync.setOwner(currentUser);
+  if(SRV){
+    var served=null,localWorkflow=store.loadLocal(currentUser,ADOPTED_OWNER_GENERATION);
+    var progressOptions={headers:{'X-EasyBoost-Expected-Owner':startOwner}};if(signal)progressOptions.signal=signal;
+    try{served=await apiGet('/api/v1/progress',progressOptions)}catch(e){
+      if(signal?.aborted)return false;
+      if(apiIsAuthorityFailure(e))await invalidateLearningAuthority({owner:startOwner,ownerGeneration:startOwnerGeneration});
+      if(!apiCanUseOfflineFallback(e))return false;served=null}
+    if(!startStillCurrent())return false;
+    if(served&&apiResponseOwner(served)!==startOwner){await invalidateLearningAuthority({owner:startOwner,ownerGeneration:startOwnerGeneration});return false}
+    S=store.restore(currentUser,served,store.sync.pendingModules(),ADOPTED_OWNER_GENERATION);
+    /* Active exercise queues are device-local workflow, not mastery authority. Keep the exact
+       generation-bound value (including null) so an immediate reload cannot lose a committed
+       answer or resurrect a completed queue while server-owned mastery still comes from served. */
+    if(Object.hasOwn(localWorkflow,'grammarRunner'))S.grammarRunner=localWorkflow.grammarRunner;
+    store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION);
+    if(!served)try{toast('Нет сети — показан сохранённый прогресс')}catch(e){}}
+  if(!startStillCurrent())return false;
+  store.sync.setBaseline(S);
+  authorizeLearningShell();
+  tab('scr1',function(){closeAccessGate();firstLaunch.release();focusTodayHeading()});
+  void (async function(){for(const hook of START_HOOKS){if(!startStillCurrent())return;try{await hook()}catch(e){}if(!startStillCurrent())return}})();
+  return true;
+}
+async function startLearningWithDeadline(session){
+  try{return await runWithAbortDeadline(
+    function(signal){return startLearningWithVerifiedSession(session,{signal})},
+    {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
+  )}catch(_){applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true});return false}
+}
+async function startApp(){
+  return runAuthTransition(async function(){
+    const access=await checkLearningAccess();
+    if(access.state!==LEARNING_ACCESS_STATES.ACTIVE)return false;
+    return startLearningWithDeadline(access.session);
+  });
+}
+
+async function logout(expectedAuthority=null){
+  return runAuthTransition(async function(){
+    const logoutOwner=currentUser,logoutOwnerGeneration=ADOPTED_OWNER_GENERATION;
+    if(expectedAuthority&&(expectedAuthority.owner!==logoutOwner||expectedAuthority.ownerGeneration!==logoutOwnerGeneration))throw Object.assign(new Error('Аккаунт изменился. Действие отменено.'),{code:'OWNER_CHANGED',status:409});
+    /* Keep the current owner authoritative until the server confirms that its HttpOnly session
+       was revoked. A network/server failure is surfaced by the caller's confirmation dialog and
+       must not erase local authority only to let the same cookie silently sign back in later. */
+    if(SRV){const result=await auth.logout({'X-EasyBoost-Expected-Owner':logoutOwner});if(apiResponseOwner(result)!==logoutOwner)throw Object.assign(new Error('Аккаунт изменился. Действие отменено.'),{code:'OWNER_CHANGED',status:409})}
+    hideLearningShell();try{firstLaunch.showLogin()}catch(_){show('scr5')}
+    AUTH_SESSION_GENERATION+=1;OFFLINE_EGE_MOCK_CONTINUATION=false;
+    TOKEN='';currentUser=null;currentDisplayName=null;S=null;window.__sub=null;
+    ADOPTED_OWNER_GENERATION=null;rememberSessionOwnerGeneration(null,null);store.sync.setOwner(null);
+    await Promise.all([
+      store.clearCurrentOwner?.(logoutOwner,logoutOwnerGeneration),
+      clearAdaptiveRuntime({owner:logoutOwner,ownerGeneration:logoutOwnerGeneration}),
+      clearAdaptiveOverviewCache(localStorage,{owner:logoutOwner,ownerGeneration:logoutOwnerGeneration}),
+    ]);
+    try{localStorage.removeItem('eb_tg_code')}catch(_){}
+    location.reload()
+  })
+}
+
+function generateAiContent(operation,payload,headers){return EasyBoostApi.generateContent(operation,payload,headers)}
+
+/* профиль: в серверном режиме ключ не нужен на клиенте */
+registerProfileHook(function(){var ai=document.getElementById('pf_ai');if(ai){ai.textContent='Подключено к серверу';ai.dataset.state='active'}})
+
+/* До завершения единого first-launch gate учебная оболочка скрыта. */
+hideLearningShell();
+/*
+ * После подтверждённого входа ученик уходит на «Главную». Готовим её заранее: первая отрисовка
+ * стоит около двухсот миллисекунд. Подготовка не показывает экран и не даёт доступ к навигации.
+ */
+prepareScreen('scr1');
+
+
+/* legacy block 2 */
+async function pwCheck(){
+  let pendingRetry=document.getElementById('access_gate_retry');
+  if(pendingRetry?.disabled)return false;
+  applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null});
+  pendingRetry=document.getElementById('access_gate_retry');
+  if(pendingRetry){pendingRetry.disabled=true;pendingRetry.setAttribute('aria-busy','true')}
+  try{return await runAuthTransition(async function(){
+    const access=await runWithAbortDeadline(
+      function(signal){return checkLearningAccess(null,{deferPresentation:true,signal})},
+      {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
+    ).catch(function(){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true}});
+    if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
+    applyLearningAccess(access);return false;
+  })}finally{
+    const currentRetry=document.getElementById('access_gate_retry');
+    if(currentRetry){currentRetry.disabled=false;currentRetry.removeAttribute('aria-busy')}
+  }
+}
+async function recheckLearningAccess(){return pwCheck()}
+window.checkSub=pwCheck;
+
+/* legacy block 4 */
+/* ===== SESSION v2: постоянный вход, восстановление сессии, подписка ===== */
+(function(){
+  async function me(options={}){return runAuthTransition(function(){return auth.currentSession(options)})}
+  window.ebMe=me;
+  /* Один coordinator держит private gate, а minimum splash/onboarding и /me идут параллельно.
+     Auth transition stays owned through the eventual shell launch: otherwise a delayed initial
+     progress read can reopen Today after a newer offline access check has already locked it. */
+  (async function(){
+    const opening=firstLaunch.start();
+    if(typeof SRV==='undefined'||!SRV){
+      await opening;applyLearningAccess(classifyLearningAccess(null,new Error('server mode required')));return
+    }
+    return runAuthTransition(async function(){
+      const accessCheck=runWithAbortDeadline(
+        function(signal){return checkLearningAccess(null,{deferPresentation:true,signal})},
+        {timeoutMs:FIRST_LAUNCH_SESSION_TIMEOUT_MS},
+      ).catch(function(){return{state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null,timedOut:true}});
+      await opening;
+      const access=await accessCheck;
+      if(access.state===LEARNING_ACCESS_STATES.ACTIVE)return startLearningWithDeadline(access.session);
+      if(access.state===LEARNING_ACCESS_STATES.NETWORK_UNKNOWN&&startOfflineEgeMockContinuation())return;
+      applyLearningAccess(access);
+    });
+  })();
+  /* статус подписки в профиле */
+  registerProfileHook(function(){
+    if(typeof SRV==='undefined'||!SRV)return;
+    var el=document.getElementById('pf_sub');if(!el)return;
+    var profileOwner=currentUser;var profileGeneration=window.EasyBoostSync?.ownerBoundGeneration?.(profileOwner);
+    if(!profileOwner||!Number.isSafeInteger(profileGeneration))return;
+    var profileAuthorityCurrent=function(){return currentUser===profileOwner
+      &&window.EasyBoostSync?.ownerBoundGeneration?.(profileOwner)===profileGeneration};
+    var profileAuthority={owner:profileOwner,ownerGeneration:profileGeneration};var ownerHeaders={'X-EasyBoost-Expected-Owner':profileOwner};var paymentRequest=null;
+    var renderProfileUnknown=function(copy){if(!profileAuthorityCurrent())return false;el.textContent='Статус доступа временно недоступен';el.dataset.state='pending';setTxt('pf_plan_name','Не удалось проверить доступ');setTxt('pf_plan_summary',copy);setTxt('pf_voice_title','Голосовой разбор Аси');var unknownDetail=document.getElementById('pf_voice_detail');var unknownAction=document.getElementById('pf_voice_action');if(unknownDetail){unknownDetail.textContent='Статус временно недоступен. Повторите проверку позже.';unknownDetail.dataset.state='pending'}if(unknownAction){unknownAction.hidden=true;unknownAction.disabled=false;unknownAction.onclick=null}return true};
+    var renderProfileStatuses=function(profile,options={}){if(!profileAuthorityCurrent())return false;var subscriptionStatus=profileModule.subscriptionStatus(profile,Date.now());el.textContent=subscriptionStatus.text;el.dataset.state=subscriptionStatus.state==='active'?'active':subscriptionStatus.state==='expired'?'danger':'inactive';var plan=presentProfilePlan(profile);setTxt('pf_plan_name',plan.label);setTxt('pf_plan_summary',plan.summary);
+      var voiceTutorStatus=profileModule.voiceTutorStatus(profile,paymentRequest);var title=document.getElementById('pf_voice_title');var detail=document.getElementById('pf_voice_detail');var action=document.getElementById('pf_voice_action');
+      if(options.paymentUnknown){if(title)title.textContent='Голосовой разбор Аси';if(detail){detail.textContent='Статус заявки временно недоступен. Повторите проверку позже.';detail.dataset.state='pending'}if(action){action.hidden=true;action.disabled=false;action.onclick=null}return true}
+      if(title)title.textContent=voiceTutorStatus.title;if(detail){detail.textContent=voiceTutorStatus.text;detail.dataset.state=voiceTutorStatus.state==='premium'?'active':voiceTutorStatus.state==='pending'?'pending':'inactive'}
+      if(action){action.textContent=voiceTutorStatus.actionLabel;action.hidden=!voiceTutorStatus.actionLabel;action.disabled=false;action.onclick=voiceTutorStatus.actionLabel?async function(){action.disabled=true;try{var result=await EasyBoostApi.post('/api/v1/payments/requests',{product:'premium_voice'},ownerHeaders);if(!profileAuthorityCurrent())return;if(apiResponseOwner(result)!==profileOwner){await invalidateLearningAuthority(profileAuthority);return}paymentRequest=result.request;renderProfileStatuses(profile)}catch(error){if(!profileAuthorityCurrent())return;if(apiIsAuthorityFailure(error)){await invalidateLearningAuthority(profileAuthority);return}action.disabled=false;detail.textContent=EasyBoostApi.messageFor(error);detail.dataset.state='danger'}}:null}return true};
+    if(window.__sub)renderProfileStatuses(window.__sub);
+    return Promise.all([me({headers:ownerHeaders,cache:'no-store'}),EasyBoostApi.get('/api/v1/payments/requests?product=premium_voice',{headers:ownerHeaders}).catch(function(error){return{request:null,error:error}})]).then(async function(values){if(!profileAuthorityCurrent())return;var profile=values[0],requestResult=values[1];if(!profileModule.sessionMatchesOwner(profile,profileOwner)||apiResponseOwner(profile)!==profileOwner||requestResult.error&&apiIsAuthorityFailure(requestResult.error)||!requestResult.error&&apiResponseOwner(requestResult)!==profileOwner){await invalidateLearningAuthority(profileAuthority);return}window.__sub=profile;if(profile.active!==true){paymentRequest=null;renderProfileStatuses(profile);applyLearningAccess(classifyLearningAccess(profile));return}if(requestResult.error){paymentRequest=null;renderProfileStatuses(profile,{paymentUnknown:true});return}paymentRequest=requestResult.request;renderProfileStatuses(profile)}).catch(async function(error){if(!profileAuthorityCurrent())return;if(apiIsAuthorityFailure(error)){await invalidateLearningAuthority(profileAuthority);return}renderProfileUnknown('Не удалось подтвердить текущий доступ. Проверьте сеть и повторите попытку.');applyLearningAccess({state:LEARNING_ACCESS_STATES.NETWORK_UNKNOWN,session:null})});
+  });
+})();
+
+/* legacy block 5 */
+const EGE_WORDS=[
+{w:'relationship',t:1,p:'n',tr:'отношения',ex:'They have a close relationship.',voice:{id:'vocabulary.relationship.meaning',revision:1}},
+{w:'sibling',t:1,p:'n',tr:'брат или сестра',ex:'I have one sibling, a younger brother.'},
+{w:'upbringing',t:1,p:'n',tr:'воспитание',ex:'She had a strict upbringing.'},
+{w:'to bring up',t:1,p:'ph',tr:'воспитывать',ex:'It is hard to bring up children alone.'},
+{w:'to get on with',t:1,p:'ph',tr:'ладить с кем-то',ex:'I get on with my parents well.'},
+{w:'to rely on',t:1,p:'ph',tr:'полагаться на',ex:'You can always rely on true friends.'},
+{w:'supportive',t:1,p:'adj',tr:'поддерживающий',ex:'My family is very supportive.'},
+{w:'to argue',t:1,p:'v',tr:'спорить, ссориться',ex:'They argue about small things.'},
+{w:'argument',t:1,p:'n',tr:'ссора, спор',ex:'We had an argument yesterday.'},
+{w:'household',t:1,p:'n',tr:'домохозяйство, семья',ex:'Every household has its rules.'},
+{w:'chores',t:1,p:'n',tr:'домашние обязанности',ex:'I do chores every weekend.'},
+{w:'to take care of',t:1,p:'id',tr:'заботиться о',ex:'She has to take care of her granny.'},
+{w:'generation',t:1,p:'n',tr:'поколение',ex:'Each generation has its own values.'},
+{w:'elderly',t:1,p:'adj',tr:'пожилой',ex:'We should help elderly people.'},
+{w:'to respect',t:1,p:'v',tr:'уважать',ex:'Children should respect their parents.'},
+{w:'bond',t:1,p:'n',tr:'связь, узы',ex:'There is a strong bond between twins.'},
+{w:'to trust',t:1,p:'v',tr:'доверять',ex:'I trust my best friend completely.'},
+{w:'honest',t:1,p:'adj',tr:'честный',ex:'Be honest with your family.'},
+{w:'to forgive',t:1,p:'v',tr:'прощать',ex:'It is important to forgive each other.'},
+{w:'to quarrel',t:1,p:'v',tr:'ссориться',ex:'Brothers sometimes quarrel over toys.'},
+{w:'to resemble',t:1,p:'v',tr:'быть похожим на',ex:'I resemble my mother a lot.'},
+{w:'to look after',t:1,p:'ph',tr:'присматривать за',ex:'Grandparents look after the kids.'},
+{w:'to grow up',t:1,p:'ph',tr:'вырастать',ex:'Children grow up so fast.'},
+{w:'marriage',t:1,p:'n',tr:'брак',ex:'Their marriage lasted fifty years.'},
+{w:'mutual',t:1,p:'adj',tr:'взаимный',ex:'Friendship is based on mutual trust.'},
+{w:'to appreciate',t:1,p:'v',tr:'ценить',ex:'I appreciate your help a lot.'},
+{w:'to support',t:1,p:'v',tr:'поддерживать',ex:'Parents support us in hard times.'},
+{w:'ancestor',t:1,p:'n',tr:'предок',ex:'My ancestors lived in a village.'},
+{w:'to inherit',t:1,p:'v',tr:'наследовать',ex:'She will inherit the house.'},
+{w:'strict',t:1,p:'adj',tr:'строгий',ex:'His father is quite strict.'},
+{w:'to attend',t:2,p:'v',tr:'посещать',ex:'All children attend school here.'},
+{w:'compulsory',t:2,p:'adj',tr:'обязательный',ex:'Education is compulsory in Russia.'},
+{w:'curriculum',t:2,p:'n',tr:'учебная программа',ex:'The curriculum includes two languages.'},
+{w:'timetable',t:2,p:'n',tr:'расписание',ex:'Check the timetable for Monday.'},
+{w:'to fail',t:2,p:'v',tr:'провалить (экзамен)',ex:'I do not want to fail the exam.'},
+{w:'grade',t:2,p:'n',tr:'оценка, класс',ex:'She always gets good grades.'},
+{w:'knowledge',t:2,p:'n',tr:'знания',ex:'Reading widens your knowledge.'},
+{w:'to acquire',t:2,p:'v',tr:'приобретать (знания)',ex:'Students acquire new skills.'},
+{w:'to memorise',t:2,p:'v',tr:'заучивать',ex:'It is hard to memorise dates.'},
+{w:'to revise',t:2,p:'v',tr:'повторять (материал)',ex:'I revise grammar before tests.'},
+{w:'revision',t:2,p:'n',tr:'повторение',ex:'Revision helps before exams.'},
+{w:'achievement',t:2,p:'n',tr:'достижение',ex:'Winning was a great achievement.'},
+{w:'to achieve',t:2,p:'v',tr:'достигать',ex:'You can achieve your goals.'},
+{w:'opportunity',t:2,p:'n',tr:'возможность',ex:'University gives you every opportunity to grow.'},
+{w:'skill',t:2,p:'n',tr:'навык',ex:'Writing is a useful skill.'},
+{w:'to develop',t:2,p:'v',tr:'развивать',ex:'Sports develop team spirit.'},
+{w:'to graduate',t:2,p:'v',tr:'оканчивать (вуз)',ex:'She will graduate next year.'},
+{w:'degree',t:2,p:'n',tr:'учёная степень, диплом',ex:'He has a degree in law.'},
+{w:'scholarship',t:2,p:'n',tr:'стипендия',ex:'She won a scholarship to Oxford.'},
+{w:'term',t:2,p:'n',tr:'четверть, семестр',ex:'The autumn term starts in September.'},
+{w:'assignment',t:2,p:'n',tr:'задание',ex:'Hand in your assignment on Friday.'},
+{w:'to concentrate',t:2,p:'v',tr:'сосредотачиваться',ex:'I cannot concentrate in noise.'},
+{w:'to succeed',t:2,p:'v',tr:'преуспевать',ex:'Work hard to succeed in exams.'},
+{w:'successful',t:2,p:'adj',tr:'успешный',ex:'She is a successful student.'},
+{w:'effort',t:2,p:'n',tr:'усилие',ex:'Learning takes time and effort.'},
+{w:'to make progress',t:2,p:'id',tr:'делать успехи',ex:'You make progress every week.'},
+{w:'pupil',t:2,p:'n',tr:'ученик',ex:'Every pupil has a locker.'},
+{w:'to cheat',t:2,p:'v',tr:'списывать, жульничать',ex:'Never cheat in a test.'},
+{w:'boarding school',t:2,p:'n',tr:'школа-интернат',ex:'He studies at a boarding school.'},
+{w:'to encourage',t:2,p:'v',tr:'поощрять, вдохновлять',ex:'Teachers encourage us to read.'},
+{w:'career',t:3,p:'n',tr:'карьера',ex:'She built a career in medicine.'},
+{w:'to apply for',t:3,p:'ph',tr:'подавать заявку на',ex:'You can apply for this job online.'},
+{w:'application',t:3,p:'n',tr:'заявление, заявка',ex:'Send your application by May.'},
+{w:'employer',t:3,p:'n',tr:'работодатель',ex:'Her employer offered a pay rise.'},
+{w:'employee',t:3,p:'n',tr:'сотрудник',ex:'Every employee gets a bonus.'},
+{w:'to employ',t:3,p:'v',tr:'нанимать',ex:'The firm employs 200 people.'},
+{w:'unemployed',t:3,p:'adj',tr:'безработный',ex:'He was unemployed for a year.'},
+{w:'salary',t:3,p:'n',tr:'зарплата',ex:'The salary is paid monthly.'},
+{w:'to earn',t:3,p:'v',tr:'зарабатывать',ex:'Doctors earn a good salary.'},
+{w:'to hire',t:3,p:'v',tr:'нанимать',ex:'They hire students in summer.'},
+{w:'to quit',t:3,p:'v',tr:'увольняться',ex:'He decided to quit his job.'},
+{w:'to retire',t:3,p:'v',tr:'выходить на пенсию',ex:'My granddad will retire soon.'},
+{w:'responsibility',t:3,p:'n',tr:'ответственность',ex:'The job involves great responsibility.'},
+{w:'responsible',t:3,p:'adj',tr:'ответственный',ex:'She is responsible for sales.'},
+{w:'to be in charge of',t:3,p:'id',tr:'руководить, отвечать за',ex:'You will be in charge of the project.'},
+{w:'experience',t:3,p:'n',tr:'опыт',ex:'The job requires experience.'},
+{w:'qualification',t:3,p:'n',tr:'квалификация',ex:'What qualifications do you need?'},
+{w:'interview',t:3,p:'n',tr:'собеседование',ex:'I have a job interview tomorrow.'},
+{w:'part-time',t:3,p:'adj',tr:'на неполный день',ex:'She has a part-time job.'},
+{w:'colleague',t:3,p:'n',tr:'коллега',ex:'My colleagues are friendly.'},
+{w:'staff',t:3,p:'n',tr:'персонал',ex:'The staff work very hard.'},
+{w:'to manage',t:3,p:'v',tr:'управлять; справляться',ex:'She manages a small team.'},
+{w:'ambitious',t:3,p:'adj',tr:'амбициозный',ex:'He is young and ambitious.'},
+{w:'demanding',t:3,p:'adj',tr:'требовательный, тяжёлый',ex:'Nursing is a demanding job.'},
+{w:'rewarding',t:3,p:'adj',tr:'приносящий удовлетворение',ex:'Teaching is a rewarding career.'},
+{w:'deadline',t:3,p:'n',tr:'крайний срок',ex:'The deadline is on Friday.'},
+{w:'to run a business',t:3,p:'id',tr:'вести бизнес',ex:'Her parents run a business.'},
+{w:'wage',t:3,p:'n',tr:'заработная плата (почасовая)',ex:'The minimum wage went up.'},
+{w:'promotion',t:3,p:'n',tr:'повышение',ex:'He got a promotion last month.'},
+{w:'to take on',t:3,p:'ph',tr:'брать (работу, сотрудника)',ex:'We will take on extra staff.'},
+{w:'journey',t:4,p:'n',tr:'поездка, путь',ex:'The journey takes three hours.'},
+{w:'voyage',t:4,p:'n',tr:'морское путешествие',ex:'The voyage across the sea was long.'},
+{w:'to book',t:4,p:'v',tr:'бронировать',ex:'Book your tickets early.'},
+{w:'accommodation',t:4,p:'n',tr:'жильё, размещение',ex:'The price includes accommodation.'},
+{w:'luggage',t:4,p:'n',tr:'багаж',ex:'My luggage was too heavy.'},
+{w:'to pack',t:4,p:'v',tr:'собирать вещи',ex:'I pack my suitcase the night before.'},
+{w:'destination',t:4,p:'n',tr:'пункт назначения',ex:'Paris is a popular destination.'},
+{w:'sightseeing',t:4,p:'n',tr:'осмотр достопримечательностей',ex:'We went sightseeing in Rome.'},
+{w:'souvenir',t:4,p:'n',tr:'сувенир',ex:'I bought a souvenir for my mum.'},
+{w:'abroad',t:4,p:'adv',tr:'за границей',ex:'She often travels abroad.'},
+{w:'flight',t:4,p:'n',tr:'рейс, полёт',ex:'Our flight was delayed.'},
+{w:'to delay',t:4,p:'v',tr:'задерживать',ex:'Fog can delay planes.'},
+{w:'to cancel',t:4,p:'v',tr:'отменять',ex:'They had to cancel the trip.'},
+{w:'to miss',t:4,p:'v',tr:'опоздать на; скучать',ex:'Hurry up or we will miss the train.'},
+{w:'route',t:4,p:'n',tr:'маршрут',ex:'We planned the route carefully.'},
+{w:'to explore',t:4,p:'v',tr:'исследовать',ex:'We love to explore old towns.'},
+{w:'adventure',t:4,p:'n',tr:'приключение',ex:'The hike was a real adventure.'},
+{w:'to set off',t:4,p:'ph',tr:'отправляться в путь',ex:'We set off early in the morning.'},
+{w:'to check in',t:4,p:'ph',tr:'регистрироваться',ex:'Please check in two hours before.'},
+{w:'to get around',t:4,p:'ph',tr:'передвигаться (по городу)',ex:'It is easy to get around by bus.'},
+{w:'foreign',t:4,p:'adj',tr:'иностранный',ex:'She speaks two foreign languages.'},
+{w:'currency',t:4,p:'n',tr:'валюта',ex:'What currency do they use?'},
+{w:'to exchange',t:4,p:'v',tr:'обменивать',ex:'You can exchange money at the bank.'},
+{w:'customs',t:4,p:'n',tr:'таможня',ex:'We went through customs quickly.'},
+{w:'insurance',t:4,p:'n',tr:'страховка',ex:'Travel insurance is a must.'},
+{w:'memorable',t:4,p:'adj',tr:'запоминающийся',ex:'It was a memorable holiday.'},
+{w:'guidebook',t:4,p:'n',tr:'путеводитель',ex:'The guidebook lists cheap cafes.'},
+{w:'crew',t:4,p:'n',tr:'экипаж',ex:'The cabin crew were polite.'},
+{w:'to board',t:4,p:'v',tr:'садиться (на транспорт)',ex:'Passengers board the plane now.'},
+{w:'scenery',t:4,p:'n',tr:'пейзаж',ex:'The mountain scenery is stunning.'},
+{w:'environment',t:5,p:'n',tr:'окружающая среда',ex:'We must protect the environment.'},
+{w:'environmental',t:5,p:'adj',tr:'экологический',ex:'Environmental problems are serious.'},
+{w:'pollution',t:5,p:'n',tr:'загрязнение',ex:'Air pollution harms our health.'},
+{w:'to pollute',t:5,p:'v',tr:'загрязнять',ex:'Factories pollute the river.'},
+{w:'litter',t:5,p:'n',tr:'мусор (на улице)',ex:'Do not drop litter in the park.'},
+{w:'rubbish',t:5,p:'n',tr:'мусор',ex:'Take the rubbish out, please.'},
+{w:'waste',t:5,p:'n',tr:'отходы',ex:'Plastic waste is everywhere.'},
+{w:'to recycle',t:5,p:'v',tr:'перерабатывать',ex:'We recycle paper and glass.'},
+{w:'to reduce',t:5,p:'v',tr:'сокращать',ex:'We should reduce energy use.'},
+{w:'to reuse',t:5,p:'v',tr:'использовать повторно',ex:'You can reuse glass jars.'},
+{w:'climate change',t:5,p:'n',tr:'изменение климата',ex:'Climate change affects everyone.'},
+{w:'global warming',t:5,p:'n',tr:'глобальное потепление',ex:'Global warming melts the ice.'},
+{w:'to protect',t:5,p:'v',tr:'защищать',ex:'Laws protect rare animals.'},
+{w:'endangered',t:5,p:'adj',tr:'находящийся под угрозой',ex:'Tigers are an endangered species.'},
+{w:'species',t:5,p:'n',tr:'биологический вид',ex:'Many species live in the ocean.'},
+{w:'extinct',t:5,p:'adj',tr:'вымерший',ex:'Dinosaurs are extinct.'},
+{w:'habitat',t:5,p:'n',tr:'среда обитания',ex:'Forests are the habitat of bears.'},
+{w:'wildlife',t:5,p:'n',tr:'дикая природа',ex:'The park is rich in wildlife.'},
+{w:'to threaten',t:5,p:'v',tr:'угрожать',ex:'Fires threaten the forest.'},
+{w:'threat',t:5,p:'n',tr:'угроза',ex:'Plastic is a threat to sea life.'},
+{w:'drought',t:5,p:'n',tr:'засуха',ex:'The drought lasted all summer.'},
+{w:'flood',t:5,p:'n',tr:'наводнение',ex:'The flood destroyed many homes.'},
+{w:'disaster',t:5,p:'n',tr:'катастрофа',ex:'The earthquake was a disaster.'},
+{w:'renewable',t:5,p:'adj',tr:'возобновляемый',ex:'Wind is a renewable source.'},
+{w:'to conserve',t:5,p:'v',tr:'сохранять, беречь',ex:'Turn off lights to conserve energy.'},
+{w:'emission',t:5,p:'n',tr:'выброс',ex:'Car emissions cause smog.'},
+{w:'to run out of',t:5,p:'ph',tr:'исчерпать',ex:'We may run out of clean water.'},
+{w:'to throw away',t:5,p:'ph',tr:'выбрасывать',ex:'Do not throw away old clothes.'},
+{w:'harmful',t:5,p:'adj',tr:'вредный',ex:'Smog is harmful to lungs.'},
+{w:'to plant',t:5,p:'v',tr:'сажать',ex:'Volunteers plant trees every spring.'},
+{w:'device',t:6,p:'n',tr:'устройство',ex:'This device measures your pulse.'},
+{w:'to invent',t:6,p:'v',tr:'изобретать',ex:'Who invented the telephone?'},
+{w:'invention',t:6,p:'n',tr:'изобретение',ex:'The wheel is a great invention.'},
+{w:'research',t:6,p:'n',tr:'исследование',ex:'Research shows teens sleep less.'},
+{w:'scientist',t:6,p:'n',tr:'учёный',ex:'Scientists study the climate.'},
+{w:'discovery',t:6,p:'n',tr:'открытие',ex:'It was an important discovery.'},
+{w:'to discover',t:6,p:'v',tr:'открывать, обнаруживать',ex:'They hope to discover new planets.'},
+{w:'artificial',t:6,p:'adj',tr:'искусственный',ex:'Artificial intelligence is everywhere.'},
+{w:'gadget',t:6,p:'n',tr:'гаджет',ex:'Teens love new gadgets.'},
+{w:'to download',t:6,p:'v',tr:'скачивать',ex:'You can download the app free.'},
+{w:'to upload',t:6,p:'v',tr:'загружать (в сеть)',ex:'She uploads videos every week.'},
+{w:'to browse',t:6,p:'v',tr:'просматривать (сайты)',ex:'I browse the news at breakfast.'},
+{w:'network',t:6,p:'n',tr:'сеть',ex:'The school network is fast.'},
+{w:'wireless',t:6,p:'adj',tr:'беспроводной',ex:'The hotel has wireless internet.'},
+{w:'to connect',t:6,p:'v',tr:'подключать(ся)',ex:'Connect your phone to wifi.'},
+{w:'data',t:6,p:'n',tr:'данные',ex:'The app collects user data.'},
+{w:'to store',t:6,p:'v',tr:'хранить',ex:'Clouds store our photos.'},
+{w:'digital',t:6,p:'adj',tr:'цифровой',ex:'We live in a digital world.'},
+{w:'to update',t:6,p:'v',tr:'обновлять',ex:'Update the app to fix bugs.'},
+{w:'software',t:6,p:'n',tr:'программное обеспечение',ex:'The software needs a licence.'},
+{w:'virtual',t:6,p:'adj',tr:'виртуальный',ex:'We took a virtual museum tour.'},
+{w:'to log in',t:6,p:'ph',tr:'входить в систему',ex:'Log in with your password.'},
+{w:'to switch off',t:6,p:'ph',tr:'выключать',ex:'Switch off your phone in class.'},
+{w:'to charge',t:6,p:'v',tr:'заряжать',ex:'I charge my phone at night.'},
+{w:'battery',t:6,p:'n',tr:'батарея',ex:'My battery dies by evening.'},
+{w:'breakthrough',t:6,p:'n',tr:'прорыв',ex:'It was a breakthrough in medicine.'},
+{w:'experiment',t:6,p:'n',tr:'эксперимент',ex:'We did an experiment in class.'},
+{w:'to carry out',t:6,p:'ph',tr:'проводить (исследование)',ex:'They carry out tests daily.'},
+{w:'evidence',t:6,p:'n',tr:'доказательство',ex:'There is strong evidence for it.'},
+{w:'efficient',t:6,p:'adj',tr:'эффективный',ex:'Solar panels became more efficient.'},
+{w:'healthy',t:7,p:'adj',tr:'здоровый',ex:'A healthy diet includes fruit.'},
+{w:'illness',t:7,p:'n',tr:'болезнь',ex:'Stress can cause illness.'},
+{w:'disease',t:7,p:'n',tr:'заболевание',ex:'Vaccines prevent many diseases.'},
+{w:'to suffer from',t:7,p:'ph',tr:'страдать от',ex:'Many teens suffer from stress.'},
+{w:'symptom',t:7,p:'n',tr:'симптом',ex:'A cough is a common symptom.'},
+{w:'to recover',t:7,p:'v',tr:'выздоравливать',ex:'He needs a week to recover.'},
+{w:'injury',t:7,p:'n',tr:'травма',ex:'The player has a knee injury.'},
+{w:'to injure',t:7,p:'v',tr:'травмировать',ex:'You may injure your back at the gym.'},
+{w:'to treat',t:7,p:'v',tr:'лечить',ex:'Doctors treat patients with care.'},
+{w:'treatment',t:7,p:'n',tr:'лечение',ex:'The treatment lasts a month.'},
+{w:'medicine',t:7,p:'n',tr:'лекарство; медицина',ex:'Take the medicine twice a day.'},
+{w:'to prescribe',t:7,p:'v',tr:'выписывать (лекарство)',ex:'The doctor prescribed some pills.'},
+{w:'nutrition',t:7,p:'n',tr:'питание',ex:'Good nutrition matters for teens.'},
+{w:'to keep fit',t:7,p:'id',tr:'поддерживать форму',ex:'I run to keep fit.'},
+{w:'to work out',t:7,p:'ph',tr:'тренироваться',ex:'I work out three times a week.'},
+{w:'to train',t:7,p:'v',tr:'тренировать(ся)',ex:'We train hard before matches.'},
+{w:'coach',t:7,p:'n',tr:'тренер',ex:'Our coach is very strict.'},
+{w:'competition',t:7,p:'n',tr:'соревнование',ex:'She won the swimming competition.'},
+{w:'to compete',t:7,p:'v',tr:'соревноваться',ex:'Ten teams compete for the cup.'},
+{w:'opponent',t:7,p:'n',tr:'соперник',ex:'Respect your opponent.'},
+{w:'to defeat',t:7,p:'v',tr:'побеждать (кого-то)',ex:'They defeated the champions.'},
+{w:'victory',t:7,p:'n',tr:'победа',ex:'The victory made us proud.'},
+{w:'championship',t:7,p:'n',tr:'чемпионат',ex:'The championship starts in May.'},
+{w:'to give up',t:7,p:'ph',tr:'бросать (привычку); сдаваться',ex:'He wants to give up sweets.'},
+{w:'habit',t:7,p:'n',tr:'привычка',ex:'Reading at night is my habit.'},
+{w:'addiction',t:7,p:'n',tr:'зависимость',ex:'Phone addiction is a real problem.'},
+{w:'to prevent',t:7,p:'v',tr:'предотвращать',ex:'Exercise prevents many illnesses.'},
+{w:'exhausted',t:7,p:'adj',tr:'измотанный',ex:'I was exhausted after the race.'},
+{w:'to warm up',t:7,p:'ph',tr:'разминаться',ex:'Always warm up before running.'},
+{w:'referee',t:7,p:'n',tr:'судья (в спорте)',ex:'The referee stopped the game.'},
+{w:'entertainment',t:8,p:'n',tr:'развлечение',ex:'The city offers lots of entertainment.'},
+{w:'performance',t:8,p:'n',tr:'выступление, спектакль',ex:'The performance lasted two hours.'},
+{w:'to perform',t:8,p:'v',tr:'выступать',ex:'The band will perform tonight.'},
+{w:'audience',t:8,p:'n',tr:'зрители, публика',ex:'The audience clapped loudly.'},
+{w:'exhibition',t:8,p:'n',tr:'выставка',ex:'We visited a photo exhibition.'},
+{w:'masterpiece',t:8,p:'n',tr:'шедевр',ex:'This novel is a masterpiece.'},
+{w:'to admire',t:8,p:'v',tr:'восхищаться',ex:'I admire her talent.'},
+{w:'novel',t:8,p:'n',tr:'роман',ex:'I am reading a detective novel.'},
+{w:'author',t:8,p:'n',tr:'автор',ex:'The author signed my book.'},
+{w:'plot',t:8,p:'n',tr:'сюжет',ex:'The plot is full of surprises.'},
+{w:'character',t:8,p:'n',tr:'персонаж; характер',ex:'The main character is a spy.'},
+{w:'to publish',t:8,p:'v',tr:'издавать',ex:'The book was published in May.'},
+{w:'review',t:8,p:'n',tr:'рецензия, отзыв',ex:'The film got great reviews.'},
+{w:'fascinating',t:8,p:'adj',tr:'увлекательный',ex:'The story is fascinating.'},
+{w:'leisure',t:8,p:'n',tr:'досуг',ex:'How do you spend your leisure time?'},
+{w:'to take up',t:8,p:'ph',tr:'увлечься, начать заниматься',ex:'I want to take up painting.'},
+{w:'to be keen on',t:8,p:'id',tr:'увлекаться чем-то',ex:'It helps to be keen on your hobby.'},
+{w:'impressive',t:8,p:'adj',tr:'впечатляющий',ex:'The set design was impressive.'},
+{w:'to impress',t:8,p:'v',tr:'впечатлять',ex:'The actors impress everyone.'},
+{w:'orchestra',t:8,p:'n',tr:'оркестр',ex:'The orchestra played Mozart.'},
+{w:'rehearsal',t:8,p:'n',tr:'репетиция',ex:'We have a rehearsal at five.'},
+{w:'stage',t:8,p:'n',tr:'сцена',ex:'She stepped onto the stage.'},
+{w:'applause',t:8,p:'n',tr:'аплодисменты',ex:'The song ended with applause.'},
+{w:'festival',t:8,p:'n',tr:'фестиваль',ex:'The film festival is in June.'},
+{w:'tradition',t:8,p:'n',tr:'традиция',ex:'It is a family tradition.'},
+{w:'heritage',t:8,p:'n',tr:'наследие',ex:'We must keep our cultural heritage.'},
+{w:'ancient',t:8,p:'adj',tr:'древний',ex:'We saw ancient Greek vases.'},
+{w:'to entertain',t:8,p:'v',tr:'развлекать',ex:'Clowns entertain the children.'},
+{w:'subtitles',t:8,p:'n',tr:'субтитры',ex:'I watch films with subtitles.'},
+{w:'to broadcast',t:9,p:'v',tr:'транслировать',ex:'They broadcast the match live.'},
+{w:'society',t:9,p:'n',tr:'общество',ex:'Society is changing fast.'},
+{w:'community',t:9,p:'n',tr:'сообщество',ex:'Our community helps the elderly.'},
+{w:'charity',t:9,p:'n',tr:'благотворительность',ex:'The concert raised money for charity.'},
+{w:'to donate',t:9,p:'v',tr:'жертвовать',ex:'People donate clothes and food.'},
+{w:'to volunteer',t:9,p:'v',tr:'работать волонтёром',ex:'I volunteer at an animal shelter.'},
+{w:'poverty',t:9,p:'n',tr:'бедность',ex:'Poverty is a global issue.'},
+{w:'wealthy',t:9,p:'adj',tr:'богатый',ex:'He comes from a wealthy family.'},
+{w:'equality',t:9,p:'n',tr:'равенство',ex:'We stand for equality.'},
+{w:'to influence',t:9,p:'v',tr:'влиять',ex:'Ads influence our choices.'},
+{w:'advertisement',t:9,p:'n',tr:'реклама',ex:'The advertisement was funny.'},
+{w:'to advertise',t:9,p:'v',tr:'рекламировать',ex:'They advertise on social media.'},
+{w:'headline',t:9,p:'n',tr:'заголовок',ex:'The headline caught my eye.'},
+{w:'article',t:9,p:'n',tr:'статья',ex:'I read an article about space.'},
+{w:'journalist',t:9,p:'n',tr:'журналист',ex:'The journalist asked hard questions.'},
+{w:'source',t:9,p:'n',tr:'источник',ex:'Check the source of the news.'},
+{w:'reliable',t:9,p:'adj',tr:'надёжный',ex:'Is this website reliable?'},
+{w:'to convince',t:9,p:'v',tr:'убеждать',ex:'He convinced me to join.'},
+{w:'to persuade',t:9,p:'v',tr:'уговаривать',ex:'She persuaded them to help.'},
+{w:'opinion',t:9,p:'n',tr:'мнение',ex:'In my opinion, it is fair.'},
+{w:'to express',t:9,p:'v',tr:'выражать',ex:'Express your ideas clearly.'},
+{w:'freedom',t:9,p:'n',tr:'свобода',ex:'Freedom of speech matters.'},
+{w:'government',t:9,p:'n',tr:'правительство',ex:'The government passed a new law.'},
+{w:'law',t:9,p:'n',tr:'закон',ex:'The law protects consumers.'},
+{w:'to obey',t:9,p:'v',tr:'подчиняться',ex:'Drivers must obey the rules.'},
+{w:'citizen',t:9,p:'n',tr:'гражданин',ex:'Every citizen has rights.'},
+{w:'to vote',t:9,p:'v',tr:'голосовать',ex:'You can vote at eighteen.'},
+{w:'campaign',t:9,p:'n',tr:'кампания',ex:'They started an anti-litter campaign.'},
+{w:'issue',t:9,p:'n',tr:'проблема, вопрос',ex:'Bullying is a serious issue.'},
+{w:'awareness',t:9,p:'n',tr:'осведомлённость',ex:'The ad raises awareness of ecology.'},
+{w:'neighbourhood',t:10,p:'n',tr:'район, окрестности',ex:'We live in a quiet neighbourhood.'},
+{w:'suburb',t:10,p:'n',tr:'пригород',ex:'They moved to a suburb of London.'},
+{w:'crowded',t:10,p:'adj',tr:'переполненный',ex:'The metro is crowded at eight.'},
+{w:'convenient',t:10,p:'adj',tr:'удобный',ex:'Online shopping is convenient.'},
+{w:'facilities',t:10,p:'n',tr:'инфраструктура, удобства',ex:'The area has good sports facilities.'},
+{w:'pedestrian',t:10,p:'n',tr:'пешеход',ex:'This street is for pedestrians only.'},
+{w:'traffic jam',t:10,p:'n',tr:'пробка',ex:'We got stuck in a traffic jam.'},
+{w:'to commute',t:10,p:'v',tr:'ездить на работу/учёбу',ex:'Dad commutes by train.'},
+{w:'resident',t:10,p:'n',tr:'житель',ex:'Residents want a new park.'},
+{w:'to rent',t:10,p:'v',tr:'снимать, арендовать',ex:'They rent a flat downtown.'},
+{w:'to afford',t:10,p:'v',tr:'позволить себе',ex:'I cannot afford a new phone.'},
+{w:'affordable',t:10,p:'adj',tr:'доступный по цене',ex:'The cafe has affordable prices.'},
+{w:'bargain',t:10,p:'n',tr:'выгодная покупка',ex:'This jacket was a real bargain.'},
+{w:'discount',t:10,p:'n',tr:'скидка',ex:'Students get a ten percent discount.'},
+{w:'to queue',t:10,p:'v',tr:'стоять в очереди',ex:'We had to queue for an hour.'},
+{w:'receipt',t:10,p:'n',tr:'чек',ex:'Keep the receipt for a refund.'},
+{w:'refund',t:10,p:'n',tr:'возврат денег',ex:'I asked for a full refund.'},
+{w:'customer',t:10,p:'n',tr:'покупатель, клиент',ex:'The customer is always right.'},
+{w:'to deliver',t:10,p:'v',tr:'доставлять',ex:'They deliver pizza in thirty minutes.'},
+{w:'brand',t:10,p:'n',tr:'бренд',ex:'Which brand do you prefer?'},
+{w:'to try on',t:10,p:'ph',tr:'примерять',ex:'Can I try on these jeans?'},
+{w:'to pay in cash',t:10,p:'id',tr:'платить наличными',ex:'You can pay in cash or by card.'},
+{w:'to save up',t:10,p:'ph',tr:'копить',ex:'I save up for a new bike.'},
+{w:'groceries',t:10,p:'n',tr:'продукты',ex:'Mum buys groceries on Saturdays.'},
+{w:'purchase',t:10,p:'n',tr:'покупка',ex:'It was an expensive purchase.'},
+{w:'to spend',t:10,p:'v',tr:'тратить',ex:'Teens spend money on games.'},
+{w:'shop assistant',t:10,p:'n',tr:'продавец-консультант',ex:'The shop assistant helped me.'},
+{w:'to fit',t:10,p:'v',tr:'подходить по размеру',ex:'These shoes fit perfectly.'},
+{w:'to suit',t:10,p:'v',tr:'идти, быть к лицу',ex:'This colour suits you.'},
+{w:'window shopping',t:10,p:'n',tr:'разглядывание витрин',ex:'We went window shopping in the mall.'}
+];
+decorateCoreVocabulary(EGE_WORDS);
+var W_SYNC=new Map(),W_SYNC_T=new Map();
+function wAuthority(){return TOKEN&&currentOwnerAuthorityCurrent()?Object.freeze({owner:currentUser,ownerGeneration:ADOPTED_OWNER_GENERATION}):null}
+function wAuthorityKey(authority){return authority.owner+'\u0000'+authority.ownerGeneration}
+function wAuthorityCurrent(authority){return Boolean(authority&&currentUser===authority.owner&&ADOPTED_OWNER_GENERATION===authority.ownerGeneration&&currentOwnerAuthorityCurrent(authority.owner))}
+async function wFlushServer(authority){
+  var key=wAuthorityKey(authority),pending=W_SYNC.get(key);W_SYNC_T.delete(key);
+  if(!pending||!pending.size||!wAuthorityCurrent(authority))return false;
+  var entries=Array.from(pending.entries()),result;
+  try{result=await apiPut('/api/v1/word-progress',{words:entries.map(function(entry){return entry[1]})},{'X-EasyBoost-Expected-Owner':authority.owner})}
+  catch(error){if(apiIsAuthorityFailure(error))await invalidateLearningAuthority(authority);return false}
+  if(!wAuthorityCurrent(authority))return false;
+  if(apiResponseOwner(result)!==authority.owner){await invalidateLearningAuthority(authority);return false}
+  entries.forEach(function(entry){if(pending.get(entry[0])===entry[1])pending.delete(entry[0])});if(!pending.size)W_SYNC.delete(key);return true
+}
+function wQueueServer(w){if(typeof SRV==='undefined'||!SRV)return;var authority=wAuthority(),r=wRec(w);if(!authority||!r)return;
+  var key=wAuthorityKey(authority),pending=W_SYNC.get(key);if(!pending){pending=new Map();W_SYNC.set(key,pending)}
+  pending.set(w,migrateVocabularyProgress({...r,word:w}));clearTimeout(W_SYNC_T.get(key));
+  W_SYNC_T.set(key,setTimeout(function(){void wFlushServer(authority)},900))}
+function wToday0(){var d=new Date();d.setHours(0,0,0,0);return d.getTime()}
+function wRec(w){S.srs=S.srs||{};return S.srs[w]}
+function wSet(w){S.srs=S.srs||{};return S.srs[w]||(S.srs[w]=localVocabularyProgress(w,{s:0,e:0,n:0,due:0}))}
+function wBase(w){return wordModule.baseForm(w)}
+function srsApply(w,ok){S.srs=S.srs||{};var current=wSet(w),legacy=EasyBoostLearning.reviewWord(current,ok);
+  S.srs[w]=localVocabularyProgress(w,mergeLegacyVocabularyProgress(current,{word:w,...legacy}));wQueueServer(w)}
+function srsOk(w){srsApply(w,true)}
+function srsFail(w){srsApply(w,false)}
+function srsRecordVocabularyOutcome(w,attempt){S.srs=S.srs||{};var current=wSet(w);
+  var next=applyVocabularyOutcome({...current,word:w},attempt);
+  S.srs[w]=localVocabularyProgress(w,next);wQueueServer(w);return S.srs[w]}
+function wStats(){return wordModule.calculateStats(EGE_WORDS,S.srs)}
+function wSync(){var st=wStats();S.learned=st.learned;S.prog=S.prog||{};S.prog.words=EasyBoostLearning.calculateProgress(st.learned,st.total);
+  setTxt('w_know_n','Знаю '+st.learned);setTxt('pf_known_n',String(st.learned));setTxt('w_sumline','Выучено '+st.learned+' из '+st.total+' слов');
+  var percentage=st.total?Math.round(st.learned/st.total*100):0,bar=document.getElementById('w_bar');
+  if(bar){bar.style.width=Math.max(2,percentage)+'%';var progress=bar.parentElement;
+    if(progress&&progress.getAttribute('role')==='progressbar')progress.setAttribute('aria-valuenow',String(percentage))}
+  setTxt('sub_words','учу · '+st.learned+' / '+st.total)}
+function wMigrate(){if(!S.srsMig){S.srsMig=1;S.srs=wordModule.migrateLegacy(EGE_WORDS,S.box,S.srs||{})}
+  S.srs=migrateLocalVocabularyProgress(S.srs||{});S.srsMasteryVersion=1;
+  S.personalWords=normalizePersonalVocabularyCards(S.personalWords||[]);
+  S.personalWordTombstones=Array.from(new Set((Array.isArray(S.personalWordTombstones)?S.personalWordTombstones:[])
+    .map(String).filter(function(id){return id.startsWith('personal:')}))).slice(-500);
+  store.saveLocal(currentUser,S,ADOPTED_OWNER_GENERATION)}
+function wSpeakFallback(txt){try{var u=new SpeechSynthesisUtterance(txt.replace(/^to /,''));u.lang='en-GB';u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
+function wDeco(){return '<svg style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;" viewBox="0 0 346 280" preserveAspectRatio="xMidYMid slice">'
+  +'<circle cx="330" cy="8" r="64" fill="rgba(255,200,97,.16)"/>'
+  +'<circle cx="10" cy="270" r="54" fill="rgba(242,104,63,.07)"/>'
+  +'<circle cx="300" cy="250" r="30" fill="rgba(255,165,112,.10)"/>'
+  +'<g fill="rgba(242,104,63,.5)">'
+  +'<path class="eb5sp" style="animation-delay:.3s" d="M28,52 Q28,56 32,56 Q28,56 28,60 Q28,56 24,56 Q28,56 28,52 Z"/>'
+  +'<path class="eb5sp" style="animation-delay:1.4s" d="M318,120 Q318,124 322,124 Q318,124 318,128 Q318,124 314,124 Q318,124 318,120 Z"/>'
+  +'<path class="eb5sp" style="animation-delay:.8s" d="M40,205 Q40,209 44,209 Q40,209 40,213 Q40,209 36,209 Q40,209 40,205 Z"/>'
+  +'</g><g fill="rgba(255,178,76,.75)">'
+  +'<path class="eb5sp" style="animation-delay:1.9s" d="M300,45 Q300,49.5 304.5,49.5 Q300,49.5 300,54 Q300,49.5 295.5,49.5 Q300,49.5 300,45 Z"/>'
+  +'<path class="eb5sp" style="animation-delay:.5s" d="M170,28 Q170,31.5 173.5,31.5 Q170,31.5 170,35 Q170,31.5 166.5,31.5 Q170,31.5 170,28 Z"/>'
+  +'<path class="eb5sp" style="animation-delay:2.3s" d="M310,215 Q310,218.5 313.5,218.5 Q310,218.5 310,222 Q310,218.5 306.5,218.5 Q310,218.5 310,215 Z"/>'
+  +'<path class="eb5sp" style="animation-delay:1.1s" d="M25,130 Q25,133.5 28.5,133.5 Q25,133.5 25,137 Q25,133.5 21.5,133.5 Q25,133.5 25,130 Z"/>'
+  +'</g></svg>'}
+const WBTN='width:100%;min-height:52px;border:1px solid #F0EAE2;background:#fff;border-radius:18px;font-family:Manrope,sans-serif;font-weight:700;font-size:15px;color:#2B2B2B;cursor:pointer;padding:13px 14px;text-align:center;box-shadow:0 10px 22px rgba(60,45,30,.07),inset 0 2px 0 rgba(255,255,255,.9);';
+function wMergeAi(){return S&&Array.isArray(S.aiWords)?S.aiWords.slice():[]}
+/* домашняя плитка при загрузке */
+try{if(S)wSync()}catch(e){}
+registerStartHook(function(){wMigrate();wMergeAi();return wSync()});
+registerRouteHook(function(id){if(id==='scr2'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
+
+/* legacy block 6 */
+function gClosed(){return grammarModule.countStable(S.grammarMastery)}
+function gSync(){if(!S)return;var before=JSON.stringify(S.grammarMastery||{});
+  S.grammarMastery=grammarModule.hasCanonicalMasteryRecords(S.grammarMastery)
+    ?grammarModule.migrateMasteryRecords(S.grammarMastery)
+    :grammarModule.migrateLegacyMasteryRecords(S.gram);
+  if(JSON.stringify(S.grammarMastery)!==before)save();var c=gClosed();S.prog=S.prog||{};S.prog.gram=Math.round(c/20*100);
+  setTxt('sub_gram','устойчиво '+c+' из 20 тем');setTxt('g_sumline','Устойчиво освоено '+c+' из 20 тем');
+  var bar=document.getElementById('g_bar');if(bar)bar.style.width=Math.max(2,Math.round(c/20*100))+'%'}
+function gExamFmt(sec){return grammarModule.formatDuration(sec)}
+/* прячем FAB на грамматике, синк при старте */
+registerRouteHook(function(id){if(id==='scr3'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
+registerStartHook(function(){return gSync()});
+
+/* legacy block 7 */
+function rSt(){S.read=readingModule.normalizeState(S.read);return S.read}
+function rSync(){if(!S)return;var r=rSt();var stats=readingModule.summary(r),acc=stats.accuracy;
+  S.prog=S.prog||{};S.prog.read=acc;
+  setTxt('sub_read',r.texts?('текстов: '+r.texts+' · точность '+acc+'%'):'начни с первого текста');
+  setTxt('r_sumline',r.texts?('Прочитано '+r.texts+' · точность '+acc+'%'):'Два тренажёра — как на экзамене');
+  var bar=document.getElementById('r_bar');if(bar)bar.style.width=Math.max(2,acc)+'%';
+  var progress=bar&&bar.parentElement;if(progress)progress.setAttribute('aria-valuenow',String(acc))}
+function rEsc(w){return ui.escapeHtml(w)}
+function rWordsHtml(text){var sentences=String(text||'').match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)\s*/gu)||[String(text||'')];
+  return sentences.map(function(sentence){var context=sentence.trim(),encoded=encodeURIComponent(context).replace(/'/g,'%27');
+    return sentence.split(/(\s+)/).map(function(tok){
+      if(/^\s+$/.test(tok))return tok;
+      var m=tok.match(/[A-Za-z][A-Za-z'-]*/);if(!m)return rEsc(tok);
+      var clean=m[0].toLowerCase();
+      var st=S.wstatus&&S.wstatus[clean],stateClass='',stateLabel='';
+      if(st==='learn'){stateClass=' reading-word--learning';stateLabel=', в изучении'}
+      else if(st==='know'){stateClass=' reading-word--known';stateLabel=', знакомое слово'}
+      return '<button type="button" class="clk iconbtn reading-word'+stateClass+'" data-w="'+clean+'" data-context="'+encoded+'" data-word-state="'+(st||'new')+'"'+(stateLabel?' aria-label="'+rEsc(m[0]+stateLabel)+'"':'')+' onclick="trWord(this.dataset.w,this.dataset.context)">'+rEsc(tok)+'</button>'}).join('')
+  }).join('')}
+/* FAB прячем и на чтении; синк при старте */
+registerRouteHook(function(id){if(id==='scr7'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
+registerStartHook(function(){return window.EasyBoostReading?rSync():null});
+
+/* legacy block 8 */
+/* Замедленная озвучка — настройка проигрывателя, а не экрана: её читает tts.js, который
+   настроен один раз при старте, задолго до того как приедет чанк аудирования. */
+let LSLOW=false,L_FALLBACK_FINISH=null;
+function lSt(){S.lis=listeningModule.normalizeState(S.lis);return S.lis}
+function lSync(){if(!S)return;var r=lSt(),sum=listeningModule.summary(r),acc=sum.accuracy;
+  S.prog=S.prog||{};S.prog.listen=acc;
+  setTxt('sub_listen',r.done?('подходов: '+r.done+' · точность '+acc+'%'):'начни с первого диалога');
+  setTxt('l_sumline',r.done?('Пройдено '+r.done+' · точность '+acc+'%'):'Три формата — как на экзамене');
+  var bar=document.getElementById('l_bar');if(bar)bar.style.width=Math.max(2,acc)+'%';
+  var progress=bar&&bar.parentElement;if(progress)progress.setAttribute('aria-valuenow',String(acc))}
+function lStopFallback(){if(L_FALLBACK_FINISH){var finish=L_FALLBACK_FINISH;L_FALLBACK_FINISH=null;finish(false)}try{speechSynthesis.cancel()}catch(e){}}
+function lPauseFallback(){try{if(!('speechSynthesis'in window)||!speechSynthesis.speaking||speechSynthesis.paused)return false;speechSynthesis.pause();return true}catch(e){return false}}
+function lResumeFallback(){try{if(!('speechSynthesis'in window)||!speechSynthesis.paused)return false;speechSynthesis.resume();return true}catch(e){return false}}
+function lVoice(i){try{var vs=(speechSynthesis.getVoices()||[]).filter(function(v){return /^en[-_]/i.test(v.lang)});
+  if(!vs.length)return null;
+  var gb=vs.filter(function(v){return /GB/i.test(v.lang)});
+  var pool=gb.length>1?gb:vs;
+  return pool[i%pool.length]}catch(e){return null}}
+function lPlayRawFallback(lines){
+  lStopFallback();
+  return new Promise(function(resolve){
+    function finish(result){if(L_FALLBACK_FINISH===finish)L_FALLBACK_FINISH=null;resolve(Boolean(result))}
+    L_FALLBACK_FINISH=finish;
+    if(!('speechSynthesis'in window)){try{toast('Озвучка недоступна в этом браузере')}catch(e){}finish(false);return}
+    var us=lines.map(function(ln){var u=new SpeechSynthesisUtterance(ln.t);
+      u.lang='en-GB';u.rate=LSLOW?0.68:0.85;u.pitch=ln.s?1.15:0.92;
+      var v=lVoice(ln.s);if(v)u.voice=v;return u});
+    if(!us.length){finish(true);return}
+    us[us.length-1].onend=function(){try{lPlayBtn('')}catch(e){}finish(true)};
+    us[us.length-1].onerror=function(){try{lPlayBtn('')}catch(e){}finish(false)};
+    try{lPlayBtn('play')}catch(e){}
+    try{us.forEach(function(u){speechSynthesis.speak(u)})}catch(e){finish(false)}
+  })}
+var L_PLAYSVG='<svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>';
+function lPlayBtn(st){var b=document.getElementById('l_playbtn'),ic=document.getElementById('l_playic'),tx=document.getElementById('l_playtx'),status=document.getElementById('l_audio_status'),pause=document.getElementById('l_pausebtn');
+  if(!b||!ic||!tx)return;
+  var host=b.closest('[data-audio-state]');
+  function pauseState(active,disabled){if(!pause)return;pause.disabled=Boolean(disabled);pause.setAttribute('aria-pressed',String(Boolean(active)));pause.setAttribute('aria-label',active?'Продолжить воспроизведение':'Приостановить воспроизведение');pause.textContent=active?'▶':'Ⅱ'}
+  if(st==='load'){if(host)host.dataset.audioState='buffering';b.disabled=true;b.setAttribute('aria-busy','true');pauseState(false,true);ic.textContent='…';tx.textContent='Загружаем запись…';if(status)status.textContent='Буферизация'}
+  else if(st==='play'){if(host)host.dataset.audioState='playing';b.disabled=false;b.removeAttribute('aria-busy');pauseState(false,false);ic.textContent='●';tx.textContent='Играет';if(status)status.textContent='Играет'}
+  else if(st==='pause'){if(host)host.dataset.audioState='paused';b.disabled=false;b.removeAttribute('aria-busy');pauseState(true,false);ic.textContent='Ⅱ';tx.textContent='Приостановлено';if(status)status.textContent='Приостановлено'}
+  else if(st==='error'){if(host)host.dataset.audioState='error';b.disabled=false;b.removeAttribute('aria-busy');pauseState(false,true);ic.textContent='!';tx.textContent='Повторить';if(status)status.textContent='Ошибка воспроизведения'}
+  else{if(host)host.dataset.audioState='stopped';b.disabled=false;b.removeAttribute('aria-busy');pauseState(false,true);ic.innerHTML=L_PLAYSVG;tx.textContent='Слушать';if(status)status.textContent='Остановлено'}}
+function lAudioStatus(status){var el=document.getElementById('l_audio_source');if(!el)return;
+  var host=el.closest('[data-audio-state]');if(host)host.dataset.audioSource=status;
+  if(status==='static'){el.textContent='Готовая экзаменационная запись';return}
+  if(status==='assisted-slow'){el.textContent='Замедленная тренировочная синтезированная озвучка · с помощью';return}
+  el.textContent=status==='fallback-error'?'Статическая запись недоступна · синтезированная озвучка с помощью':'Синтезированная озвучка · с помощью'}
+/* Переключение замедленной озвучки: переменную модуля ни разметка, ни чанк присвоить не могут. */
+function lToggleSlow(button){LSLOW=!LSLOW;button.classList.toggle('is-selected',LSLOW);button.setAttribute('aria-pressed',String(LSLOW))}
+function lSetSlow(value){LSLOW=Boolean(value)}
+/* FAB прячем, звук глушим при уходе, синк при старте */
+registerRouteHook(function(id){lStop();if(id==='scr4'){var f=document.getElementById('genfab');if(f)f.style.display='none'}});
+registerStartHook(function(){return window.EasyBoostListening?lSync():null});
+
+/* legacy block 10 */
+var W37=[],W38=[];
+function applyTaskBank(bank){
+  var b=bank||{};
+  W37=(b.writing_task_37||[]).map(function(t){return {id:t.id,from:t.from,stim:t.stim,ask:t.ask}});
+  W38=(b.writing_task_38||[]).map(function(t){return {id:t.id,topic:t.topic,rows:t.rows}});
+  return W37.length+W38.length;
+}
+function loadTaskBank(signal=null){
+  return EasyBoostApi.get('/task-bank.json',signal?{signal:signal}:{}).then(applyTaskBank).catch(function(){return 0});
+}
+function wrSyncTile(){if(!S)return;var works=(Array.isArray(S.works)?S.works:[]).filter(function(work){
+    return Number.isSafeInteger(Number(work&&work.attemptId))&&Number(work.attemptId)>0});
+  var restored=Number(S.essays),count=Number.isSafeInteger(restored)&&restored>=works.length?restored:works.length;
+  if(!count){setTxt('sub_write','задания 37–38 · ИИ');return}
+  var recent=works.slice(-5),computed=recent.length?Math.round(recent.reduce(function(total,work){return total+(Number(work.g)||0)/(Number(work.m)||1)},0)/recent.length*100):0;
+  var authorityAverage=Number(S.prog&&S.prog.write),average=Number.isInteger(authorityAverage)&&authorityAverage>=0&&authorityAverage<=100?authorityAverage:computed;
+  S.prog=S.prog||{};S.prog.write=average;
+  setTxt('sub_write','работ: '+count+' · средний '+average+'%')}
+registerStartHook(wrSyncTile);
+
+/* legacy block 11 */
+/* ===== GLOW: переливающаяся рамка при вводе ===== */
+(function(){
+  document.addEventListener('focusin',function(e){var t=e.target;if(!t)return;
+    if(t.id==='w_editor'){var g=document.getElementById('w_edglow');if(g)g.classList.add('glow-on')}
+    if(t.tagName==='INPUT'&&/^(w_inp|g_inp|g_ex_\d+)$/.test(t.id||''))t.classList.add('glow-input')});
+  document.addEventListener('focusout',function(e){var t=e.target;if(!t)return;
+    if(t.id==='w_editor'){var g=document.getElementById('w_edglow');if(g)g.classList.remove('glow-on')}
+    if(t.tagName==='INPUT')t.classList.remove('glow-input')});
+})();
+
+/* legacy block 12 */
+function spSt(){S.spk=speakingModule.normalizeState(S.spk);return S.spk}
+function spSync(){if(!S)return;var sum=speakingModule.summary(S.spkScores,spSt()),tot=sum.trainings;
+  S.prog=S.prog||{};S.prog.speak=sum.progress;
+  if(sum.rated){
+    setTxt('sub_speak','оценок: '+sum.count+' · средний '+sum.average+'%');
+    setTxt('s9_sumline','Оценок ИИ: '+sum.count+' · средний '+sum.average+'%');
+  }else{
+    setTxt('sub_speak',tot?('тренировок: '+tot):'устная часть · запись');
+    setTxt('s9_sumline',tot?('Тренировок: '+tot+' · 4 задания'):'Четыре задания — как на экзамене');}
+  var bar=document.getElementById('s9_bar');if(bar){var progress=Math.max(0,Math.min(100,S.prog.speak||0));bar.style.width=Math.max(2,progress)+'%';var progressbar=bar.closest&&bar.closest('[role="progressbar"]');if(progressbar)progressbar.setAttribute('aria-valuenow',String(progress))}
+  try{setTxt('m_speak',S.prog.speak);ringOff('ring_speak',113.1,S.prog.speak)}catch(e){}}
+registerStartHook(function(){return window.EasyBoostSpeaking?spSync():null});
+
+/* ---------- ГРАНИЦА МОДУЛЯ ---------- */
+/* Озвучка живёт отдельным модулем и не имеет доступа к состоянию приложения.
+   Изменяемое (сессия, замедление) передаётся функциями, иначе tts.js увидит снимок на момент старта. */
+configureTts({
+  apiGetBlob:apiGetBlob,
+  lPlayBtn:lPlayBtn,
+  lStopFallback:lStopFallback,
+  lPauseFallback:lPauseFallback,
+  lResumeFallback:lResumeFallback,
+  lPlayRawFallback:lPlayRawFallback,
+  wSpeakFallback:wSpeakFallback,
+  serverAvailable:function(){return Boolean(SRV&&TOKEN)},
+  slow:function(){return LSLOW},
+  loadListeningManifest:function(){return EasyBoostApi.get('/audio/listening/listening-pilot-v1/manifest.json')},
+  listeningAudioStatus:lAudioStatus
+});
+
+/*
+ * Имена, которые обязаны быть видны за пределами модуля: их ищут инлайновые обработчики
+ * разметки, сгенерированная разметка экранов и e2e-сценарии. Список сверяется автоматически —
+ * `npm run check` запускает scripts/check-inline-handlers.js. Раскладывает их по window main.js.
+ * Имена экранов сюда не входят: они приезжают со своим чанком и попадают на window тогда же.
+ */
+export {
+  lastWord,lastWordContext,
+  closeLearn,closeReadingWordPopover,learnGo,logout,lToggleSlow,openLearn,pwCheck,rSync,save,startApp,
+  trWord,
+};
+
+/* Зависимости privacy.js и pwa.js, которые раньше находились через глобальную область. */
+export {SRV,registerProfileHook,registerStartHook,toast};
+
+/*
+ * Оболочка для чанков экранов. Экран не видит глобальной области: всё, чем он пользуется —
+ * состояние ученика, сохранение, общие помощники разметки и сводки главного экрана — приходит
+ * сюда импортом. Сводки (wSync, gSync, rSync, lSync, wrSyncTile, spSync) живут в оболочке
+ * намеренно: плитки главного экрана обязаны показывать настоящие числа сразу после входа,
+ * когда ни один чанк ещё не загружен.
+ */
+export {
+  EGE_WORDS,LSLOW,L_PLAYSVG,S,TOKEN,W37,W38,WBTN,
+  apiCanUseOfflineFallback,apiGet,apiIsAuthorityFailure,apiMessage,apiPost,apiPostBinary,apiPostIdempotent,apiPut,apiResponseOwner,apiResponseServerTime,commitEgeMockOwnerMutation,currentDisplayName,currentEgeMockOwnerBinding,currentOwnerBinding,currentUser,examModule,exitOfflineEgeMockContinuation,gExamFmt,gSync,generateAiContent,invalidateLearningAuthority,readingDictionarySelection,recheckLearningAccess,registerAuthorityReset,
+  grammarModule,lSetSlow,lSt,lSync,listeningModule,profileModule,progressModule,readingModule,
+  rEsc,rSt,rWordsHtml,registerScreenGenerator,ringOff,runProfileHooks,setTxt,spSt,spSync,
+  speakingModule,srsFail,srsOk,srsRecordVocabularyOutcome,syncModuleAttempt,todayStr,ui,wBase,wDeco,wMergeAi,wMigrate,wRec,wStats,wSync,
+  verifyLearningAccessForLaunch,wordModule,writingModule,wrSyncTile,
+};

@@ -1,0 +1,5 @@
+ALTER TABLE writing_attempts
+  ADD COLUMN IF NOT EXISTS model VARCHAR(100);
+
+ALTER TABLE speaking_attempts
+  ADD COLUMN IF NOT EXISTS model VARCHAR(100);
