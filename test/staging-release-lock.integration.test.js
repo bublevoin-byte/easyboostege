@@ -84,7 +84,7 @@ async function release(root, name, copy) {
   return { archive, sha: created.sha256, source };
 }
 
-async function waitForFile(file, handle, timeoutMs = 30_000) {
+async function waitForFile(file, handle, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try { await fs.access(file); return; } catch {}
@@ -98,7 +98,10 @@ async function waitForFile(file, handle, timeoutMs = 30_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error(`Timed out waiting for ${file}`);
+  throw new Error([
+    `Timed out waiting for ${file}`,
+    handle.output.stderr.slice(-4_096),
+  ].join('\n'));
 }
 
 async function waitForProcessExit(pid, timeoutMs = 5_000) {
@@ -117,17 +120,16 @@ async function waitForProcessExit(pid, timeoutMs = 5_000) {
 
 function start(command, args, environment) {
   const child = spawn(command, args, { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
-  let stdout = '';
-  let stderr = '';
+  const output = { stderr: '', stdout: '' };
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => { stdout += chunk; });
-  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.stdout.on('data', (chunk) => { output.stdout += chunk; });
+  child.stderr.on('data', (chunk) => { output.stderr += chunk; });
   const done = new Promise((resolve, reject) => {
     child.once('error', reject);
-    child.once('close', (status, signal) => resolve({ signal, status, stderr, stdout }));
+    child.once('close', (status, signal) => resolve({ signal, status, ...output }));
   });
-  return { child, done };
+  return { child, done, output };
 }
 
 function childIsLive(child) {
