@@ -64,6 +64,7 @@ deadline_control_active=0
 deadline_watchdog_settlement_unproven=0
 protected_runtime_identity=''
 postgres_image_id=''
+postgres_runtime_authority=''
 unset EASYBOOST_STAGING_POSTGRES_IMAGE_ID
 temporary_reservation_file=''
 live_reservation_file=''
@@ -460,26 +461,31 @@ reverify_protected_runtime_identity() {
   fi
 }
 
-acquire_release_lock() {
-  local temporary before after runtime_root_before runtime_root_after
-  if [ ! -e "$lock_file" ]; then
-    temporary="$app_dir/.staging-release.lock.new.$$"
-    (umask 077; set -o noclobber; : > "$temporary") 2>/dev/null || return 1
-    run_bounded "$COMMAND_SECONDS" chmod 600 "$temporary" \
-      || { run_bounded "$COMMAND_SECONDS" rm -f -- "$temporary"; return 1; }
-    if ! ln -- "$temporary" "$lock_file"; then
-      run_bounded "$COMMAND_SECONDS" rm -f -- "$temporary"
-      [ -e "$lock_file" ] || return 1
+acquire_release_lock_inode() {
+  local before after runtime_root_before runtime_root_after
+  if [ ! -e "$lock_file" ] && [ ! -L "$lock_file" ]; then
+    # The stable lock inode is intentionally retained forever. Create the final
+    # pathname with O_EXCL semantics so no random preparing sibling can survive.
+    if (umask 077; set -o noclobber; : > "$lock_file") 2>/dev/null; then
+      :
     else
-      run_bounded "$COMMAND_SECONDS" rm -f -- "$temporary"
+      [ -e "$lock_file" ] || [ -L "$lock_file" ] || return 1
     fi
   fi
-  verify_protected_path "$lock_file" file 'staging release lock' || return 1
-  before="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%F:%u:%a' -- "$lock_file")" || return 1
-  runtime_root_before="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%F:%u:%a' -- "$app_dir")" || return 1
+  verify_protected_path "$lock_file" file 'staging release lock' 1 600 || return 1
+  before="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%u:%g:%a:%h:%s' -- "$lock_file")" || return 1
+  case "$before" in *':600:1:0') ;; *)
+    echo "staging release lock must be the exact private zero-byte single-link inode" >&2
+    return 1 ;;
+  esac
+  durable_sync_file "$lock_file" || return 1
+  durable_sync_parent "$lock_file" || return 1
+  [ "$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%u:%g:%a:%h:%s' -- "$lock_file")" \
+    = "$before" ] || return 1
+  runtime_root_before="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%F:%u:%g:%a' -- "$app_dir")" || return 1
   exec 9<> "$lock_file" || return 1
   if [[ "${OSTYPE:-}" == linux* ]]; then
-    after="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%F:%u:%a' -- "/proc/$$/fd/9")" || return 1
+    after="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%u:%g:%a:%h:%s' -- "/proc/$$/fd/9")" || return 1
     [ "$before" = "$after" ] || {
       echo "staging release lock identity changed while opening" >&2
       return 1
@@ -489,14 +495,23 @@ acquire_release_lock() {
     echo "Another staging release operation is active" >&2
     return 75
   fi
-  runtime_root_after="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%F:%u:%a' -- "$app_dir")" || return 1
+  runtime_root_after="$(run_bounded "$COMMAND_SECONDS" stat -Lc '%d:%i:%F:%u:%g:%a' -- "$app_dir")" || return 1
   [ "$runtime_root_before" = "$runtime_root_after" ] || {
     echo "protected staging root changed while acquiring the release lock" >&2
     return 1
   }
+}
+
+bind_release_runtime_authority() {
+  verify_protected_runtime || return 1
   capture_protected_runtime_identity || return 1
   capture_active_marker_identity || return 1
   capture_transaction_marker_identity || return 1
+}
+
+acquire_release_lock() {
+  acquire_release_lock_inode || return "$?"
+  bind_release_runtime_authority
 }
 
 verify_host_operation_lock() {
@@ -942,6 +957,75 @@ verify_postgres_image() {
   }
 }
 
+canonical_container_id() {
+  [[ "$1" =~ ^[0-9a-f]{64}$ ]]
+}
+
+read_running_postgres_authority() {
+  local containers container_id container_authority authority
+  [ -n "$postgres_image_id" ] && canonical_image_id "$postgres_image_id" || {
+    echo "Pinned PostgreSQL image authority is unavailable" >&2
+    return 1
+  }
+  containers="$(run_bounded "$COMMAND_SECONDS" docker ps --no-trunc --quiet \
+    --filter 'label=com.docker.compose.project=easyboost-staging' \
+    --filter 'label=com.docker.compose.service=postgres' \
+    --filter 'label=com.docker.compose.oneoff=False')" || return 1
+  [ -n "$containers" ] && [[ "$containers" != *$'\n'* ]] \
+    && [[ "$containers" != *$'\r'* ]] && canonical_container_id "$containers" || {
+    echo "Staging PostgreSQL must have exactly one canonical running container" >&2
+    return 1
+  }
+  container_id="$containers"
+  container_authority="$(run_bounded "$COMMAND_SECONDS" docker inspect \
+      --format '{{json .}}' "$container_id" \
+    | run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" \
+      capture-postgres-container "$container_id" "$postgres_image_id")" || return 1
+  [ -n "$container_authority" ] || return 1
+  authority="$(run_bounded "$COMMAND_SECONDS" docker volume inspect \
+      --format '{{json .}}' easyboost-staging_postgres-data \
+    | run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" \
+      complete-postgres-runtime "$container_authority")" || return 1
+  [ -n "$authority" ] || return 1
+  printf '%s\n' "$authority"
+}
+
+capture_running_postgres_authority() {
+  local captured
+  [ -z "$postgres_runtime_authority" ] || {
+    echo "Staging PostgreSQL runtime authority was already captured" >&2
+    return 1
+  }
+  require_local_dependency_images || return 1
+  captured="$(read_running_postgres_authority)" || return 1
+  postgres_runtime_authority="$captured"
+}
+
+wait_for_running_postgres_authority() {
+  local attempt
+  for ((attempt=1; attempt<=READINESS_ATTEMPTS; attempt+=1)); do
+    if capture_running_postgres_authority 2>/dev/null; then return 0; fi
+    [ "$attempt" -lt "$READINESS_ATTEMPTS" ] || break
+    run_bounded "$READINESS_INTERVAL_SECONDS" sleep "$READINESS_INTERVAL_SECONDS" || return 1
+  done
+  echo "Staging PostgreSQL did not become an exact healthy named-volume authority" >&2
+  return 1
+}
+
+verify_running_postgres_authority() {
+  local current
+  [ -n "$postgres_runtime_authority" ] || {
+    echo "Staging PostgreSQL runtime authority is unavailable" >&2
+    return 1
+  }
+  if ! verify_postgres_image || ! current="$(read_running_postgres_authority)" \
+    || [ "$current" != "$postgres_runtime_authority" ]; then
+    authority_violation=1
+    echo "Staging PostgreSQL container or named-volume identity changed" >&2
+    return 1
+  fi
+}
+
 canonical_image_id() {
   [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]]
 }
@@ -1070,6 +1154,9 @@ verify_active_snapshot() {
   require_local_dependency_images || return 1
   verify_stable_image "$expected_image" || return 1
   verify_running_image "$expected_image" || return 1
+  if [ -n "$postgres_runtime_authority" ]; then
+    verify_running_postgres_authority || return 1
+  fi
   wait_for_readiness || return 1
   reverify_active_marker_identity || return 1
   reverify_release_store_identity || return 1
@@ -1166,6 +1253,8 @@ finalize_release_boundaries() {
 
 recover_previous_release() {
   local restored_marker
+  recovery_step='verify retained PostgreSQL authority before recovery'
+  verify_running_postgres_authority || return 1
   recovery_step='retag previous image'
   run_bounded "$COMMAND_SECONDS" docker image tag \
     "$previous_image_id" "$STABLE_IMAGE" || return 1
@@ -1179,11 +1268,12 @@ recover_previous_release() {
   recovery_step='restart previous application'
   compose_file="$app_dir/compose.staging.yml"
   validate_staging_compose_contract "$compose_file" || return 1
-  verify_postgres_image || return 1
+  verify_running_postgres_authority || return 1
   reverify_compose_authority || return 1
   run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" \
-    --env-file "$env_file" up --pull never -d --no-build app || return 1
+    --env-file "$env_file" up --pull never -d --no-build --no-deps app || return 1
   verify_running_image "$previous_image_id" || return 1
+  verify_running_postgres_authority || return 1
   wait_for_readiness || return 1
   recovery_step='verify previous release identity'
   publish_active_marker "$previous_sha" || return 1
@@ -1195,12 +1285,19 @@ recover_previous_release() {
 }
 
 recover_empty_release() {
+  local recovery_compose=''
   recovery_step='remove failed first Compose project'
   if [ -f "$app_dir/compose.staging.yml" ]; then
-    compose_file="$app_dir/compose.staging.yml"
-    validate_staging_compose_contract "$compose_file" || return 1
+    recovery_compose="$app_dir/compose.staging.yml"
+  elif [ -n "${first_deploy_compose_file:-}" ] \
+    && [ -f "$first_deploy_compose_file" ] && [ ! -L "$first_deploy_compose_file" ]; then
+    recovery_compose="$first_deploy_compose_file"
+  fi
+  if [ -n "$recovery_compose" ]; then
+    validate_staging_compose_contract "$recovery_compose" || return 1
     reverify_compose_authority || return 1
-    run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" --env-file "$env_file" \
+    run_bounded "$COMMAND_SECONDS" docker compose --project-directory "$app_dir" \
+      -f "$recovery_compose" --env-file "$env_file" \
       down --volumes --remove-orphans || return 1
     reverify_compose_authority || return 1
     recovery_step='verify failed first Compose project removal'

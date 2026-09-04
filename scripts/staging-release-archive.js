@@ -18,6 +18,8 @@ export const ARCHIVE_LIMITS = Object.freeze({
 export const STAGING_ARCHIVE_PROTOCOL = 'immutable-archive-v4';
 
 const BLOCK = 512;
+const COMPOSE_MEMBER = 'compose.staging.yml';
+const COMPOSE_IO_CHUNK_BYTES = 64 * 1024;
 const TAR_END = Buffer.alloc(BLOCK * 2);
 const GZIP_HEADER = Buffer.from([
   0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff,
@@ -286,6 +288,196 @@ function readAndParse({ archivePath, limits = ARCHIVE_LIMITS, now = () => Date.n
   return { ...parsed, compressedBytes: compressed.length, sha256: sha256(compressed) };
 }
 
+function releaseComposeEntry(parsed) {
+  const matches = parsed.entries.filter((entry) => entry.name === COMPOSE_MEMBER);
+  if (matches.length !== 1) {
+    throw archiveError(`${COMPOSE_MEMBER}: archive must contain exactly one literal member`);
+  }
+  return matches[0];
+}
+
+function writeBounded(bytes, writeChunk) {
+  if (typeof writeChunk !== 'function') {
+    throw new TypeError('release Compose output requires one byte writer');
+  }
+  let offset = 0;
+  while (offset < bytes.length) {
+    const end = Math.min(offset + COMPOSE_IO_CHUNK_BYTES, bytes.length);
+    let chunkOffset = offset;
+    while (chunkOffset < end) {
+      const written = writeChunk(bytes.subarray(chunkOffset, end));
+      if (!Number.isSafeInteger(written) || written < 1 || written > end - chunkOffset) {
+        throw archiveError('release Compose output writer made invalid progress');
+      }
+      chunkOffset += written;
+    }
+    offset = end;
+  }
+}
+
+export async function emitReleaseCompose({
+  archivePath,
+  limits = ARCHIVE_LIMITS,
+  now = () => Date.now(),
+  writeChunk = (chunk) => fs.writeSync(1, chunk),
+}) {
+  // Nothing is emitted until the complete gzip, USTAR inventory, canonical
+  // producer bytes and every archive bound have been validated.
+  const parsed = readAndParse({ archivePath, limits, now });
+  const compose = releaseComposeEntry(parsed);
+  writeBounded(compose.body, writeChunk);
+  return {
+    bytes: compose.size,
+    sha256: sha256(compose.body),
+  };
+}
+
+function sameFileNode(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && right.isFile();
+}
+
+function exactComposeOutputIdentity(identity, userId, groupId) {
+  return identity.isFile() && !identity.isSymbolicLink() && identity.nlink === 1n
+    && identity.uid === BigInt(userId) && identity.gid === BigInt(groupId)
+    && Number(identity.mode & 0o777n) === 0o600;
+}
+
+function verifyComposePrefix(descriptor, expected, length) {
+  if (!Number.isSafeInteger(length) || length < 0 || length > expected.length) {
+    throw archiveError('release Compose output length is not a bounded prefix');
+  }
+  const buffer = Buffer.allocUnsafe(Math.min(COMPOSE_IO_CHUNK_BYTES, Math.max(length, 1)));
+  let offset = 0;
+  while (offset < length) {
+    const requested = Math.min(buffer.length, length - offset);
+    const received = fs.readSync(descriptor, buffer, 0, requested, offset);
+    if (received !== requested
+        || !buffer.subarray(0, received).equals(expected.subarray(offset, offset + received))) {
+      throw archiveError('release Compose output is not an exact literal prefix');
+    }
+    offset += received;
+  }
+}
+
+function stableComposeOutputPath(outputPath, expectedIdentity, userId, groupId) {
+  const current = fs.lstatSync(outputPath, { bigint: true });
+  if (!exactComposeOutputIdentity(current, userId, groupId)
+      || !sameFileNode(expectedIdentity, current)) {
+    throw archiveError('release Compose output path identity changed');
+  }
+  return current;
+}
+
+export async function completeReleaseCompose({
+  archivePath,
+  outputPath,
+  limits = ARCHIVE_LIMITS,
+  now = () => Date.now(),
+}) {
+  // Validate the whole archive before creating or opening the deterministic
+  // output. Invalid archive input therefore cannot leave filesystem residue.
+  const parsed = readAndParse({ archivePath, limits, now });
+  const compose = releaseComposeEntry(parsed);
+  if (typeof outputPath !== 'string' || !path.isAbsolute(outputPath)
+      || path.resolve(outputPath) !== outputPath || path.dirname(outputPath) === outputPath) {
+    throw archiveError('release Compose output path must be exact and absolute');
+  }
+  if (typeof process.getuid !== 'function' || typeof process.getgid !== 'function') {
+    throw archiveError('release Compose completion requires POSIX ownership authority');
+  }
+  if (!Number.isInteger(fs.constants.O_NOFOLLOW)
+      || !Number.isInteger(fs.constants.O_DIRECTORY)) {
+    throw archiveError('release Compose completion requires no-follow POSIX descriptors');
+  }
+  const userId = process.getuid();
+  const groupId = process.getgid();
+  const noFollow = fs.constants.O_NOFOLLOW;
+  let descriptor;
+  let created = false;
+  let pathBefore;
+  try {
+    try {
+      descriptor = fs.openSync(outputPath,
+        fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow,
+        0o600);
+      created = true;
+      fs.fchmodSync(descriptor, 0o600);
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      pathBefore = fs.lstatSync(outputPath, { bigint: true });
+      if (!exactComposeOutputIdentity(pathBefore, userId, groupId)) {
+        throw archiveError('release Compose output has an unsafe identity');
+      }
+      descriptor = fs.openSync(outputPath, fs.constants.O_RDWR | noFollow);
+    }
+
+    const opened = fs.fstatSync(descriptor, { bigint: true });
+    if (!exactComposeOutputIdentity(opened, userId, groupId)
+        || (pathBefore && !sameFileNode(pathBefore, opened))) {
+      throw archiveError('release Compose output changed while opening');
+    }
+    stableComposeOutputPath(outputPath, opened, userId, groupId);
+    if (opened.size > BigInt(compose.size)) {
+      throw archiveError('release Compose output is longer than the literal member');
+    }
+    const appendOffset = Number(opened.size);
+    verifyComposePrefix(descriptor, compose.body, appendOffset);
+    const beforeAppend = fs.fstatSync(descriptor, { bigint: true });
+    stableComposeOutputPath(outputPath, opened, userId, groupId);
+    if (!sameFileNode(opened, beforeAppend) || beforeAppend.size !== opened.size) {
+      throw archiveError('release Compose output changed before append');
+    }
+
+    let offset = appendOffset;
+    while (offset < compose.size) {
+      const end = Math.min(offset + COMPOSE_IO_CHUNK_BYTES, compose.size);
+      const written = fs.writeSync(descriptor, compose.body, offset, end - offset, offset);
+      if (!Number.isSafeInteger(written) || written < 1 || written > end - offset) {
+        throw archiveError('release Compose output append made invalid progress');
+      }
+      offset += written;
+    }
+    fs.fsyncSync(descriptor);
+    const completed = fs.fstatSync(descriptor, { bigint: true });
+    stableComposeOutputPath(outputPath, opened, userId, groupId);
+    if (!sameFileNode(opened, completed) || completed.size !== BigInt(compose.size)) {
+      throw archiveError('release Compose output identity changed after append');
+    }
+    verifyComposePrefix(descriptor, compose.body, compose.size);
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+  if (created) {
+    const parentDescriptor = fs.openSync(path.dirname(outputPath),
+      fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | noFollow);
+    try {
+      fs.fsyncSync(parentDescriptor);
+    } finally {
+      fs.closeSync(parentDescriptor);
+    }
+  }
+  const finalIdentity = fs.lstatSync(outputPath, { bigint: true });
+  if (!exactComposeOutputIdentity(finalIdentity, userId, groupId)
+      || finalIdentity.size !== BigInt(compose.size)) {
+    throw archiveError('release Compose output final identity is unsafe');
+  }
+  const finalDescriptor = fs.openSync(outputPath, fs.constants.O_RDONLY | noFollow);
+  try {
+    const opened = fs.fstatSync(finalDescriptor, { bigint: true });
+    if (!sameFileNode(finalIdentity, opened)) {
+      throw archiveError('release Compose output changed during final reproof');
+    }
+    verifyComposePrefix(finalDescriptor, compose.body, compose.size);
+  } finally {
+    fs.closeSync(finalDescriptor);
+  }
+  return {
+    bytes: compose.size,
+    complete: true,
+    sha256: sha256(compose.body),
+  };
+}
+
 export async function validateReleaseArchive(options) {
   const parsed = readAndParse(options);
   return {
@@ -379,6 +571,53 @@ export async function verifyReleaseTree({ archivePath, directory, limits = ARCHI
     }
   }
   return { aggregateBytes: parsed.aggregateBytes, files: parsed.entries.length, sha256: parsed.sha256 };
+}
+
+export async function verifyReleaseTreeTransition({
+  archivePath,
+  directory,
+  transitionFile,
+  limits = ARCHIVE_LIMITS,
+}) {
+  const allowedTransition = canonicalName(transitionFile, limits);
+  if (allowedTransition !== 'compose.staging.yml') {
+    throw archiveError('legacy transition authority must be compose.staging.yml');
+  }
+  const parsed = readAndParse({ archivePath, limits });
+  const declared = parsed.entries.map((entry) => entry.name).sort();
+  const actual = listTree(directory);
+  if (JSON.stringify(actual) !== JSON.stringify(declared)) {
+    throw archiveError('legacy transition tree inventory mismatch');
+  }
+  const transition = parsed.entries.find((entry) => entry.name === allowedTransition);
+  if (!transition) throw archiveError('declared transition file is missing from archive');
+
+  let liveTransitionSha256 = '';
+  for (const entry of parsed.entries) {
+    const live = readStableFile(
+      path.join(directory, ...entry.name.split('/')),
+      entry.name,
+    ).bytes;
+    if (entry.name === allowedTransition) {
+      liveTransitionSha256 = sha256(live);
+      continue;
+    }
+    if (live.length !== entry.size || sha256(live) !== sha256(entry.body)) {
+      throw archiveError(`${entry.name}: live transition tree bytes mismatch`);
+    }
+  }
+  const archiveTransitionSha256 = sha256(transition.body);
+  if (liveTransitionSha256 === archiveTransitionSha256) {
+    throw archiveError('declared transition file did not change');
+  }
+  return {
+    aggregateBytes: parsed.aggregateBytes,
+    archiveTransitionSha256,
+    files: parsed.entries.length,
+    liveTransitionSha256,
+    sha256: parsed.sha256,
+    transitionFile: allowedTransition,
+  };
 }
 
 function directoryIdentity(stat) {
@@ -512,6 +751,17 @@ async function runCli() {
     console.log(JSON.stringify(result));
     return;
   }
+  if (command === 'emit-compose' && args.length === 1) {
+    await emitReleaseCompose({ archivePath: path.resolve(args[0]) });
+    return;
+  }
+  if (command === 'complete-compose' && args.length === 2) {
+    await completeReleaseCompose({
+      archivePath: path.resolve(args[0]),
+      outputPath: args[1],
+    });
+    return;
+  }
   if (command === 'extract' && args.length === 2) {
     await extractReleaseArchive({ archivePath: path.resolve(args[0]), destination: path.resolve(args[1]) });
     return;
@@ -520,11 +770,20 @@ async function runCli() {
     await verifyReleaseTree({ archivePath: path.resolve(args[0]), directory: path.resolve(args[1]) });
     return;
   }
+  if (command === 'verify-tree-transition' && args.length === 3) {
+    const result = await verifyReleaseTreeTransition({
+      archivePath: path.resolve(args[0]),
+      directory: path.resolve(args[1]),
+      transitionFile: args[2],
+    });
+    console.log(JSON.stringify(result));
+    return;
+  }
   if (command === 'prepare-copy' && args.length === 1) {
     await prepareReleaseTreeForCopy({ directory: path.resolve(args[0]) });
     return;
   }
-  throw new Error('Usage: staging-release-archive.js protocol | create-git ROOT OUTPUT | inspect ARCHIVE | extract ARCHIVE DEST | verify-tree ARCHIVE DIRECTORY | prepare-copy DIRECTORY');
+  throw new Error('Usage: staging-release-archive.js protocol | create-git ROOT OUTPUT | inspect ARCHIVE | emit-compose ARCHIVE | complete-compose ARCHIVE OUTPUT | extract ARCHIVE DEST | verify-tree ARCHIVE DIRECTORY | verify-tree-transition ARCHIVE DIRECTORY FILE | prepare-copy DIRECTORY');
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';

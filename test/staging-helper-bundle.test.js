@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 import {
   HELPER_BUNDLE_FILES,
   HELPER_GENERATION_FILES,
+  PRE_CUTOVER_V4_HELPER_BUNDLE_FILES,
   STAGING_HELPER_PROTOCOL,
   STAGING_NODE_AUTHORITY_ENVIRONMENT,
   STAGING_NODE_AUTHORITY_PROTOCOL,
@@ -53,6 +54,45 @@ async function copyBundleSource(destination) {
   await Promise.all(HELPER_BUNDLE_FILES.map((name) => (
     fs.copyFile(path.resolve('scripts', name), path.join(destination, name))
   )));
+}
+
+async function writeFrozenPreCutoverGeneration({ installRoot, source, overrides = new Map() }) {
+  const records = [];
+  const aggregate = crypto.createHash('sha256');
+  aggregate.update(`easyboost-staging-helper-bundle-v4\0${STAGING_HELPER_PROTOCOL}\0`);
+  const names = ['package.json', ...PRE_CUTOVER_V4_HELPER_BUNDLE_FILES].sort();
+  const contents = new Map();
+  for (const name of names) {
+    const bytes = overrides.get(name) ?? (name === 'package.json'
+      ? Buffer.from('{"type":"module"}\n')
+      : await fs.readFile(path.join(source, name)));
+    const mode = name === 'package.json' ? '0444' : '0555';
+    const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+    aggregate.update(`F\0${name}\0${bytes.length}\0${digest}\0${mode}\0`);
+    contents.set(name, bytes);
+    records.push({ name, bytes: bytes.length, sha256: digest, mode });
+  }
+  const bundleDigest = aggregate.digest('hex');
+  const generationRoot = path.join(installRoot, 'generations', bundleDigest);
+  await fs.mkdir(generationRoot, { mode: 0o755 });
+  for (const record of records) {
+    const destination = path.join(generationRoot, record.name);
+    await fs.writeFile(destination, contents.get(record.name), {
+      mode: Number.parseInt(record.mode, 8),
+    });
+    await fs.chmod(destination, Number.parseInt(record.mode, 8));
+  }
+  const manifest = Buffer.from(`${JSON.stringify({
+    protocol: STAGING_HELPER_PROTOCOL,
+    bundleDigest,
+    files: records,
+  }, null, 2)}\n`);
+  await fs.writeFile(path.join(generationRoot, 'staging-release-bundle.json'), manifest, {
+    mode: 0o444,
+  });
+  await fs.chmod(path.join(generationRoot, 'staging-release-bundle.json'), 0o444);
+  await fs.chmod(generationRoot, 0o555);
+  return { bundleDigest, generationRoot };
 }
 
 async function makeDirectoriesOwnerWritable(directory) {
@@ -279,6 +319,13 @@ test('v4 helper installation atomically advances one digest pointer to exact cur
       'the root-owned restart implementation must be digest-bound with deploy/rollback');
     assert.ok(HELPER_BUNDLE_FILES.includes('staging-quiescent-maintenance.js'),
       'the fd8 consumer and maintenance root authority must be digest-bound with the transaction');
+    const launcher = await fs.readFile(path.join(installRoot, 'staging-release-entry.sh'), 'utf8');
+    assert.match(launcher,
+      /cutover\) \[ "\$#" -eq 9 \][^\n]+"\$8" = immutable-archive-v4[^\n]+expected="\$9"/u,
+      'cutover dispatch must preserve the exact 9-argument mode-bound contract');
+    assert.match(launcher,
+      /cutover\) if \[ "\$#" -eq 11 \][^\n]+"\$10" = --recovery-authority[^\n]+set -- "\$1" "\$2" "\$3" "\$4" "\$5" "\$6" "\$7" "\$8" "\$9"/u,
+      'cutover recovery must strip only its exact authority suffix');
     const restartDispatcher = path.join(linkRoot, 'easyboost-staging-restart');
     assert.match(await fs.readFile(restartDispatcher, 'utf8'),
       /staging-release-entry\.sh' restart "\$@"/u);
@@ -908,6 +955,197 @@ test('recover verifies and executes an explicit historical generation after curr
         `${tamperedRecovery.stdout}\n${tamperedRecovery.stderr}`);
       await assert.rejects(fs.access(marker), { code: 'ENOENT' },
         'a changed historical generation must never execute');
+    } finally {
+      await removeFixture(root);
+    }
+  });
+
+test('upgraded bridge recovery verifies frozen old and current generations but executes only the current supervisor',
+  async (context) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-helper-upgraded-recovery-'));
+    const source = path.join(root, 'source');
+    const installRoot = path.join(root, 'lib');
+    const linkRoot = path.join(root, 'bin');
+    const currentMarker = path.join(root, 'current-supervisor.json');
+    const oldMarker = path.join(root, 'old-code-executed');
+    try {
+      await copyBundleSource(source);
+      await fs.writeFile(path.join(source, 'staging-transaction-supervisor.js'), [
+        "import fsSync from 'node:fs';",
+        'fsSync.writeFileSync(process.env.EASYBOOST_TEST_UPGRADED_CURRENT_MARKER,',
+        '  JSON.stringify(process.argv.slice(2)));',
+        '',
+      ].join('\n'));
+      const current = await installStagingHelperBundle({
+        sourceDirectory: source, installRoot, linkRoot, allowedPrefix: root,
+      });
+      const oldSupervisor = Buffer.from([
+        "import fsSync from 'node:fs';",
+        "fsSync.writeFileSync(process.env.EASYBOOST_TEST_UPGRADED_OLD_MARKER, 'supervisor');",
+        '',
+      ].join('\n'));
+      const oldDeploy = Buffer.from([
+        '#!/bin/bash',
+        'printf deploy > "$EASYBOOST_TEST_UPGRADED_OLD_MARKER"',
+        'exit 91',
+        '',
+      ].join('\n'));
+      const old = await writeFrozenPreCutoverGeneration({
+        installRoot,
+        source,
+        overrides: new Map([
+          ['staging-deploy.sh', oldDeploy],
+          ['staging-transaction-supervisor.js', oldSupervisor],
+        ]),
+      });
+      const archive = '/tmp/release archive;$(must-stay-one-argument).tar.gz';
+      const archiveSha = 'a'.repeat(64);
+      const authority = JSON.stringify({
+        protocol: 'easyboost-staging-transaction-recovery-v1',
+        token: "quote ' and $(no-eval)",
+      });
+      const invoke = (values) => spawnSync(gitBash, [
+        '-p', posixPath(path.join(linkRoot, 'easyboost-staging-recover')), ...values,
+      ], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          EASYBOOST_TEST_UPGRADED_CURRENT_MARKER: currentMarker,
+          EASYBOOST_TEST_UPGRADED_OLD_MARKER: oldMarker,
+        },
+      });
+      const arguments_ = [
+        'bridge', 'deploy', archive, archiveSha, STAGING_HELPER_PROTOCOL,
+        old.bundleDigest, current.bundleDigest, '--recovery-authority', authority,
+      ];
+      const recovered = invoke(arguments_);
+      if (recovered.error?.code === 'ENOENT') return context.skip('Git Bash is not installed');
+      assert.equal(recovered.status, 0, `${recovered.stdout}\n${recovered.stderr}`);
+      const capturedArguments = JSON.parse(await fs.readFile(currentMarker, 'utf8'));
+      assert.equal(path.resolve(capturedArguments[3]), path.join(old.generationRoot,
+        'staging-deploy.sh'));
+      assert.deepEqual(capturedArguments.toSpliced(3, 1), [
+        '--recover-with-authority', authority, '--',
+        archive, archiveSha, STAGING_HELPER_PROTOCOL, old.bundleDigest,
+      ]);
+      await assert.rejects(fs.access(oldMarker), { code: 'ENOENT' },
+        'neither the old supervisor nor the old deploy script may execute');
+
+      for (const invalid of [
+        arguments_.slice(0, -1),
+        [...arguments_, 'extra'],
+        arguments_.map((value, index) => index === 8 ? '' : value),
+        arguments_.map((value, index) => index === 1 ? 'rollback' : value),
+        arguments_.map((value, index) => index === 5 ? current.bundleDigest : value),
+        arguments_.map((value, index) => index === 3 ? 'not-a-sha' : value),
+      ]) {
+        await fs.rm(currentMarker, { force: true });
+        const rejected = invoke(invalid);
+        assert.equal(rejected.status, 64, `${rejected.stdout}\n${rejected.stderr}`);
+        await assert.rejects(fs.access(currentMarker), { code: 'ENOENT' });
+      }
+
+      await fs.chmod(path.join(installRoot, 'current'), 0o644);
+      await fs.writeFile(path.join(installRoot, 'current'), `${old.bundleDigest}\n`);
+      await fs.chmod(path.join(installRoot, 'current'), 0o444);
+      const wrongCurrent = invoke(arguments_);
+      assert.equal(wrongCurrent.status, 69, `${wrongCurrent.stdout}\n${wrongCurrent.stderr}`);
+      await assert.rejects(fs.access(currentMarker), { code: 'ENOENT' });
+
+      await fs.chmod(path.join(installRoot, 'current'), 0o644);
+      await fs.writeFile(path.join(installRoot, 'current'), `${current.bundleDigest}\n`);
+      await fs.chmod(path.join(installRoot, 'current'), 0o444);
+      const oldCommon = path.join(old.generationRoot, 'staging-release-common.sh');
+      const oldCommonBytes = await fs.readFile(oldCommon);
+      await fs.chmod(old.generationRoot, 0o755);
+      await fs.chmod(oldCommon, 0o755);
+      await fs.appendFile(oldCommon, '\n# tampered old generation\n');
+      await fs.chmod(oldCommon, 0o555);
+      await fs.chmod(old.generationRoot, 0o555);
+      const tamperedOld = invoke(arguments_);
+      assert.equal(tamperedOld.status, 69, `${tamperedOld.stdout}\n${tamperedOld.stderr}`);
+      await assert.rejects(fs.access(currentMarker), { code: 'ENOENT' });
+      await fs.chmod(old.generationRoot, 0o755);
+      await fs.chmod(oldCommon, 0o755);
+      await fs.writeFile(oldCommon, oldCommonBytes);
+      await fs.chmod(oldCommon, 0o555);
+      await fs.chmod(old.generationRoot, 0o555);
+
+      const currentCommon = path.join(installRoot, 'generations', current.bundleDigest,
+        'staging-release-common.sh');
+      await fs.chmod(path.dirname(currentCommon), 0o755);
+      await fs.chmod(currentCommon, 0o755);
+      await fs.appendFile(currentCommon, '\n# tampered current generation\n');
+      await fs.chmod(currentCommon, 0o555);
+      await fs.chmod(path.dirname(currentCommon), 0o555);
+      const tamperedCurrent = invoke(arguments_);
+      assert.equal(tamperedCurrent.status, 69,
+        `${tamperedCurrent.stdout}\n${tamperedCurrent.stderr}`);
+      await assert.rejects(fs.access(currentMarker), { code: 'ENOENT' });
+    } finally {
+      await removeFixture(root);
+    }
+  });
+
+test('upgraded bridge recovery rejects a current-pointer replacement at the fd8 linearization boundary',
+  async (context) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-helper-upgraded-pointer-race-'));
+    const source = path.join(root, 'source');
+    const installRoot = path.join(root, 'lib');
+    const linkRoot = path.join(root, 'bin');
+    const marker = path.join(root, 'supervisor-executed');
+    const hook = path.join(root, 'replace-current.sh');
+    try {
+      await copyBundleSource(source);
+      await fs.writeFile(path.join(source, 'staging-transaction-supervisor.js'), [
+        "import fsSync from 'node:fs';",
+        "fsSync.writeFileSync(process.env.EASYBOOST_TEST_UPGRADED_RACE_MARKER, 'executed');",
+        '',
+      ].join('\n'));
+      const current = await installStagingHelperBundle({
+        sourceDirectory: source, installRoot, linkRoot, allowedPrefix: root,
+      });
+      const old = await writeFrozenPreCutoverGeneration({ installRoot, source });
+      await fs.writeFile(hook, [
+        '#!/bin/bash -p',
+        'set -Eeuo pipefail',
+        'temporary="$EASYBOOST_TEST_UPGRADED_POINTER.new"',
+        'printf "%s\\n" "$EASYBOOST_TEST_UPGRADED_REPLACEMENT" > "$temporary"',
+        'chmod 0444 "$temporary"',
+        'mv -f -- "$temporary" "$EASYBOOST_TEST_UPGRADED_POINTER"',
+        '',
+      ].join('\n'));
+      await fs.chmod(hook, 0o755);
+      const launcherPath = path.join(installRoot, 'staging-release-entry.sh');
+      let launcher = await fs.readFile(launcherPath, 'utf8');
+      const checkpoint = '  bind_quiescent_maintenance || { echo "staging quiescent maintenance lock is unavailable" >&2; exit 75; }\n  before="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "$pointer")" || exit 69';
+      assert.equal(launcher.includes(checkpoint), true,
+        'the test must intercept the upgraded recovery fd8-to-pointer recheck boundary');
+      launcher = launcher.replace(checkpoint, checkpoint.replace(
+        '\n  before=', '\n  "$EASYBOOST_TEST_UPGRADED_POINTER_HOOK"\n  before=',
+      ));
+      await fs.chmod(launcherPath, 0o755);
+      await fs.writeFile(launcherPath, launcher);
+      await fs.chmod(launcherPath, 0o555);
+      const authority = '{"protocol":"easyboost-staging-transaction-recovery-v1"}';
+      const invocation = spawnSync(gitBash, [
+        '-p', posixPath(path.join(linkRoot, 'easyboost-staging-recover')),
+        'bridge', 'deploy', '/tmp/release.tar.gz', 'a'.repeat(64), STAGING_HELPER_PROTOCOL,
+        old.bundleDigest, current.bundleDigest, '--recovery-authority', authority,
+      ], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          EASYBOOST_TEST_UPGRADED_POINTER: posixPath(path.join(installRoot, 'current')),
+          EASYBOOST_TEST_UPGRADED_POINTER_HOOK: posixPath(hook),
+          EASYBOOST_TEST_UPGRADED_RACE_MARKER: marker,
+          EASYBOOST_TEST_UPGRADED_REPLACEMENT: old.bundleDigest,
+        },
+      });
+      if (invocation.error?.code === 'ENOENT') return context.skip('Git Bash is not installed');
+      assert.equal(invocation.status, 69, `${invocation.stdout}\n${invocation.stderr}`);
+      assert.match(invocation.stderr, /current pointer changed before upgraded recovery/iu);
+      await assert.rejects(fs.access(marker), { code: 'ENOENT' });
     } finally {
       await removeFixture(root);
     }
@@ -1664,8 +1902,8 @@ test('launcher revalidates pinned Node ancestors identity and digest before ever
         `${STAGING_NODE_AUTHORITY_ENVIRONMENT}=\"\\$node_authority_contract_protocol:9:\\$owner_pid:\\$node_digest_expected\"`,
         'u',
       ));
-      assert.equal((launcher.match(/publish_node_authority_contract \|\|/gu) ?? []).length, 2,
-        'current and recovery final execs must receive the descriptor metadata contract');
+      assert.equal((launcher.match(/publish_node_authority_contract \|\|/gu) ?? []).length, 3,
+        'current, historical recovery and upgraded recovery execs need the descriptor contract');
       assert.match(launcher, new RegExp(
         `unset [^\n]*${STAGING_QUIESCENT_MAINTENANCE_ENVIRONMENT}`,
         'u',
@@ -1691,8 +1929,8 @@ test('launcher revalidates pinned Node ancestors identity and digest before ever
         `maintenance_environment_expected='${STAGING_QUIESCENT_MAINTENANCE_PROTOCOL}:${STAGING_QUIESCENT_MAINTENANCE_DESCRIPTOR}:[a-f0-9]{64}'`,
         'u',
       ));
-      assert.equal((launcher.match(/bind_quiescent_maintenance \|\|/gu) ?? []).length, 2,
-        'current and recovery exec paths must both bind and prove fd8');
+      assert.equal((launcher.match(/bind_quiescent_maintenance \|\|/gu) ?? []).length, 3,
+        'current, historical recovery and upgraded recovery exec paths must bind fd8');
       assert.match(launcher, /exec 9< "\$node_executable"/u,
         'the existing pinned Node fd9 contract must stay unchanged');
       assert.doesNotMatch(launcher, /exec 8< "\$pointer"/u,
@@ -2223,7 +2461,7 @@ test('upgraded launcher verifies and recovers an exact retained pre-ESM v4 gener
       aggregate.update(`easyboost-staging-helper-bundle-v4\0${STAGING_HELPER_PROTOCOL}\0`);
       const legacyFiles = [];
       const legacyBytes = new Map();
-      for (const name of HELPER_BUNDLE_FILES) {
+      for (const name of PRE_CUTOVER_V4_HELPER_BUNDLE_FILES) {
         const bytes = await fs.readFile(path.join(source, name));
         const digest = crypto.createHash('sha256').update(bytes).digest('hex');
         aggregate.update(`F\0${name}\0${bytes.length}\0${digest}\0${'0555'}\0`);
@@ -2249,7 +2487,7 @@ test('upgraded launcher verifies and recovers an exact retained pre-ESM v4 gener
       await fs.chmod(generationRoot, 0o555);
 
       assert.deepEqual((await fs.readdir(generationRoot)).sort(),
-        [...HELPER_BUNDLE_FILES, 'staging-release-bundle.json'].sort());
+        [...PRE_CUTOVER_V4_HELPER_BUNDLE_FILES, 'staging-release-bundle.json'].sort());
       await verifyInstalledHelperGeneration({
         generationDirectory: generationRoot,
         expectedDigest: legacyDigest,

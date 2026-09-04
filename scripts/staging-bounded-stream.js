@@ -130,6 +130,145 @@ function openCapturedInput(inputPath, maximumBytes, authority) {
   }
 }
 
+function assertPrivatePrefixFile(stat, sourceSize) {
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n
+      || stat.size < 0n || stat.size > BigInt(sourceSize)) {
+    throw new Error('journal-owned frozen release prefix must be a bounded single-link regular file');
+  }
+  if (process.platform !== 'win32'
+      && (Number(stat.uid) !== process.getuid() || Number(stat.gid) !== process.getgid()
+        || Number(stat.mode & 0o777n) !== 0o600)) {
+    throw new Error('journal-owned frozen release prefix must have the exact private owner and mode');
+  }
+}
+
+function compareDescriptorPrefix(sourceDescriptor, outputDescriptor, outputBytes) {
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let offset = 0;
+  while (offset < outputBytes) {
+    const length = Math.min(buffer.length, outputBytes - offset);
+    const sourceCount = fs.readSync(sourceDescriptor, buffer, 0, length, offset);
+    if (sourceCount !== length) throw new Error('uploaded release archive ended during prefix proof');
+    const candidate = Buffer.allocUnsafe(length);
+    const outputCount = fs.readSync(outputDescriptor, candidate, 0, length, offset);
+    if (outputCount !== length || !candidate.equals(buffer.subarray(0, length))) {
+      throw new Error('journal-owned frozen release bytes are not an exact uploaded prefix');
+    }
+    offset += length;
+  }
+}
+
+export function captureBoundedFilePrefixAuthority({
+  inputPath, outputPath, maximumBytes, authority,
+}) {
+  assertMaximumBytes(maximumBytes);
+  const { descriptor: sourceDescriptor, source } = openCapturedInput(
+    inputPath, maximumBytes, authority,
+  );
+  const output = path.resolve(outputPath);
+  let outputDescriptor;
+  try {
+    let before;
+    try {
+      before = fs.lstatSync(output, { bigint: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return { present: false };
+      throw error;
+    }
+    assertPrivatePrefixFile(before, Number(authority.size));
+    outputDescriptor = fs.openSync(output, fs.constants.O_RDWR | noFollowFlag());
+    const opened = fs.fstatSync(outputDescriptor, { bigint: true });
+    if (!sameFileRecord(opened, fileRecord(before))) {
+      throw new Error('journal-owned frozen release prefix changed while opening');
+    }
+    compareDescriptorPrefix(sourceDescriptor, outputDescriptor, Number(opened.size));
+    const sourceAfter = fs.fstatSync(sourceDescriptor, { bigint: true });
+    const sourcePathAfter = fs.lstatSync(source, { bigint: true });
+    const outputAfter = fs.fstatSync(outputDescriptor, { bigint: true });
+    const outputPathAfter = fs.lstatSync(output, { bigint: true });
+    if (!sameFileRecord(sourceAfter, authority) || !sameFileRecord(sourcePathAfter, authority)
+        || !sameFileRecord(outputAfter, fileRecord(opened))
+        || !sameFileRecord(outputPathAfter, fileRecord(opened))) {
+      throw new Error('uploaded or journal-owned frozen release prefix changed during capture');
+    }
+    return { present: true, authority: fileRecord(opened) };
+  } finally {
+    if (outputDescriptor !== undefined) fs.closeSync(outputDescriptor);
+    fs.closeSync(sourceDescriptor);
+  }
+}
+
+export function completeBoundedFilePrefix({
+  inputPath, outputPath, maximumBytes, authority, outputAuthority,
+}) {
+  assertMaximumBytes(maximumBytes);
+  const current = captureBoundedFilePrefixAuthority({
+    inputPath, outputPath, maximumBytes, authority,
+  });
+  if (JSON.stringify(current) !== JSON.stringify(outputAuthority)) {
+    throw new Error('journal-owned frozen release prefix authority changed before completion');
+  }
+  const { descriptor: sourceDescriptor, source } = openCapturedInput(
+    inputPath, maximumBytes, authority,
+  );
+  const output = path.resolve(outputPath);
+  const flags = fs.constants.O_RDWR | noFollowFlag()
+    | (current.present ? 0 : fs.constants.O_CREAT | fs.constants.O_EXCL);
+  let outputDescriptor;
+  try {
+    outputDescriptor = fs.openSync(output, flags, 0o600);
+    const opened = fs.fstatSync(outputDescriptor, { bigint: true });
+    assertPrivatePrefixFile(opened, Number(authority.size));
+    if (current.present && !sameFileRecord(opened, current.authority)) {
+      throw new Error('journal-owned frozen release prefix changed while reopening');
+    }
+    const prefixBytes = Number(opened.size);
+    compareDescriptorPrefix(sourceDescriptor, outputDescriptor, prefixBytes);
+    const digest = crypto.createHash('sha256');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let offset = 0;
+    while (offset < Number(authority.size)) {
+      const length = Math.min(buffer.length, Number(authority.size) - offset);
+      const count = fs.readSync(sourceDescriptor, buffer, 0, length, offset);
+      if (count !== length) throw new Error('uploaded release archive ended during prefix completion');
+      digest.update(buffer.subarray(0, count));
+      if (offset >= prefixBytes) {
+        let written = 0;
+        while (written < count) {
+          const progress = fs.writeSync(outputDescriptor, buffer, written,
+            count - written, offset + written);
+          if (progress < 1) throw new Error('journal-owned frozen release prefix write stalled');
+          written += progress;
+        }
+      } else if (offset + count > prefixBytes) {
+        let written = prefixBytes - offset;
+        while (written < count) {
+          const progress = fs.writeSync(outputDescriptor, buffer, written,
+            count - written, offset + written);
+          if (progress < 1) throw new Error('journal-owned frozen release prefix write stalled');
+          written += progress;
+        }
+      }
+      offset += count;
+    }
+    fs.fsyncSync(outputDescriptor);
+    const sourceAfter = fs.fstatSync(sourceDescriptor, { bigint: true });
+    const sourcePathAfter = fs.lstatSync(source, { bigint: true });
+    const outputAfter = fs.fstatSync(outputDescriptor, { bigint: true });
+    const outputPathAfter = fs.lstatSync(output, { bigint: true });
+    assertPrivatePrefixFile(outputAfter, Number(authority.size));
+    if (outputAfter.size !== BigInt(authority.size)
+        || !sameFileRecord(sourceAfter, authority) || !sameFileRecord(sourcePathAfter, authority)
+        || !sameFileRecord(outputPathAfter, fileRecord(outputAfter))) {
+      throw new Error('uploaded or journal-owned frozen release changed during completion');
+    }
+    return { bytes: Number(authority.size), sha256: digest.digest('hex') };
+  } finally {
+    if (outputDescriptor !== undefined) fs.closeSync(outputDescriptor);
+    fs.closeSync(sourceDescriptor);
+  }
+}
+
 export function captureBoundedFileAuthority({ inputPath, maximumBytes }) {
   assertMaximumBytes(maximumBytes);
   const source = path.resolve(inputPath);
@@ -409,6 +548,33 @@ async function runCli() {
     process.stdout.write(`${JSON.stringify(authority)}\n`);
     return;
   }
+  if (command === 'capture-file-prefix' && args.length === 4 && /^\d+$/u.test(args[2])) {
+    let authority;
+    try { authority = JSON.parse(args[3]); } catch {
+      throw new Error('uploaded release archive authority is invalid');
+    }
+    const result = captureBoundedFilePrefixAuthority({
+      inputPath: args[0], outputPath: args[1], maximumBytes: Number(args[2]), authority,
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
+  if (command === 'complete-file-prefix' && args.length === 5 && /^\d+$/u.test(args[2])) {
+    let authority;
+    let outputAuthority;
+    try {
+      authority = JSON.parse(args[3]);
+      outputAuthority = JSON.parse(args[4]);
+    } catch {
+      throw new Error('uploaded release archive or prefix authority is invalid');
+    }
+    const result = completeBoundedFilePrefix({
+      inputPath: args[0], outputPath: args[1], maximumBytes: Number(args[2]),
+      authority, outputAuthority,
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    return;
+  }
   if (command === 'freeze-reserved-file' && args.length === 5 && /^\d+$/u.test(args[2])) {
     let authority;
     let outputAuthority;
@@ -427,7 +593,7 @@ async function runCli() {
   }
   const [outputPath, maximum] = [command, ...args];
   if (!outputPath || !/^\d+$/u.test(maximum ?? '') || args.length !== 1) {
-    throw new Error('Usage: staging-bounded-stream.js fsync-file PATH | fsync-parent PATH | OUTPUT MAXIMUM_BYTES | capture-file INPUT MAXIMUM_BYTES | freeze-reserved-file INPUT OUTPUT MAXIMUM_BYTES INPUT_AUTHORITY OUTPUT_AUTHORITY');
+    throw new Error('Usage: staging-bounded-stream.js fsync-file PATH | fsync-parent PATH | OUTPUT MAXIMUM_BYTES | capture-file INPUT MAXIMUM_BYTES | capture-file-prefix INPUT OUTPUT MAXIMUM_BYTES INPUT_AUTHORITY | complete-file-prefix INPUT OUTPUT MAXIMUM_BYTES INPUT_AUTHORITY OUTPUT_AUTHORITY | freeze-reserved-file INPUT OUTPUT MAXIMUM_BYTES INPUT_AUTHORITY OUTPUT_AUTHORITY');
   }
   const result = await copyBoundedStream({
     input: process.stdin, outputPath, maximumBytes: Number(maximum),

@@ -100,7 +100,9 @@ Producer создаёт checksum-bound single-member gzip
 с regular-file USTAR; validator до Docker требует уже canonical relative POSIX NFC names, запрещает
 aliases/links/special/protected entries и применяет границы 256 MiB compressed, 4096 entries, 16 MiB
 на файл, 384 MiB aggregate, 64 MiB disk headroom и 60/90/600 s inspect/extract/build. Primary deadline
-1800 s плюс отдельные 600 s recovery укладываются во внешний 2500 s host timeout и 60-minute workflow.
+1800 s и отдельные 600 s recovery принадлежат root-owned launcher/supervisor; внешний `timeout` вокруг
+helper не используется, чтобы не оборвать recovery. 60-minute workflow оставляет запас на
+archive/upload/SSH и supervisor settlement.
 Filesystem reservations удерживают candidate/predecessor peak и до 256 MiB DB backup на каждом
 distinct filesystem. Блокировки разделены по назначению: helper installer сериализует разные
 процессы своим nonblocking kernel `flock` на fd 7, launcher удерживает отдельный process-lifetime

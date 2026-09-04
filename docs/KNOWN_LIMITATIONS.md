@@ -76,11 +76,58 @@ decision, staging redesign approval or deployment approval. The amendment exclud
 registry/network calls, secrets transfer and broader operator redesign. The helper still does not deploy
 anything automatically.
 
-The first cutover is intentionally fail-closed. Before the new workflow runs, an operator must install
-the atomic digest-verified root-owned `immutable-archive-v4` helper bundle, then seed the active
-full `.release-sha256` plus its exact retained CI archive/checksum sidecar. The live tree and stable image
-must also match that retained predecessor. A legacy mutable `code-before-*.tar.gz`, missing pair or
-abbreviated/default rollback target is not migrated or guessed. Deploy/rollback require Linux, Node.js,
+The first cutover is intentionally fail-closed. The operator first installs the new atomic,
+digest-verified, root-owned `immutable-archive-v4` helper generation under fd 8. Inert historical
+deadline/session residue does not block that installation, but an app recovery journal or an active typed
+cutover lock does. If the failed deploy belongs to an older helper generation, the operator then recovers
+its exact authority through the verified cross-generation bridge. Replacing the old digest in an ordinary
+deploy recovery would derive the wrong transaction key:
+
+```bash
+sudo bash scripts/install-staging-release-helpers.sh
+sudo /usr/local/sbin/easyboost-staging-recover bridge \
+  deploy \
+  "$archive" \
+  "$archive_sha" \
+  immutable-archive-v4 \
+  "$old_bundle_sha" \
+  "$current_bundle_sha" \
+  --recovery-authority \
+  "$authority_json"
+```
+
+The bridge verifies both generations, executes only the current supervisor and uses the old script and
+arguments solely as authenticated key material. An updated recovery JSON may be retried only byte-for-byte;
+cutover is forbidden until bridge recovery exits successfully and every exact deadline/session control
+path and retirement tombstone named by the authority is proven absent without manual deletion.
+
+Only after that recovery proof does the operator invoke the authorized metadata migration entrypoint with
+exactly nine arguments:
+
+```bash
+set -euo pipefail
+bridge_archive='/tmp/easyboost-staging-bridge.tar.gz'
+bridge_sha='<full-bridge-sha256>'
+legacy_marker_sha='<full-observed-legacy-marker-sha256>'
+legacy_compose_sha='<full-observed-legacy-compose-sha256>'
+helper_sha="$(sudo cat /usr/local/lib/easyboost-staging-release/current)"
+sudo /usr/local/sbin/easyboost-staging-cutover \
+  "$bridge_archive" \
+  "$bridge_sha" \
+  "$legacy_marker_sha" \
+  "$legacy_compose_sha" \
+  700 644 664 \
+  immutable-archive-v4 \
+  "$helper_sha"
+```
+
+Manual seeding or replacement of `.release-sha256`, the retained archive, its sidecar, Compose, tags,
+locks or recovery journal is forbidden. Normal deploy remains forbidden until cutover has succeeded and
+the operator has proved: no recovery journal; the bridge marker/archive/sidecar/tree are exact; the stable
+tag still names the running app image; readiness is green; and the PostgreSQL container, image, mount and
+named-volume authority are byte-for-byte unchanged. A completed typed-lock tombstone is not sufficient
+while a journal exists. A legacy mutable `code-before-*.tar.gz`, missing pair or abbreviated/default
+rollback target is not migrated or guessed. Deploy/rollback require Linux, Node.js,
 `/usr/bin/python3`, libc/kernel/filesystem support for `renameat2(RENAME_NOREPLACE)`, GNU coreutils and
 `flock`; the installer probes that syscall on `/tmp` and fails closed before changing a generation.
 `postgres:17-alpine` must already exist locally as a seed because activation uses

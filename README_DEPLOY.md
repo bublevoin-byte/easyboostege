@@ -1078,6 +1078,38 @@ sudo /usr/local/sbin/easyboost-staging-recover deploy \
   --recovery-authority "$authority_json"
 ```
 
+Если после сбоя `current` уже переведён на новую проверенную generation, нельзя подставлять её digest
+в обычный `recover deploy`: это изменит transaction key старой операции. Используйте отдельный
+cross-generation bridge с восемью аргументами после role `bridge`. Сначала установите новую
+проверенную generation под fd 8; старые неактивные deadline/session residue этому не мешают, но app
+journal или активный typed cutover lock обязаны отсутствовать:
+
+```bash
+set -euo pipefail
+sudo bash scripts/install-staging-release-helpers.sh
+archive='/tmp/easyboost-staging-release.tar.gz'
+archive_sha='<full-archive-sha256>'
+old_bundle_sha='<full-bundle-sha256-from-failed-run>'
+current_bundle_sha="$(sudo cat /usr/local/lib/easyboost-staging-release/current)"
+authority_json='<exact-json из STAGING_TRANSACTION_RECOVERY_REQUIRED>'
+sudo /usr/local/sbin/easyboost-staging-recover bridge \
+  deploy \
+  "$archive" \
+  "$archive_sha" \
+  immutable-archive-v4 \
+  "$old_bundle_sha" \
+  "$current_bundle_sha" \
+  --recovery-authority \
+  "$authority_json"
+```
+
+Bridge проверяет обе content-addressed generation, но исполняет только текущий supervisor; старый
+deploy script и его исходные аргументы используются как проверенный key material для точной старой
+transaction authority. Если команда вернула новый `STAGING_TRANSACTION_RECOVERY_REQUIRED`, повторите
+bridge только с этим новым exact JSON. К cutover можно переходить лишь после exit 0 и read-only
+подтверждения, что все exact deadline/session control paths и retirement tombstones из authority
+отсутствуют. Ручное удаление даже одного из них запрещено.
+
 Для rollback/restart используется тот же суффикс `--recovery-authority`, но исходная role и её
 аргументы должны совпасть байт-в-байт. Helper передаёт authority отдельно от transaction key,
 проверяет bounded exact JSON и соответствие вычисленным deadline/session control namespaces. Raw
@@ -1147,10 +1179,32 @@ sudo /usr/local/sbin/easyboost-staging-rollback \
 Rollback повторно сверяет filename, requested SHA, одно-строчный sidecar и bytes, строит image из exact
 retained archive до изменения live tree и запускает его без build. Legacy `code-before-*.tar.gz` и
 mutable архив текущего каталога не принимаются. При первом переходе на этот protocol активный staging
-должен иметь заранее сохранённую exact archive+sidecar пару, `.release-sha256`, совпадающий code tree и
-восстанавливаемый stable image; иначе helper fail-closed с кодом 67. Сначала одним окном обслуживания
-установите root-owned v4 bundle и общий launcher, затем выполняйте новый workflow: v1/v2/v3, неверная
-форма CLI и stale same-v4 bundle digest отвергаются до lock, release store и Docker.
+переводится только отдельным девятиаргументным cutover-entrypoint. Ручное создание или замена
+`.release-sha256`, retained archive/sidecar, Compose, Docker tags, locks и recovery journal запрещены:
+
+```bash
+set -euo pipefail
+bridge_archive='/tmp/easyboost-staging-bridge.tar.gz'
+bridge_sha='<full-bridge-sha256>'
+legacy_marker_sha='<full-observed-legacy-marker-sha256>'
+legacy_compose_sha='<full-observed-legacy-compose-sha256>'
+helper_sha="$(sudo cat /usr/local/lib/easyboost-staging-release/current)"
+sudo /usr/local/sbin/easyboost-staging-cutover \
+  "$bridge_archive" \
+  "$bridge_sha" \
+  "$legacy_marker_sha" \
+  "$legacy_compose_sha" \
+  700 644 664 \
+  immutable-archive-v4 \
+  "$helper_sha"
+```
+
+Обычный deploy нельзя запускать, пока cutover не завершился и оператор не доказал отсутствие recovery
+journal, exact bridge marker/archive/sidecar/tree, прежний stable/running app image, зелёный readiness и
+byte-for-byte неизменную authority PostgreSQL container/image/mount/named volume. Один оставшийся
+completed typed-lock tombstone не означает успех, если journal ещё существует. После этой проверки
+выполняйте новый workflow: v1/v2/v3, неверная форма CLI и stale same-v4 bundle digest отвергаются до
+lock, release store и Docker.
 
 Оба helper требуют Linux, Node.js, Docker Compose и GNU tools (`timeout`, `sha256sum`, `readlink`,
 `stat`, `df`, `fallocate`, `truncate`, `cp`) и `flock`. Локальный seed image
@@ -1189,9 +1243,10 @@ private entry и no-replace publication; primary failure остаётся пер
 Supervisor после TERM→KILL имеет отдельный post-KILL deadline: group probe различает absent/alive/unknown,
 и surviving group, probe/signal error либо отсутствие leader close/reap дают явную fail-closed ошибку.
 
-Primary-транзакция ограничена 1800 секундами, checked recovery — отдельными 600 секундами. Внешний
-host timeout равен 2500 секундам, а workflow timeout — 60 минут, то есть оставляет запас на SSH и
-cleanup. Каждая Docker/Compose/archive/readiness/backup и live-tree filesystem операция имеет ещё и
+Root-owned launcher/supervisor ограничивает primary-транзакцию 1800 секундами, а checked recovery —
+отдельными 600 секундами; внешний `timeout` вокруг helper намеренно не используется, чтобы он не мог
+оборвать recovery и оставить неоднозначного владельца cleanup. Workflow timeout равен 60 минутам и
+оставляет запас на archive/upload/SSH и supervisor settlement. Каждая Docker/Compose/archive/readiness/backup и live-tree filesystem операция имеет ещё и
 собственный bounded timeout; readiness-запросы используют connect/max-time. До extraction и сразу
 перед promotion helper удерживает реальные `fallocate` reservations на каждом отличающемся filesystem:
 candidate+predecessor tree/archive, 64 MiB headroom и до 256 MiB для bounded PostgreSQL dump.

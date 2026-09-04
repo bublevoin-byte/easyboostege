@@ -8,7 +8,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { STAGING_DEADLINE_PROTOCOL } from '../scripts/staging-deadline-control.js';
+import {
+  STAGING_DEADLINE_PROTOCOL,
+  createStagingDeadlineMailbox,
+} from '../scripts/staging-deadline-control.js';
+import {
+  recoverPosixSessionControl,
+  resumePosixSessionRecoveryHandoff,
+} from '../scripts/posix-session-supervisor.js';
 import {
   parseStagingTransactionRecoveryAuthority,
   recoverStagingTransaction,
@@ -998,16 +1005,16 @@ test('root transaction recovery retires only an absence-proven canonical incompl
     kind, options.permitIncompleteRetirement, options.retire,
   ]), [
     ['cleanup-session-publication', undefined, undefined],
-    ['session', true, false],
     ['cleanup-deadline-publication', undefined, undefined],
+    ['session', true, false],
     ['deadline', true, false],
     ['complete-session', undefined, undefined],
   ]);
   assert.deepEqual(calls[0][1], posixSessionPublicationAuthority);
-  assert.equal(calls[2][1], deadlinePublicationAuthority);
+  assert.equal(calls[1][1], deadlinePublicationAuthority);
   assert.equal(calls[3][1].sessionRecoveryProof, recoveryProof);
   assert.equal(calls[4][1].proof, recoveryProof);
-  assert.equal(calls[1][1].publicationResidue, undefined);
+  assert.equal(calls[2][1].publicationResidue, undefined);
   assert.equal(calls[3][1].publicationResidue, undefined);
   assert.deepEqual(recovered, {
     deadline: { finalSequence: 1, state: 'incomplete' },
@@ -1608,9 +1615,8 @@ test('typed transaction recovery cleans exact retirement tombstones before names
   });
   assert.deepEqual(calls, [
     ['cleanup-session', authority.posixSessionRetirementAuthority],
-    ['recover-session'],
     ['cleanup-deadline', authority.deadlineRetirementAuthority],
-    ['recover-deadline'], ['complete-session'],
+    ['recover-session'], ['recover-deadline'], ['complete-session'],
   ]);
   assert.deepEqual(recovered, {
     deadline: { state: 'not-created' },
@@ -1703,6 +1709,313 @@ test('failed retirement cleanup preserves every still-live exact transaction aut
     && JSON.stringify(error.recoveryAuthority) === JSON.stringify(authority));
 });
 
+test('deadline retirement cleanup failure does not advance a retained session baton', () => {
+  const script = '/fixture/staging-deploy.sh';
+  const args = ['archive', 'sha'];
+  const key = `${path.resolve(script)}:${JSON.stringify(args)}`;
+  const deadlineRoot = path.resolve('/fixture/deadline-root');
+  const sessionRoot = path.resolve('/fixture/session-root');
+  const deadlineDirectory = path.join(deadlineRoot, createHash('sha256')
+    .update(`staging-deadline:${key}`, 'utf8').digest('hex'));
+  const sessionKey = `staging-transaction:${key}`;
+  const sessionDirectory = path.join(sessionRoot, createHash('sha256')
+    .update(sessionKey, 'utf8').digest('hex'));
+  const sessionHandoff = Object.freeze({
+    claimPath: path.join(sessionDirectory, 'retirement.claim'),
+    controlDirectory: sessionDirectory,
+    controlKey: sessionKey,
+    controlRoot: sessionRoot,
+    protocol: 'easyboost-posix-session-recovery-handoff-v1',
+    recoveryScope: deadlineDirectory,
+    retirementOwner: 'c'.repeat(64),
+  });
+  const deadlineRetirement = Object.freeze({
+    controlDirectory: deadlineDirectory,
+    tombstone: path.join(deadlineRoot,
+      `.easyboost-staging-quarantine-slot.${'e'.repeat(64)}.tombstone`),
+  });
+  const cleanupFailure = new Error('staging deadline retired control directory still exists');
+  cleanupFailure.recoveryAuthority = deadlineRetirement;
+  let sessionResumeCalls = 0;
+
+  assert.throws(() => recoverStagingTransaction({
+    args,
+    cleanupDeadlineRetirement() { throw cleanupFailure; },
+    deadlineControlRoot: deadlineRoot,
+    platform: 'linux',
+    recoveryAuthority: {
+      deadlineControlDirectory: deadlineDirectory,
+      deadlineRetirementAuthority: deadlineRetirement,
+      posixSessionControlDirectory: sessionDirectory,
+      posixSessionRecoveryHandoff: sessionHandoff,
+      protocol: 'easyboost-staging-transaction-recovery-v1',
+    },
+    resumeSessionRecovery() {
+      sessionResumeCalls += 1;
+      const result = { absence: 'absent', state: 'incomplete' };
+      Object.defineProperty(result, 'recoveryHandoff', {
+        value: Object.freeze({
+          ...sessionHandoff,
+          claimPath: path.join(sessionDirectory,
+            `.recovery-baton.${'d'.repeat(64)}.claim`),
+        }),
+      });
+      Object.defineProperty(result, 'recoveryProof', { value: Object.freeze({}) });
+      return Object.freeze(result);
+    },
+    script,
+    sessionControlRoot: sessionRoot,
+  }), (error) => error?.exitCode === 125
+    && error?.cause === cleanupFailure
+    && JSON.stringify(error.recoveryAuthority?.deadlineRetirementAuthority)
+      === JSON.stringify(deadlineRetirement)
+    && JSON.stringify(error.recoveryAuthority?.posixSessionRecoveryHandoff)
+      === JSON.stringify(sessionHandoff));
+  assert.equal(sessionResumeCalls, 0,
+    'deadline retirement must be preflighted before adopting the session baton');
+});
+
+test('interrupted deadline retirement round-trips both authorities and resumes deadline first', () => {
+  const temporaryRoot = fsSync.mkdtempSync(path.join(os.tmpdir(),
+    'easyboost-transaction-deadline-collision-'));
+  const deadlineRoot = path.join(temporaryRoot, 'deadline-root');
+  const sessionRoot = path.join(temporaryRoot, 'session-root');
+  const script = path.resolve('/fixture/staging-deploy.sh');
+  const args = ['archive', 'sha'];
+  const key = `${script}:${JSON.stringify(args)}`;
+  const deadlineKey = `staging-deadline:${key}`;
+  const sessionKey = `staging-transaction:${key}`;
+  const deadlineDirectory = path.join(deadlineRoot, createHash('sha256')
+    .update(deadlineKey, 'utf8').digest('hex'));
+  const sessionDirectory = path.join(sessionRoot, createHash('sha256')
+    .update(sessionKey, 'utf8').digest('hex'));
+  const handoff = (role, suffix) => Object.freeze({
+    claimPath: path.join(role === 'deadline' ? deadlineDirectory : sessionDirectory,
+      `.recovery-baton.${suffix.repeat(64)}.claim`),
+    controlDirectory: role === 'deadline' ? deadlineDirectory : sessionDirectory,
+    controlKey: role === 'deadline' ? deadlineKey : sessionKey,
+    controlRoot: role === 'deadline' ? deadlineRoot : sessionRoot,
+    protocol: role === 'deadline'
+      ? 'easyboost-staging-deadline-recovery-handoff-v1'
+      : 'easyboost-posix-session-recovery-handoff-v1',
+    recoveryScope: role === 'deadline'
+      ? JSON.stringify({ fingerprint: 'f'.repeat(64), result: { state: 'incomplete' } })
+      : deadlineDirectory,
+    retirementOwner: suffix.repeat(64),
+  });
+  const capable = (value, recoveryHandoff, recoveryProof) => {
+    Object.defineProperty(value, 'recoveryHandoff', { value: recoveryHandoff });
+    Object.defineProperty(value, 'recoveryProof', { value: recoveryProof });
+    return Object.freeze(value);
+  };
+  const oldDeadlineRetirement = Object.freeze({
+    controlDirectory: deadlineDirectory,
+    tombstone: path.join(deadlineRoot,
+      `.easyboost-staging-quarantine-slot.${'a'.repeat(64)}.tombstone`),
+  });
+  const firstSession = handoff('session', 'b');
+  const nextSession = handoff('session', 'c');
+  const currentDeadline = handoff('deadline', 'd');
+  const nextDeadline = handoff('deadline', 'e');
+  const finalSession = handoff('session', 'f');
+  fsSync.mkdirSync(deadlineDirectory, { mode: 0o700, recursive: true });
+  fsSync.mkdirSync(sessionDirectory, { mode: 0o700, recursive: true });
+  try {
+    const deadlineFailure = new Error('synthetic current deadline recovery interruption');
+    Object.defineProperty(deadlineFailure, 'recoveryHandoff', { value: currentDeadline });
+    let combinedAuthority;
+    assert.throws(() => recoverStagingTransaction({
+      args,
+      deadlineControlRoot: deadlineRoot,
+      platform: 'linux',
+      recoverDeadline() { throw deadlineFailure; },
+      recoveryAuthority: {
+        deadlineControlDirectory: deadlineDirectory,
+        deadlineRetirementAuthority: oldDeadlineRetirement,
+        posixSessionControlDirectory: sessionDirectory,
+        posixSessionRecoveryHandoff: firstSession,
+        protocol: 'easyboost-staging-transaction-recovery-v1',
+      },
+      resumeSessionRecovery() {
+        return capable({ absence: 'absent', state: 'incomplete' }, nextSession, {});
+      },
+      script,
+      sessionControlRoot: sessionRoot,
+    }), (error) => {
+      combinedAuthority = error?.recoveryAuthority;
+      return error?.exitCode === 125
+        && JSON.stringify(combinedAuthority?.deadlineRetirementAuthority)
+          === JSON.stringify(oldDeadlineRetirement)
+        && JSON.stringify(combinedAuthority?.deadlineRecoveryHandoff)
+          === JSON.stringify(currentDeadline)
+        && JSON.stringify(combinedAuthority?.posixSessionRecoveryHandoff)
+          === JSON.stringify(nextSession);
+    });
+    assert.deepEqual(parseStagingTransactionRecoveryAuthority(
+      JSON.stringify(combinedAuthority),
+    ), combinedAuthority);
+
+    const calls = [];
+    const recovered = recoverStagingTransaction({
+      args,
+      cleanupDeadlineRetirement(value) {
+        calls.push(['cleanup-deadline-retirement', value]);
+        assert.equal(fsSync.existsSync(deadlineDirectory), false);
+      },
+      completeDeadlineRecovery(proof) {
+        calls.push(['complete-deadline', proof]);
+        fsSync.rmSync(deadlineDirectory, { recursive: true });
+        return true;
+      },
+      completeSessionRecovery(proof) {
+        calls.push(['complete-session', proof]);
+        return true;
+      },
+      deadlineControlRoot: deadlineRoot,
+      platform: 'linux',
+      recoverDeadline() { throw new Error('must resume the retained deadline handoff'); },
+      recoveryAuthority: combinedAuthority,
+      resumeDeadlineRecovery(value) {
+        calls.push(['resume-deadline', value]);
+        return capable({ state: 'incomplete' }, nextDeadline, { role: 'deadline' });
+      },
+      resumeSessionRecovery(value) {
+        calls.push(['resume-session', value]);
+        return capable({ absence: 'absent', state: 'incomplete' }, finalSession,
+          { role: 'session' });
+      },
+      script,
+      sessionControlRoot: sessionRoot,
+    });
+    assert.deepEqual(calls.map(([operation]) => operation), [
+      'resume-deadline',
+      'complete-deadline',
+      'cleanup-deadline-retirement',
+      'resume-session',
+      'complete-session',
+    ]);
+    assert.deepEqual(recovered, {
+      deadline: { state: 'incomplete' },
+      session: { absence: 'absent', state: 'incomplete' },
+    });
+  } finally {
+    fsSync.rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test('reserved deadline tombstone and live session baton recover without another collision', () => {
+  const temporaryRoot = fsSync.mkdtempSync(path.join(os.tmpdir(),
+    'easyboost-transaction-reserved-deadline-slot-'));
+  const deadlineRoot = path.join(temporaryRoot, 'deadline-root');
+  const sessionRoot = path.join(temporaryRoot, 'session-root');
+  const script = path.join(temporaryRoot, 'staging-deploy.sh');
+  const args = ['archive', 'sha', 'protocol', 'helper-sha'];
+  const key = `${path.resolve(script)}:${JSON.stringify(args)}`;
+  const deadlineKey = `staging-deadline:${key}`;
+  const sessionKey = `staging-transaction:${key}`;
+  const deadlineDirectory = path.join(deadlineRoot, createHash('sha256')
+    .update(deadlineKey, 'utf8').digest('hex'));
+  const sessionDirectory = path.join(sessionRoot, createHash('sha256')
+    .update(sessionKey, 'utf8').digest('hex'));
+  fsSync.mkdirSync(deadlineRoot, { mode: 0o700, recursive: true });
+  fsSync.mkdirSync(sessionRoot, { mode: 0o700, recursive: true });
+  const mailbox = createStagingDeadlineMailbox({
+    controlKey: deadlineKey,
+    controlRoot: deadlineRoot,
+    token: TOKEN,
+  });
+  try {
+    let interruptedDeadline;
+    assert.throws(() => mailbox.dispose({
+      beforeRetirementValidation() {
+        throw new Error('synthetic interruption after terminal-slot reservation');
+      },
+    }), (error) => {
+      interruptedDeadline = error?.recoveryAuthority;
+      return /terminal-slot reservation/iu.test(error?.message ?? '')
+        && interruptedDeadline?.recoveryHandoff !== undefined;
+    });
+    const deadlineRetirement = Object.freeze({
+      controlDirectory: interruptedDeadline.controlDirectory,
+      tombstone: interruptedDeadline.tombstone,
+    });
+    assert.equal(deadlineRetirement.controlDirectory, deadlineDirectory);
+    assert.equal(fsSync.existsSync(deadlineDirectory), true);
+    assert.equal(fsSync.existsSync(path.join(deadlineDirectory, 'retirement.claim')), true);
+    assert.equal(fsSync.existsSync(path.join(deadlineRetirement.tombstone, 'payload')), false);
+    const reservation = JSON.parse(fsSync.readFileSync(
+      path.join(deadlineRetirement.tombstone, 'reservation.claim'), 'utf8',
+    ));
+    assert.equal(reservation.purpose, 'RETIREMENT');
+    assert.equal(reservation.source, deadlineDirectory);
+
+    const session = recoverPosixSessionControl({
+      controlKey: sessionKey,
+      controlRoot: sessionRoot,
+      permitIncompleteRetirement: true,
+      recoveryScope: deadlineDirectory,
+      retire: false,
+    });
+    const adoptedSession = resumePosixSessionRecoveryHandoff(session.recoveryHandoff);
+    const liveSessionHandoff = adoptedSession.recoveryHandoff;
+    assert.deepEqual(fsSync.readdirSync(sessionDirectory).sort(), [
+      path.basename(liveSessionHandoff.claimPath),
+      'retirement.claim',
+      'startup.claim',
+    ].sort());
+
+    let combinedAuthority;
+    assert.throws(() => recoverStagingTransaction({
+      args,
+      deadlineControlRoot: deadlineRoot,
+      platform: 'linux',
+      recoveryAuthority: {
+        deadlineControlDirectory: deadlineDirectory,
+        deadlineRetirementAuthority: deadlineRetirement,
+        posixSessionControlDirectory: sessionDirectory,
+        posixSessionRecoveryHandoff: liveSessionHandoff,
+        protocol: 'easyboost-staging-transaction-recovery-v1',
+      },
+      script,
+      sessionControlRoot: sessionRoot,
+    }), (error) => {
+      combinedAuthority = error?.recoveryAuthority;
+      return error?.exitCode === 125
+        && JSON.stringify(combinedAuthority?.deadlineRetirementAuthority)
+          === JSON.stringify(deadlineRetirement)
+        && combinedAuthority?.deadlineRecoveryHandoff?.controlDirectory
+          === deadlineDirectory
+        && combinedAuthority?.posixSessionRecoveryHandoff?.controlDirectory
+          === sessionDirectory
+        && combinedAuthority.posixSessionRecoveryHandoff.claimPath
+          !== liveSessionHandoff.claimPath;
+    });
+    assert.deepEqual(parseStagingTransactionRecoveryAuthority(
+      JSON.stringify(combinedAuthority),
+    ), combinedAuthority);
+    assert.equal(fsSync.existsSync(deadlineDirectory), true);
+    assert.equal(fsSync.existsSync(path.join(deadlineRetirement.tombstone, 'payload')), false);
+
+    const recovered = recoverStagingTransaction({
+      args,
+      deadlineControlRoot: deadlineRoot,
+      platform: 'linux',
+      recoveryAuthority: combinedAuthority,
+      script,
+      sessionControlRoot: sessionRoot,
+    });
+    assert.deepEqual(recovered, {
+      deadline: { state: 'disposed' },
+      session: { absence: 'absent', state: 'not-created' },
+    });
+    assert.equal(fsSync.existsSync(deadlineDirectory), false);
+    assert.equal(fsSync.existsSync(sessionDirectory), false);
+    assert.equal(fsSync.existsSync(path.join(deadlineRetirement.tombstone, 'payload')), true);
+  } finally {
+    fsSync.rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test('a role-local retirement failure preserves the other role recovery handoff', () => {
   const script = '/fixture/staging-deploy.sh';
   const args = ['archive', 'sha'];
@@ -1754,7 +2067,6 @@ test('a role-local retirement failure preserves the other role recovery handoff'
       === JSON.stringify(sessionRetirement));
 
   const sessionHandoff = handoff('session', 'c');
-  const nextSessionHandoff = handoff('session', 'd');
   const deadlineRetirement = Object.freeze({
     controlDirectory: deadlineDirectory,
     tombstone: path.join(deadlineRoot,
@@ -1762,7 +2074,7 @@ test('a role-local retirement failure preserves the other role recovery handoff'
   });
   const deadlineCleanupFailure = new Error('synthetic deadline retirement cleanup failure');
   deadlineCleanupFailure.recoveryAuthority = deadlineRetirement;
-  const recoveryProof = Object.freeze({});
+  let sessionResumeCalls = 0;
   assert.throws(() => recoverStagingTransaction({
     args,
     cleanupDeadlineRetirement() { throw deadlineCleanupFailure; },
@@ -1776,10 +2088,8 @@ test('a role-local retirement failure preserves the other role recovery handoff'
       protocol: 'easyboost-staging-transaction-recovery-v1',
     },
     resumeSessionRecovery() {
-      const result = { absence: 'absent', state: 'incomplete' };
-      Object.defineProperty(result, 'recoveryHandoff', { value: nextSessionHandoff });
-      Object.defineProperty(result, 'recoveryProof', { value: recoveryProof });
-      return Object.freeze(result);
+      sessionResumeCalls += 1;
+      throw new Error('session recovery must not advance before deadline cleanup');
     },
     script,
     sessionControlRoot: sessionRoot,
@@ -1787,7 +2097,8 @@ test('a role-local retirement failure preserves the other role recovery handoff'
     && JSON.stringify(error.recoveryAuthority?.deadlineRetirementAuthority)
       === JSON.stringify(deadlineRetirement)
     && JSON.stringify(error.recoveryAuthority?.posixSessionRecoveryHandoff)
-      === JSON.stringify(nextSessionHandoff));
+      === JSON.stringify(sessionHandoff));
+  assert.equal(sessionResumeCalls, 0);
 
   const sessionPublication = syntheticPosixPublicationAuthority({
     destination: path.join(sessionDirectory, 'control.json'),
@@ -1955,6 +2266,8 @@ test('transaction recovery never recaptures a replacement POSIX publication occu
 test('transaction recovery authority parser rejects extras, mismatch and unbounded payloads', () => {
   const sessionDirectory = path.resolve('/fixture/session');
   const sessionRoot = path.dirname(sessionDirectory);
+  const deadlineDirectory = path.resolve('/fixture/deadline');
+  const deadlineRoot = path.dirname(deadlineDirectory);
   const base = {
     deadlineControlDirectory: null,
     posixSessionControlDirectory: sessionDirectory,
@@ -2001,6 +2314,19 @@ test('transaction recovery authority parser rejects extras, mismatch and unbound
     posixSessionRetirementAuthority: syntheticPosixRetirementAuthority(
       sessionDirectory, '6',
     ),
+  })), /mutually exclusive/iu);
+  assert.throws(() => parseStagingTransactionRecoveryAuthority(JSON.stringify({
+    ...base,
+    deadlineControlDirectory: deadlineDirectory,
+    deadlinePublicationAuthority: {
+      destination: path.join(deadlineDirectory, 'control.json'),
+      temporary: path.join(deadlineRoot, `.deadline.control.json.${'7'.repeat(32)}.tmp`),
+    },
+    deadlineRetirementAuthority: {
+      controlDirectory: deadlineDirectory,
+      tombstone: path.join(deadlineRoot,
+        `.easyboost-staging-quarantine-slot.${'8'.repeat(64)}.tombstone`),
+    },
   })), /mutually exclusive/iu);
   assert.throws(() => parseStagingTransactionRecoveryAuthority(' '.repeat(65_537)),
     /payload/iu);

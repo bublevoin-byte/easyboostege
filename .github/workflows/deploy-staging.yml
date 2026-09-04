@@ -18,14 +18,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: staging
-    # 2500s remote transaction + 60s KILL settlement + archive/upload/SSH margin.
+    # The root-owned launcher bounds transaction/recovery; keep archive/upload/SSH margin here.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           # Archive helpers use Node built-ins and install no packages, so an npm cache has no useful payload.
-          node-version: 22
+          node-version: 22.23.2
       - name: Create immutable release archive
         run: |
           node scripts/staging-release-archive.js create-git . easyboost-staging-release.tar.gz
@@ -55,4 +55,4 @@ jobs:
             easyboost-staging-release.tar.gz \
             "$STAGING_USER@$STAGING_HOST:/tmp/"
           ssh -i ~/.ssh/staging "$STAGING_USER@$STAGING_HOST" \
-            "sudo timeout --signal=TERM --kill-after=60s 2500s /usr/local/sbin/easyboost-staging-deploy /tmp/easyboost-staging-release.tar.gz '$release_sha' immutable-archive-v4 '$helper_sha'"
+            "sudo /usr/local/sbin/easyboost-staging-deploy /tmp/easyboost-staging-release.tar.gz '$release_sha' immutable-archive-v4 '$helper_sha'"

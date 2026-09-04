@@ -113,6 +113,16 @@ function transactionControlKey(script, args) {
   return key;
 }
 
+function pathIsAbsent(entry) {
+  try {
+    fs.lstatSync(entry);
+    return false;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return true;
+    throw error;
+  }
+}
+
 function boundedString(value, maximumBytes) {
   return typeof value === 'string' && value.length > 0
     && Buffer.byteLength(value, 'utf8') <= maximumBytes;
@@ -402,9 +412,10 @@ function exactTransactionRecoveryAuthority(authority) {
       expectedProtocol: 'easyboost-staging-deadline-recovery-handoff-v1',
       label: 'staging deadline',
     });
-  if ([deadlinePublicationAuthority, deadlineRecoveryHandoff, deadlineRetirementAuthority]
-    .filter((value) => value !== undefined).length > 1) {
-    throw new Error('staging deadline recovery authority roles are mutually exclusive');
+  if (deadlinePublicationAuthority !== undefined
+      && (deadlineRecoveryHandoff !== undefined
+        || deadlineRetirementAuthority !== undefined)) {
+    throw new Error('staging deadline current recovery authority roles are mutually exclusive');
   }
   if ([posixSessionPublicationAuthority, posixSessionPublicationAuthorities,
     posixSessionRecoveryHandoff, posixSessionRetirementAuthority]
@@ -480,6 +491,7 @@ function transactionRecoveryFailure(cause, {
   const includeSession = sessionDirectory !== null && sessionDirectory !== undefined;
   const deadlineRoleChanged = publicationRole === 'deadline'
     && (publication !== null || retirement !== null || currentDeadlineHandoff !== undefined);
+  const deadlineRetirementChanged = publicationRole === 'deadline' && retirement !== null;
   const sessionRoleChanged = publicationRole === 'session'
     && (publication !== null || retirement !== null || currentSessionHandoff !== undefined);
   const retainedSessionPublications = includeSession
@@ -501,7 +513,7 @@ function transactionRecoveryFailure(cause, {
         ? { deadlineRecoveryHandoff } : {}),
     ...(includeDeadline && publicationRole === 'deadline' && retirement !== null
       ? { deadlineRetirementAuthority: retirement }
-      : includeDeadline && !deadlineRoleChanged && deadlineRetirementAuthority
+      : includeDeadline && !deadlineRetirementChanged && deadlineRetirementAuthority
         ? { deadlineRetirementAuthority } : {}),
     posixSessionControlDirectory: includeSession ? sessionDirectory : null,
     ...sessionPublicationAuthorityFields(retainedSessionPublications),
@@ -689,6 +701,85 @@ export function recoverStagingTransaction({
       });
     }
   }
+  const deadlineRecoveryFailure = (cause) => transactionRecoveryFailure(cause, {
+    deadlineDirectory,
+    deadlinePublicationAuthority: resolvedDeadlinePublication,
+    deadlineRecoveryHandoff: resolvedDeadlineHandoff,
+    deadlineRetirementAuthority: resolvedDeadlineRetirement,
+    publicationRole: 'deadline',
+    sessionDirectory,
+    sessionPublicationAuthorities: resolvedSessionPublications,
+    sessionRecoveryHandoff: resolvedSessionHandoff,
+    sessionRetirementAuthority: resolvedSessionRetirement,
+  });
+  const cleanupResolvedDeadlineRetirement = () => {
+    if (resolvedDeadlineRetirement === undefined) return;
+    try {
+      cleanupDeadlineRetirement(resolvedDeadlineRetirement, deadlineMaintenance);
+      resolvedDeadlineRetirement = undefined;
+    } catch (cause) {
+      throw deadlineRecoveryFailure(cause);
+    }
+  };
+  const completeResolvedDeadlineRecovery = (candidate) => {
+    resolvedDeadlineHandoff = candidate?.recoveryHandoff;
+    if (candidate?.recoveryProof !== undefined) {
+      let completed;
+      try {
+        completed = completeDeadlineRecovery(candidate.recoveryProof, {
+          controlKey: deadlineKey,
+          controlRoot: resolvedDeadlineRoot,
+          ...deadlineMaintenance,
+        });
+      } catch (cause) {
+        throw deadlineRecoveryFailure(cause);
+      }
+      if (completed !== true) {
+        throw deadlineRecoveryFailure(
+          new Error('staging transaction recovery could not retire the deadline authority'),
+        );
+      }
+    }
+    resolvedDeadlineHandoff = undefined;
+  };
+
+  // A terminal authority normally has no live source and can be reconciled
+  // before any restart baton is adopted. A present source means retirement was
+  // interrupted after reserving its terminal slot: retain that slot while
+  // recovering the same deadline namespace under the session-absence protocol.
+  let deadlineRetirementDeferred = false;
+  if (resolvedDeadlineRetirement !== undefined) {
+    try {
+      deadlineRetirementDeferred = !pathIsAbsent(
+        resolvedDeadlineRetirement.controlDirectory,
+      );
+    } catch (cause) {
+      throw deadlineRecoveryFailure(cause);
+    }
+    if (!deadlineRetirementDeferred) cleanupResolvedDeadlineRetirement();
+  }
+  if (resolvedDeadlinePublication !== undefined) {
+    try {
+      cleanupDeadlinePublication(resolvedDeadlinePublication, deadlineMaintenance);
+      resolvedDeadlinePublication = undefined;
+    } catch (cause) {
+      throw deadlineRecoveryFailure(cause);
+    }
+  }
+
+  let deadline;
+  let deadlineRecoveredBeforeSession = false;
+  if (deadlineRetirementDeferred && resolvedDeadlineHandoff !== undefined) {
+    try {
+      deadline = resumeDeadlineRecovery(resolvedDeadlineHandoff, deadlineMaintenance);
+    } catch (cause) {
+      throw deadlineRecoveryFailure(cause);
+    }
+    completeResolvedDeadlineRecovery(deadline);
+    cleanupResolvedDeadlineRetirement();
+    deadlineRetirementDeferred = false;
+    deadlineRecoveredBeforeSession = true;
+  }
   let proven;
   try {
     proven = resolvedSessionHandoff === undefined
@@ -728,102 +819,28 @@ export function recoverStagingTransaction({
       },
     );
   }
-  if (resolvedDeadlineRetirement !== undefined) {
+  if (!deadlineRecoveredBeforeSession) {
     try {
-      cleanupDeadlineRetirement(resolvedDeadlineRetirement, deadlineMaintenance);
-      resolvedDeadlineRetirement = undefined;
+      deadline = resolvedDeadlineHandoff === undefined
+        ? recoverDeadline({
+          controlKey: deadlineKey,
+          controlRoot: resolvedDeadlineRoot,
+          ...deadlineMaintenance,
+          permitIncompleteRetirement: true,
+          retire: false,
+          sessionControlRoot: resolvedSessionRoot,
+          sessionRecoveryProof: proven.recoveryProof,
+        })
+        : resumeDeadlineRecovery(resolvedDeadlineHandoff, deadlineMaintenance);
     } catch (cause) {
-      throw transactionRecoveryFailure(cause, {
-        deadlineDirectory,
-        deadlinePublicationAuthority: resolvedDeadlinePublication,
-        deadlineRecoveryHandoff: resolvedDeadlineHandoff,
-        deadlineRetirementAuthority: resolvedDeadlineRetirement,
-        publicationRole: 'deadline',
-        sessionDirectory,
-        sessionPublicationAuthorities: resolvedSessionPublications,
-        sessionRecoveryHandoff: resolvedSessionHandoff,
-        sessionRetirementAuthority: resolvedSessionRetirement,
-      });
+      throw deadlineRecoveryFailure(cause);
+    }
+    completeResolvedDeadlineRecovery(deadline);
+    if (deadlineRetirementDeferred) {
+      cleanupResolvedDeadlineRetirement();
+      deadlineRetirementDeferred = false;
     }
   }
-  if (resolvedDeadlinePublication !== undefined) {
-    try {
-      cleanupDeadlinePublication(resolvedDeadlinePublication, deadlineMaintenance);
-      resolvedDeadlinePublication = undefined;
-    } catch (cause) {
-      throw transactionRecoveryFailure(cause, {
-        deadlineDirectory,
-        deadlinePublicationAuthority: resolvedDeadlinePublication,
-        deadlineRecoveryHandoff: resolvedDeadlineHandoff,
-        deadlineRetirementAuthority: resolvedDeadlineRetirement,
-        publicationRole: 'deadline',
-        sessionDirectory,
-        sessionRecoveryHandoff: resolvedSessionHandoff,
-        sessionRetirementAuthority: resolvedSessionRetirement,
-      });
-    }
-  }
-  let deadline;
-  try {
-    deadline = resolvedDeadlineHandoff === undefined
-      ? recoverDeadline({
-        controlKey: deadlineKey,
-        controlRoot: resolvedDeadlineRoot,
-        ...deadlineMaintenance,
-        permitIncompleteRetirement: true,
-        retire: false,
-        sessionControlRoot: resolvedSessionRoot,
-        sessionRecoveryProof: proven.recoveryProof,
-      })
-      : resumeDeadlineRecovery(resolvedDeadlineHandoff, deadlineMaintenance);
-  } catch (cause) {
-    throw transactionRecoveryFailure(cause, {
-      deadlineDirectory,
-      deadlinePublicationAuthority: resolvedDeadlinePublication,
-      deadlineRecoveryHandoff: resolvedDeadlineHandoff,
-      deadlineRetirementAuthority: resolvedDeadlineRetirement,
-      publicationRole: 'deadline',
-      sessionDirectory,
-      sessionPublicationAuthorities: resolvedSessionPublications,
-      sessionRecoveryHandoff: resolvedSessionHandoff,
-      sessionRetirementAuthority: resolvedSessionRetirement,
-    });
-  }
-  resolvedDeadlineHandoff = deadline?.recoveryHandoff;
-  if (deadline?.recoveryProof !== undefined) {
-    let deadlineCompleted;
-    try {
-      deadlineCompleted = completeDeadlineRecovery(deadline.recoveryProof, {
-        controlKey: deadlineKey,
-        controlRoot: resolvedDeadlineRoot,
-        ...deadlineMaintenance,
-      });
-    } catch (cause) {
-      throw transactionRecoveryFailure(cause, {
-        deadlineDirectory,
-        deadlineRecoveryHandoff: resolvedDeadlineHandoff,
-        deadlineRetirementAuthority: resolvedDeadlineRetirement,
-        publicationRole: 'deadline',
-        sessionDirectory,
-        sessionRecoveryHandoff: resolvedSessionHandoff,
-        sessionRetirementAuthority: resolvedSessionRetirement,
-      });
-    }
-    if (deadlineCompleted !== true) {
-      throw transactionRecoveryFailure(
-        new Error('staging transaction recovery could not retire the deadline authority'), {
-          deadlineDirectory,
-          deadlineRecoveryHandoff: resolvedDeadlineHandoff,
-          deadlineRetirementAuthority: resolvedDeadlineRetirement,
-          publicationRole: 'deadline',
-          sessionDirectory,
-          sessionRecoveryHandoff: resolvedSessionHandoff,
-          sessionRetirementAuthority: resolvedSessionRetirement,
-        },
-      );
-    }
-  }
-  resolvedDeadlineHandoff = undefined;
   let sessionCompleted;
   try {
     sessionCompleted = completeSessionRecovery(proven.recoveryProof, {

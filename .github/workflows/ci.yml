@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
       - run: npm ci
       - name: Audit production dependencies
@@ -30,7 +30,8 @@ jobs:
         env:
           EASYBOOST_STAGING_POSTGRES_IMAGE_ID: sha256:0000000000000000000000000000000000000000000000000000000000000000
         run: |
-          bash -n scripts/staging-deploy.sh scripts/staging-rollback.sh
+          bash -n scripts/install-staging-release-helpers.sh scripts/staging-cutover.sh scripts/staging-deploy.sh scripts/staging-rollback.sh
+          node --check scripts/staging-cutover-host-lock.js
           cp .env.staging.example .env.staging
           docker compose -f compose.staging.yml --env-file .env.staging config --quiet
       - name: PostgreSQL repository integration

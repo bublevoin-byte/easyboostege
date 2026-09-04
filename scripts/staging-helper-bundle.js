@@ -25,7 +25,7 @@ export {
 export const STAGING_HELPER_PROTOCOL = 'immutable-archive-v4';
 export const STAGING_NODE_AUTHORITY_ENVIRONMENT = 'EASYBOOST_STAGING_NODE_AUTHORITY';
 export const STAGING_NODE_AUTHORITY_PROTOCOL = 'easyboost-staging-node-authority-v1';
-export const HELPER_BUNDLE_FILES = Object.freeze([
+export const PRE_CUTOVER_V4_HELPER_BUNDLE_FILES = Object.freeze([
   'posix-session-supervisor.js',
   'staging-bounded-stream.js',
   'staging-command-supervisor.js',
@@ -41,6 +41,11 @@ export const HELPER_BUNDLE_FILES = Object.freeze([
   'staging-transaction-supervisor.js',
   'verify-staging-compose.js',
 ]);
+export const HELPER_BUNDLE_FILES = Object.freeze([
+  ...PRE_CUTOVER_V4_HELPER_BUNDLE_FILES,
+  'staging-cutover-host-lock.js',
+  'staging-cutover.sh',
+].sort());
 
 const MANIFEST_NAME = 'staging-release-bundle.json';
 const GENERATION_ESM_BOUNDARY_NAME = 'package.json';
@@ -53,11 +58,19 @@ const HELPER_GENERATION_FILE_SPECS = Object.freeze(HELPER_GENERATION_FILES.map((
   mode: name === GENERATION_ESM_BOUNDARY_NAME ? '0444' : '0555',
   name,
 })));
-const LEGACY_HELPER_GENERATION_FILE_SPECS = Object.freeze(HELPER_BUNDLE_FILES.map((name) => Object.freeze({
+const PRE_CUTOVER_V4_GENERATION_FILE_SPECS = Object.freeze([
+  GENERATION_ESM_BOUNDARY_NAME,
+  ...PRE_CUTOVER_V4_HELPER_BUNDLE_FILES,
+].sort().map((name) => Object.freeze({
+  mode: name === GENERATION_ESM_BOUNDARY_NAME ? '0444' : '0555',
+  name,
+})));
+const LEGACY_HELPER_GENERATION_FILE_SPECS = Object.freeze(PRE_CUTOVER_V4_HELPER_BUNDLE_FILES.map((name) => Object.freeze({
   mode: '0555',
   name,
 })));
-const CURRENT_GENERATION_SCHEMA = 'v4-esm-boundary';
+const CURRENT_GENERATION_SCHEMA = 'v4-esm-boundary-cutover';
+const PRE_CUTOVER_V4_GENERATION_SCHEMA = 'v4-esm-boundary';
 const LEGACY_GENERATION_SCHEMA = 'v4-pre-esm-boundary';
 const LEGACY_GENERATION_LOADER_SOURCE = `import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -310,6 +323,9 @@ function generationSchemaForManifest(manifest) {
       && record.mode === specs[index].mode);
   if (matches(HELPER_GENERATION_FILE_SPECS)) {
     return { name: CURRENT_GENERATION_SCHEMA, specs: HELPER_GENERATION_FILE_SPECS };
+  }
+  if (matches(PRE_CUTOVER_V4_GENERATION_FILE_SPECS)) {
+    return { name: PRE_CUTOVER_V4_GENERATION_SCHEMA, specs: PRE_CUTOVER_V4_GENERATION_FILE_SPECS };
   }
   if (matches(LEGACY_HELPER_GENERATION_FILE_SPECS)) {
     return { name: LEGACY_GENERATION_SCHEMA, specs: LEGACY_HELPER_GENERATION_FILE_SPECS };
@@ -1126,10 +1142,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const CURRENT_FILES = Object.freeze(${JSON.stringify(HELPER_GENERATION_FILE_SPECS)});
+const PRE_CUTOVER_FILES = Object.freeze(${JSON.stringify(PRE_CUTOVER_V4_GENERATION_FILE_SPECS)});
 const LEGACY_FILES = Object.freeze(${JSON.stringify(LEGACY_HELPER_GENERATION_FILE_SPECS)});
 const MANIFEST = ${JSON.stringify(MANIFEST_NAME)};
 const PROTOCOL = ${JSON.stringify(STAGING_HELPER_PROTOCOL)};
 const CURRENT_SCHEMA = ${JSON.stringify(CURRENT_GENERATION_SCHEMA)};
+const PRE_CUTOVER_SCHEMA = ${JSON.stringify(PRE_CUTOVER_V4_GENERATION_SCHEMA)};
 const LEGACY_SCHEMA = ${JSON.stringify(LEGACY_GENERATION_SCHEMA)};
 const ESM_BOUNDARY_NAME = ${JSON.stringify(GENERATION_ESM_BOUNDARY_NAME)};
 const ESM_BOUNDARY = Buffer.from(${JSON.stringify(GENERATION_ESM_BOUNDARY_BYTES.toString('utf8'))});
@@ -1210,6 +1228,9 @@ let generationSchema;
 if (matchesSchema(CURRENT_FILES)) {
   FILES = CURRENT_FILES;
   generationSchema = CURRENT_SCHEMA;
+} else if (matchesSchema(PRE_CUTOVER_FILES)) {
+  FILES = PRE_CUTOVER_FILES;
+  generationSchema = PRE_CUTOVER_SCHEMA;
 } else if (matchesSchema(LEGACY_FILES)) {
   FILES = LEGACY_FILES;
   generationSchema = LEGACY_SCHEMA;
@@ -1376,11 +1397,19 @@ function launcherBytes(installRoot, nodeAuthority, maintenanceLock) {
     'role="${1:-}"',
     '[ "$#" -gt 0 ] && shift || true',
     "recovery_authority=''",
+    'upgraded_recovery=0',
+    "upgraded_archive=''",
+    "upgraded_archive_sha=''",
+    "upgraded_old_generation=''",
+    "upgraded_current_generation=''",
     'case "$role" in',
+    '  cutover) [ "$#" -eq 9 ] && [ -n "$1" ] && [ "$8" = immutable-archive-v4 ] && [[ "$2" =~ ^[0-9a-f]{64}$ ]] && [[ "$3" =~ ^[0-9a-f]{64}$ ]] && [[ "$4" =~ ^[0-9a-f]{64}$ ]] && [[ "$5" =~ ^0?[0-7]{3}$ ]] && [[ "$6" =~ ^0?[0-7]{3}$ ]] && [[ "$7" =~ ^0?[0-7]{3}$ ]] && [[ "$9" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging cutover bundle invocation" >&2; exit 64; }; expected="$9"; entry=staging-cutover.sh ;;',
     '  deploy) [ "$#" -eq 4 ] && [ "$3" = immutable-archive-v4 ] && [[ "$4" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging deploy bundle invocation" >&2; exit 64; }; expected="$4"; entry=staging-deploy.sh ;;',
     '  rollback) [ "$#" -eq 3 ] && [ "$2" = immutable-archive-v4 ] && [[ "$3" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging rollback bundle invocation" >&2; exit 64; }; expected="$3"; entry=staging-rollback.sh ;;',
     '  restart) [ "$#" -eq 1 ] && [[ "$1" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging restart bundle invocation" >&2; exit 64; }; expected="$1"; entry=staging-restart-app.sh ;;',
     '  recover) recovery_role="${1:-}"; [ "$#" -gt 0 ] && shift || true; case "$recovery_role" in',
+    '    bridge) [ "$#" -eq 8 ] && [ "$1" = deploy ] && [ -n "$2" ] && [ "$4" = immutable-archive-v4 ] && [[ "$3" =~ ^[0-9a-f]{64}$ ]] && [[ "$5" =~ ^[0-9a-f]{64}$ ]] && [[ "$6" =~ ^[0-9a-f]{64}$ ]] && [ "$5" != "$6" ] && [ "$7" = --recovery-authority ] && [ -n "$8" ] || { echo "invalid upgraded staging recovery invocation" >&2; exit 64; }; upgraded_recovery=1; upgraded_archive="$2"; upgraded_archive_sha="$3"; upgraded_old_generation="$5"; upgraded_current_generation="$6"; recovery_authority="$8"; expected="$6" ;;',
+    '    cutover) if [ "$#" -eq 11 ] && [ "$10" = --recovery-authority ] && [ -n "$11" ]; then recovery_authority="$11"; set -- "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"; fi; [ "$#" -eq 9 ] && [ -n "$1" ] && [ "$8" = immutable-archive-v4 ] && [[ "$2" =~ ^[0-9a-f]{64}$ ]] && [[ "$3" =~ ^[0-9a-f]{64}$ ]] && [[ "$4" =~ ^[0-9a-f]{64}$ ]] && [[ "$5" =~ ^0?[0-7]{3}$ ]] && [[ "$6" =~ ^0?[0-7]{3}$ ]] && [[ "$7" =~ ^0?[0-7]{3}$ ]] && [[ "$9" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging cutover recovery invocation" >&2; exit 64; }; expected="$9"; entry=staging-cutover.sh ;;',
     '    deploy) if [ "$#" -eq 6 ] && [ "$5" = --recovery-authority ] && [ -n "$6" ]; then recovery_authority="$6"; set -- "$1" "$2" "$3" "$4"; fi; [ "$#" -eq 4 ] && [ "$3" = immutable-archive-v4 ] && [[ "$4" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging deploy recovery invocation" >&2; exit 64; }; expected="$4"; entry=staging-deploy.sh ;;',
     '    rollback) if [ "$#" -eq 5 ] && [ "$4" = --recovery-authority ] && [ -n "$5" ]; then recovery_authority="$5"; set -- "$1" "$2" "$3"; fi; [ "$#" -eq 3 ] && [ "$2" = immutable-archive-v4 ] && [[ "$3" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging rollback recovery invocation" >&2; exit 64; }; expected="$3"; entry=staging-rollback.sh ;;',
     '    restart) if [ "$#" -eq 3 ] && [ "$2" = --recovery-authority ] && [ -n "$3" ]; then recovery_authority="$3"; set -- "$1"; fi; [ "$#" -eq 1 ] && [[ "$1" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid staging restart recovery invocation" >&2; exit 64; }; expected="$1"; entry=staging-restart-app.sh ;;',
@@ -1394,6 +1423,47 @@ function launcherBytes(installRoot, nodeAuthority, maintenanceLock) {
     ...trustedVerifier,
     'EASYBOOST_TRUSTED_GENERATION_VERIFIER',
     '}',
+    'if [ "$role" = recover ] && [ "$upgraded_recovery" -eq 1 ]; then',
+    '  pointer="$install_root/current"',
+    '  [ ! -L "$pointer" ] && [ -f "$pointer" ] || { echo "staging helper current pointer is unsafe" >&2; exit 69; }',
+    '  before="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "$pointer")" || exit 69',
+    '  exec 7< "$pointer" || exit 69',
+    '  opened="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "/proc/$$/fd/7")" || exit 69',
+    '  [ "$before" = "$opened" ] || { echo "staging helper current pointer changed while opening" >&2; exit 69; }',
+    '  IFS= read -r current_generation <&7 || { echo "staging helper current pointer is unreadable" >&2; exit 69; }',
+    '  if IFS= read -r extra <&7; then echo "staging helper current pointer has extra data" >&2; exit 69; fi',
+    '  after="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "/proc/$$/fd/7")" || exit 69',
+    '  final="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "$pointer")" || exit 69',
+    '  [ "$before" = "$after" ] && [ "$after" = "$final" ] || { echo "staging helper current pointer changed during read" >&2; exit 69; }',
+    '  IFS=: read -r pointer_dev pointer_ino pointer_type pointer_uid pointer_mode pointer_links pointer_size <<< "$before"',
+    '  [ "$pointer_uid" = "$("$id_tool" -u)" ] || { echo "staging helper current pointer owner is unsafe" >&2; exit 69; }',
+    '  [ "${before##*:}" = 65 ] && [[ "$before" == *":444:1:65" ]] || { echo "staging helper current pointer mode or size is unsafe" >&2; exit 69; }',
+    '  [[ "$current_generation" =~ ^[0-9a-f]{64}$ ]] && [ "$current_generation" = "$upgraded_current_generation" ] || { echo "staging helper current bundle does not match upgraded recovery digest" >&2; exit 69; }',
+    '  upgraded_pointer_identity="$before"',
+    '  current_generation_root="$install_root/generations/$upgraded_current_generation"',
+    '  old_generation_root="$install_root/generations/$upgraded_old_generation"',
+    '  current_generation_schema="$(verify_generation "$current_generation_root" "$upgraded_current_generation")" || { echo "upgraded staging current generation is invalid" >&2; exit 69; }',
+    `  [ "$current_generation_schema" = ${CURRENT_GENERATION_SCHEMA} ] || { echo "upgraded staging current generation schema is unsupported" >&2; exit 69; }`,
+    '  old_generation_schema="$(verify_generation "$old_generation_root" "$upgraded_old_generation")" || { echo "upgraded staging historical generation is invalid" >&2; exit 69; }',
+    `  [ "$old_generation_schema" = ${PRE_CUTOVER_V4_GENERATION_SCHEMA} ] || { echo "upgraded staging historical generation schema is unsupported" >&2; exit 69; }`,
+    '  bind_quiescent_maintenance || { echo "staging quiescent maintenance lock is unavailable" >&2; exit 75; }',
+    '  before="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "$pointer")" || exit 69',
+    '  [ "$before" = "$upgraded_pointer_identity" ] || { echo "staging helper current pointer changed before upgraded recovery" >&2; exit 69; }',
+    '  exec 7< "$pointer" || exit 69',
+    '  opened="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "/proc/$$/fd/7")" || exit 69',
+    '  [ "$before" = "$opened" ] || { echo "staging helper current pointer changed while reopening" >&2; exit 69; }',
+    '  IFS= read -r current_generation <&7 || { echo "staging helper current pointer is unreadable" >&2; exit 69; }',
+    '  if IFS= read -r extra <&7; then echo "staging helper current pointer has extra data" >&2; exit 69; fi',
+    '  after="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "/proc/$$/fd/7")" || exit 69',
+    '  final="$("$stat_tool" -Lc "%d:%i:%f:%u:%a:%h:%s" -- "$pointer")" || exit 69',
+    '  [ "$before" = "$after" ] && [ "$after" = "$final" ] && [ "$current_generation" = "$upgraded_current_generation" ] || { echo "staging helper current pointer changed during upgraded recovery recheck" >&2; exit 69; }',
+    '  [ "$(verify_generation "$current_generation_root" "$upgraded_current_generation")" = "$current_generation_schema" ] || { echo "upgraded staging current generation changed after maintenance bind" >&2; exit 69; }',
+    '  [ "$(verify_generation "$old_generation_root" "$upgraded_old_generation")" = "$old_generation_schema" ] || { echo "upgraded staging historical generation changed after maintenance bind" >&2; exit 69; }',
+    '  bind_node_authority || { echo "pinned Node execution authority changed after upgraded recovery verification" >&2; exit 69; }',
+    '  publish_node_authority_contract || { echo "pinned Node authority contract could not be exported" >&2; exit 69; }',
+    '  prepare_current_environment',
+    '  exec "$node_bound_executable" "$current_generation_root/staging-transaction-supervisor.js" --recover-with-authority "$recovery_authority" -- "$old_generation_root/staging-deploy.sh" "$upgraded_archive" "$upgraded_archive_sha" immutable-archive-v4 "$upgraded_old_generation"',
+    'fi',
     'if [ "$role" = recover ]; then',
     '  recovery_arguments=(--recover)',
     '  [ -z "$recovery_authority" ] || recovery_arguments=(--recover-with-authority "$recovery_authority" --)',
@@ -1404,6 +1474,7 @@ function launcherBytes(installRoot, nodeAuthority, maintenanceLock) {
     '  publish_node_authority_contract || { echo "pinned Node authority contract could not be exported" >&2; exit 69; }',
     '  case "$generation_schema" in',
     `    ${CURRENT_GENERATION_SCHEMA}) prepare_current_environment; exec "$node_bound_executable" "$generation_root/staging-transaction-supervisor.js" "${'${recovery_arguments[@]}'}" "$generation_root/$entry" "$@" ;;`,
+    `    ${PRE_CUTOVER_V4_GENERATION_SCHEMA}) prepare_current_environment; exec "$node_bound_executable" "$generation_root/staging-transaction-supervisor.js" "${'${recovery_arguments[@]}'}" "$generation_root/$entry" "$@" ;;`,
     `    ${LEGACY_GENERATION_SCHEMA}) prepare_legacy_environment; exec "$node_bound_executable" "$generation_root/staging-transaction-supervisor.js" "${'${recovery_arguments[@]}'}" "$generation_root/$entry" "$@" ;;`,
     '    *) echo "staging helper recovery schema is unsupported" >&2; exit 69 ;;',
     '  esac',
@@ -1431,6 +1502,7 @@ function launcherBytes(installRoot, nodeAuthority, maintenanceLock) {
     'publish_node_authority_contract || { echo "pinned Node authority contract could not be exported" >&2; exit 69; }',
     'case "$generation_schema" in',
     `  ${CURRENT_GENERATION_SCHEMA}) prepare_current_environment; exec "$node_bound_executable" "$generation_root/staging-transaction-supervisor.js" --run 1800 600 5000 7000 5000 -- "$generation_root/$entry" "$@" ;;`,
+    `  ${PRE_CUTOVER_V4_GENERATION_SCHEMA}) prepare_current_environment; exec "$node_bound_executable" "$generation_root/staging-transaction-supervisor.js" --run 1800 600 5000 7000 5000 -- "$generation_root/$entry" "$@" ;;`,
     `  ${LEGACY_GENERATION_SCHEMA}) prepare_legacy_environment; exec "$node_bound_executable" "$generation_root/staging-transaction-supervisor.js" --run 1800 600 5000 7000 5000 -- "$generation_root/$entry" "$@" ;;`,
     '  *) echo "staging helper current generation schema is unsupported" >&2; exit 69 ;;',
     'esac',
@@ -1553,6 +1625,8 @@ export async function installStagingHelperBundle({
 
     await atomicFile(path.join(root, 'staging-release-entry.sh'),
       launcherBytes(root, nodeAuthority, maintenanceLock), 0o555, io);
+    await atomicFile(path.join(links, 'easyboost-staging-cutover'),
+      dispatcherBytes(root, 'cutover'), 0o555, io);
     await atomicFile(path.join(links, 'easyboost-staging-deploy'),
       dispatcherBytes(root, 'deploy'), 0o555, io);
     await atomicFile(path.join(links, 'easyboost-staging-rollback'),

@@ -108,6 +108,7 @@ release_finalization_verified=0
 uploaded_archive_authority=''
 uploaded_archive_size=0
 frozen_archive_reservation_authority=''
+first_deploy_compose_file=''
 
 cleanup_incomplete_upload_reservation() {
   [ -n "$temporary_reservation_file" ] || return 0
@@ -347,17 +348,17 @@ if [ -f "$compose_file" ] || [ -f "$app_dir/.release-sha256" ]; then
     exit 67
   }
   [ -n "$previous_image_id" ] || { echo "Active staging image cannot be restored" >&2; exit 67; }
+  require_local_dependency_images || exit 67
+  capture_running_postgres_authority || {
+    echo "Active staging PostgreSQL runtime is not an exact healthy authority" >&2
+    exit 67
+  }
   verify_active_snapshot "$previous_sha" "$previous_archive" "$previous_image_id" || {
     echo "Active predecessor snapshot could not be verified" >&2
     exit 67
   }
-  reverify_compose_authority || exit 67
-  postgres_container="$(run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" \
-    --env-file "$env_file" ps --status running postgres --quiet)" || exit 67
-  if [ -n "$postgres_container" ]; then
-    database_backup_required=1
-    backup_capacity="$MAX_DATABASE_BACKUP_BYTES"
-  fi
+  database_backup_required=1
+  backup_capacity="$MAX_DATABASE_BACKUP_BYTES"
 else
   verify_empty_state || {
     echo "First deploy requires an empty bootstrappable Docker and code state" >&2
@@ -383,6 +384,9 @@ validate_staging_compose_contract "$release_dir/compose.staging.yml" || exit 65
 require_local_dependency_images || exit 65
 run_tree_verify "$frozen_archive" "$release_dir" || exit 65
 run_bounded "$COMMAND_SECONDS" chmod -R a-w "$release_dir"
+if [ "$active_release" -eq 0 ]; then
+  first_deploy_compose_file="$release_dir/compose.staging.yml"
+fi
 verify_space_reservations || exit 68
 image_is_absent "$release_image" || {
   echo "Temporary staging release image reference is not authoritatively absent" >&2
@@ -402,6 +406,7 @@ candidate_image_id="$(image_id "$release_image")"
 if [ "$database_backup_required" -eq 1 ]; then
   consume_reservation "$temporary_reservation_file" "$MAX_DATABASE_BACKUP_BYTES" || exit 68
   backup_temp="$work_dir/database-backup.dump"
+  verify_running_postgres_authority || exit 67
   reverify_compose_authority || exit 67
   run_bounded 120 docker compose -f "$compose_file" --env-file "$env_file" exec -T postgres \
     pg_dump -U easyboost_staging -d easyboost_staging \
@@ -411,6 +416,7 @@ if [ "$database_backup_required" -eq 1 ]; then
   backup_bytes="$(run_bounded "$COMMAND_SECONDS" stat -c '%s' -- "$backup_temp")"
   [ "$backup_bytes" -le "$MAX_DATABASE_BACKUP_BYTES" ] || exit 68
   run_bounded "$COMMAND_SECONDS" chmod 600 "$backup_temp"
+  verify_running_postgres_authority || exit 67
 fi
 
 if [ "$active_release" -eq 1 ]; then
@@ -440,6 +446,18 @@ if [ "$backup_bytes" -gt 0 ]; then
   backup_staging=''
 fi
 
+if [ "$active_release" -eq 0 ]; then
+  reverify_compose_authority || exit 70
+  validate_staging_compose_contract "$first_deploy_compose_file" || exit 70
+  verify_postgres_image || exit 70
+  run_bounded "$COMMAND_SECONDS" docker compose --project-directory "$app_dir" \
+    -f "$first_deploy_compose_file" --env-file "$env_file" \
+    up --pull never -d --no-build --no-deps postgres
+  wait_for_running_postgres_authority || exit 70
+else
+  verify_running_postgres_authority || exit 70
+fi
+
 stable_promotion_attempted=1
 run_bounded "$COMMAND_SECONDS" docker image tag "$release_image" "$STABLE_IMAGE"
 verify_stable_image "$candidate_image_id"
@@ -454,17 +472,19 @@ run_bounded "$COMMAND_SECONDS" chmod 700 "$app_dir"
 compose_file="$app_dir/compose.staging.yml"
 run_tree_verify "$frozen_archive" "$app_dir"
 validate_staging_compose_contract "$compose_file"
-verify_postgres_image
+verify_running_postgres_authority
 reverify_compose_authority
 run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" --env-file "$env_file" \
-  up --pull never -d --no-build app
+  up --pull never -d --no-build --no-deps app
 verify_running_image "$candidate_image_id"
+verify_running_postgres_authority
 wait_for_readiness || {
   reverify_compose_authority || exit 70
   run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" \
     --env-file "$env_file" logs --tail=100 app >&2
   exit 1
 }
+verify_running_postgres_authority
 run_tree_verify "$frozen_archive" "$app_dir"
 
 publish_release_pair "$expected_sha" "$frozen_archive"

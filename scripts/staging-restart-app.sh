@@ -60,6 +60,11 @@ active_image_id="$(image_id "$STABLE_IMAGE")" || {
   echo "Active staging image identity is unavailable" >&2
   exit 67
 }
+require_local_dependency_images || exit 67
+capture_running_postgres_authority || {
+  echo "Active staging PostgreSQL runtime is not an exact healthy authority" >&2
+  exit 67
+}
 verify_active_snapshot "$active_sha" "$active_archive" "$active_image_id" || {
   echo "Active staging release is not a verified restart authority" >&2
   exit 67
@@ -96,17 +101,19 @@ begin_release_transaction || exit 70
 restart_started=1
 reverify_compose_authority || exit 70
 verify_stable_image "$active_image_id" || exit 70
-verify_postgres_image || exit 70
+verify_running_postgres_authority || exit 70
 run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" --env-file "$env_file" \
   up --pull never -d --no-build --no-deps app
 verify_stable_image "$active_image_id" || exit 70
 verify_running_image "$active_image_id" || exit 70
+verify_running_postgres_authority || exit 70
 wait_for_readiness || {
   reverify_compose_authority || exit 70
   run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" \
     --env-file "$env_file" logs --tail=100 app >&2
   exit 1
 }
+verify_running_postgres_authority || exit 70
 run_tree_verify "$active_archive" "$app_dir" || exit 70
 reverify_compose_authority || exit 70
 [ "$(read_exact_sha_marker "$app_dir/.release-sha256" 'active release marker')" = "$active_sha" ] \

@@ -221,6 +221,10 @@ run_tree_verify "$previous_archive" "$app_dir" || {
 }
 validate_staging_compose_contract "$compose_file" || exit 67
 require_local_dependency_images || exit 67
+capture_running_postgres_authority || {
+  echo "Active staging PostgreSQL runtime is not an exact healthy authority" >&2
+  exit 67
+}
 verify_active_snapshot "$previous_sha" "$previous_archive" "$previous_image_id" || {
   echo "Active predecessor snapshot could not be verified" >&2
   exit 67
@@ -268,6 +272,7 @@ verify_active_snapshot "$previous_sha" "$previous_archive" "$previous_image_id" 
   echo "Active predecessor changed before rollback promotion" >&2
   exit 67
 }
+verify_running_postgres_authority || exit 67
 verify_space_reservations || exit 68
 
 stable_promotion_attempted=1
@@ -283,17 +288,19 @@ run_bounded "$COMMAND_SECONDS" cp -a "$release_dir"/. "$app_dir"/
 compose_file="$app_dir/compose.staging.yml"
 run_tree_verify "$frozen_archive" "$app_dir"
 validate_staging_compose_contract "$compose_file"
-verify_postgres_image
+verify_running_postgres_authority
 reverify_compose_authority
 run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" --env-file "$env_file" \
-  up --pull never -d --no-build app
+  up --pull never -d --no-build --no-deps app
 verify_running_image "$candidate_image_id"
+verify_running_postgres_authority
 wait_for_readiness || {
   reverify_compose_authority || exit 70
   run_bounded "$COMMAND_SECONDS" docker compose -f "$compose_file" \
     --env-file "$env_file" logs --tail=100 app >&2
   exit 1
 }
+verify_running_postgres_authority
 run_tree_verify "$frozen_archive" "$app_dir"
 port="$(app_port)"
 reverify_compose_authority

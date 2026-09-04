@@ -435,12 +435,13 @@ fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = rm ]; then case "\${@: -1}" in easyboost-staging-app:release-*) rm -f "$RELEASE_STATE" ;; esac; exit 0; fi
 if [ "\${1:-}" = inspect ]; then cat "$CONTAINER_STATE"; exit 0; fi
 if [ "\${1:-}" = compose ]; then
+  printf '%s\n' "$*" >> "$BARRIER_DIR/compose-invocations"
   case " $* " in
     *" config --format json "*) printf '%s' "$RESOLVED_COMPOSE_JSON" ;;
     *" config --quiet "*) : ;;
     *" ps -q app "*) echo fake-container ;;
     *" ps --status running postgres --quiet "*) : ;;
-    *" up --pull never -d --no-build app "*)
+    *" up --pull never -d --no-build --no-deps app "*)
       count=0; [ ! -f "$BARRIER_DIR/up-count" ] || count="$(cat "$BARRIER_DIR/up-count")"; count=$((count+1)); echo "$count" > "$BARRIER_DIR/up-count"
       cat "$IMAGE_STATE" > "$CONTAINER_STATE"
       if { [ "\${BLOCK_AT:-}" = tree ] && [ "$count" -eq 1 ]; } || { [ "\${BLOCK_AT:-}" = recovery ] && [ "$count" -eq 2 ]; }; then
@@ -544,6 +545,19 @@ exit 0
     assert.notEqual(afterKill.status, 75, afterKill.stderr);
     assert.equal(afterKill.status, 70, afterKill.stderr);
     await assert.rejects(fs.access(path.join(barriers, 'release-build')), { code: 'ENOENT' });
+    const composeInvocations = (await fs.readFile(
+      path.join(barriers, 'compose-invocations'), 'utf8',
+    )).trim().split('\n');
+    const appUpInvocations = composeInvocations.filter((invocation) => (
+      invocation.includes(' up ') && invocation.endsWith(' app')
+    ));
+    assert.ok(appUpInvocations.length >= 4,
+      `expected app activation/recovery calls, got ${appUpInvocations.length}`);
+    for (const invocation of appUpInvocations) {
+      assert.match(invocation,
+        / up --pull never -d --no-build --no-deps app$/u,
+        'every app activation must preserve the exact dependency-isolation flags');
+    }
   } catch (error) {
     primaryFailure = error;
   } finally {

@@ -2399,7 +2399,7 @@ function runPosixRenameNoReplace(runMove, source, destination) {
   });
 }
 
-function movePosixEntryNoReplace(source, destination, {
+export function movePosixEntryNoReplace(source, destination, {
   filesystem = fs,
   platform = process.platform,
   runMove = spawnSync,

@@ -21,6 +21,10 @@ const DRIFTED_POSTGRES_IMAGE_ID = `sha256:${'4'.repeat(64)}`;
 const FOREIGN_IMAGE_ID = `sha256:${'7'.repeat(64)}`;
 const DRIFTED_RUNNING_IMAGE_ID = `sha256:${'8'.repeat(64)}`;
 const LATE_RUNNING_IMAGE_ID = `sha256:${'9'.repeat(64)}`;
+const APP_CONTAINER_ID = 'a'.repeat(64);
+const POSTGRES_CONTAINER_ID = 'b'.repeat(64);
+const DRIFTED_POSTGRES_CONTAINER_ID = 'c'.repeat(64);
+const POSTGRES_VOLUME_SOURCE = '/var/lib/docker/volumes/easyboost-staging_postgres-data/_data';
 
 function posixPath(value) {
   return value.replace(/^([A-Za-z]):/u, (_, drive) => `/${drive.toLowerCase()}`).replaceAll('\\', '/');
@@ -155,6 +159,10 @@ async function createFixture() {
     `FOREIGN_IMAGE_ID=${FOREIGN_IMAGE_ID}`,
     `DRIFTED_RUNNING_IMAGE_ID=${DRIFTED_RUNNING_IMAGE_ID}`,
     `LATE_RUNNING_IMAGE_ID=${LATE_RUNNING_IMAGE_ID}`,
+    `APP_CONTAINER_ID=${APP_CONTAINER_ID}`,
+    `POSTGRES_CONTAINER_ID=${POSTGRES_CONTAINER_ID}`,
+    `DRIFTED_POSTGRES_CONTAINER_ID=${DRIFTED_POSTGRES_CONTAINER_ID}`,
+    `POSTGRES_VOLUME_SOURCE=${POSTGRES_VOLUME_SOURCE}`,
     'flock() { if [ "${FAKE_LOCK_BUSY:-0}" = "1" ]; then return 1; fi; return 0; }',
     'timeout() {',
     '  while [ "$#" -gt 0 ]; do case "$1" in --signal=*|--kill-after=*) shift ;; *s) shift; break ;; *) break ;; esac; done',
@@ -172,6 +180,10 @@ async function createFixture() {
     'if [ "${FAKE_COMMANDS_INITIALIZED:-0}" != "1" ]; then',
     '  printf "%s\\n" "$PREVIOUS_IMAGE_ID" > "$COMMAND_LOG.image-state"',
     '  printf "%s\\n" "$PREVIOUS_IMAGE_ID" > "$COMMAND_LOG.container-state"',
+    '  printf "%s\\n" "$POSTGRES_IMAGE_ID" > "$COMMAND_LOG.postgres-container-state"',
+    '  printf "%s\\n" "$POSTGRES_CONTAINER_ID" > "$COMMAND_LOG.postgres-container-id-state"',
+    '  printf "%s\\n" "$POSTGRES_VOLUME_SOURCE" > "$COMMAND_LOG.postgres-volume-source-state"',
+    '  : > "$COMMAND_LOG.volume-state"',
     '  export FAKE_COMMANDS_INITIALIZED=1',
     'fi',
     'cp() { if [ "${FAKE_RECOVERY_COPY_FAIL:-0}" = "1" ] && [[ "$*" == *"/previous/."* ]]; then return 12; fi; /usr/bin/cp "$@"; }',
@@ -190,7 +202,12 @@ async function createFixture() {
     'mv() { if [ "${FAKE_ACTIVE_MARKER_PUBLISH_FAIL:-0}" = "1" ] && [ "${@: -1}" = "$STAGING_APP_DIR/.release-sha256" ]; then count=0; [ -f "$COMMAND_LOG.marker-mv-count" ] && count="$(cat "$COMMAND_LOG.marker-mv-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.marker-mv-count"; [ "$count" -gt 1 ] || return 24; fi; /usr/bin/mv "$@"; }',
     'docker() {',
     '  printf "docker|%s\\n" "$*" >> "$COMMAND_LOG"',
-    '  if [ "$1" = "compose" ]; then action=other; case " $* " in *" config --format json "*) action=config ;; *" up --pull never -d --no-build app "*) action=up ;; *" down --volumes --remove-orphans "*) action=down ;; *" exec -T postgres "*) action=exec ;; *" ps "*) action=ps ;; esac; printf "compose-postgres-authority|%s|%s\\n" "${EASYBOOST_STAGING_POSTGRES_IMAGE_ID:-unset}" "$action" >> "$COMMAND_LOG"; fi',
+    '  if [ "$1" = "compose" ]; then action=other; case " $* " in *" config --format json "*) action=config ;; *" up --pull never -d --no-build --no-deps app "*) action=up ;; *" down --volumes --remove-orphans "*) action=down ;; *" exec -T postgres "*) action=exec ;; *" ps "*) action=ps ;; esac; printf "compose-postgres-authority|%s|%s\\n" "${EASYBOOST_STAGING_POSTGRES_IMAGE_ID:-unset}" "$action" >> "$COMMAND_LOG"; fi',
+  '  if [ "$1" = "ps" ] && [[ " $* " == *"label=com.docker.compose.project=easyboost-staging"* ]]; then',
+    '    if [[ " $* " == *"label=com.docker.compose.service=app"* ]]; then [ ! -f "$COMMAND_LOG.container-state" ] || printf "%s\\n" "$APP_CONTAINER_ID"; elif [[ " $* " == *"label=com.docker.compose.service=postgres"* ]]; then [ ! -f "$COMMAND_LOG.postgres-container-state" ] || cat "$COMMAND_LOG.postgres-container-id-state"; fi',
+  '    return 0',
+  '  fi',
+    '  if [ "$1" = "volume" ] && [ "$2" = "inspect" ]; then [ -f "$COMMAND_LOG.volume-state" ] || return 1; volume_source="${FAKE_POSTGRES_VOLUME_OBJECT_MOUNTPOINT:-$(cat "$COMMAND_LOG.postgres-volume-source-state")}"; [ ! -f "$COMMAND_LOG.postgres-volume-object-source-state" ] || volume_source="$(cat "$COMMAND_LOG.postgres-volume-object-source-state")"; printf \'{"Name":"%s","Driver":"%s","Scope":"%s","Mountpoint":"%s","Labels":{"com.docker.compose.project":"%s","com.docker.compose.volume":"%s"},"Options":null}\\n\' "${FAKE_POSTGRES_VOLUME_OBJECT_NAME:-easyboost-staging_postgres-data}" "${FAKE_POSTGRES_VOLUME_OBJECT_DRIVER:-local}" "${FAKE_POSTGRES_VOLUME_OBJECT_SCOPE:-local}" "$volume_source" "${FAKE_POSTGRES_VOLUME_OBJECT_PROJECT:-easyboost-staging}" "${FAKE_POSTGRES_VOLUME_OBJECT_LABEL:-postgres-data}"; return 0; fi',
     '  if [[ " $* " == *" config --format json "* ]]; then',
     '    printf "%s" "$FAKE_RESOLVED_COMPOSE_JSON"',
     '    return 0',
@@ -211,9 +228,22 @@ async function createFixture() {
     '  if [ "$1" = "image" ] && [ "$2" = "ls" ]; then reference="${@: -1}"; reference="${reference#reference=}"; if [[ "$reference" == easyboost-staging-app:release-* ]] && [ ! -f "$COMMAND_LOG.release-state" ]; then case "${FAKE_RELEASE_PROBE_BEFORE_BUILD_STATUS:-}" in 124) return 124 ;; 128) printf "daemon unavailable\\n" >&2; return 128 ;; 1) printf "ambiguous probe failure\\n" >&2; return 1 ;; esac; fi; if [[ "$reference" == easyboost-staging-app:release-* ]] && [ -f "$COMMAND_LOG.inspect-after-release-rm" ]; then case "${FAKE_RELEASE_INSPECT_AFTER_RM_STATUS:-}" in 124) return 124 ;; 128) printf "daemon unavailable\\n" >&2; return 128 ;; 1) printf "ambiguous inspect failure\\n" >&2; return 1 ;; esac; fi; case "$reference" in easyboost-staging-app:release-*) [ ! -f "$COMMAND_LOG.release-state" ] || cat "$COMMAND_LOG.release-state" ;; easyboost-staging-app:local) [ ! -f "$COMMAND_LOG.image-state" ] || cat "$COMMAND_LOG.image-state" ;; postgres:17-alpine) printf "%s\\n" "$POSTGRES_IMAGE_ID" ;; esac; return 0; fi',
     '  if [ "$1" = "image" ] && [ "$2" = "tag" ]; then if [ "${FAKE_PROMOTE_SIDE_EFFECT_ERROR:-0}" = "1" ] && [[ "$3" == easyboost-staging-app:release-* ]]; then printf "%s\\n" "$CANDIDATE_IMAGE_ID" > "$COMMAND_LOG.image-state"; return 8; fi; if [ "${FAKE_PROMOTE_FAIL:-0}" = "1" ] && [[ "$3" == easyboost-staging-app:release-* ]]; then return 8; fi; if [ "${FAKE_RECOVERY_RETAG_FAIL:-0}" = "1" ] && [ "$3" = "$PREVIOUS_IMAGE_ID" ]; then return 18; fi; if [ "$4" = "easyboost-staging-app:local" ]; then if [ "$3" = "$PREVIOUS_IMAGE_ID" ]; then printf "%s\\n" "$3" > "$COMMAND_LOG.image-state"; else printf "%s\\n" "$CANDIDATE_IMAGE_ID" > "$COMMAND_LOG.image-state"; [ "${FAKE_RELEASE_IMAGE_DRIFT_BEFORE_RM:-0}" != "1" ] || printf "%s\\n" "$FOREIGN_IMAGE_ID" > "$COMMAND_LOG.release-state"; fi; fi; return 0; fi',
     '  if [ "$1" = "image" ] && [ "$2" = "rm" ]; then if [ "${FAKE_IMAGE_RM_FAIL:-0}" = "1" ]; then return 19; fi; case "${@: -1}" in easyboost-staging-app:local) rm -f "$COMMAND_LOG.image-state" ;; easyboost-staging-app:release-*) rm -f "$COMMAND_LOG.release-state"; [ -z "${FAKE_RELEASE_INSPECT_AFTER_RM_STATUS:-}" ] || : > "$COMMAND_LOG.inspect-after-release-rm" ;; esac; return 0; fi',
-    '  if [ "$1" = "inspect" ]; then [ -f "$COMMAND_LOG.container-state" ] || return 1; if [ "${FAKE_RUNNING_IMAGE_DRIFT:-0}" = "1" ]; then printf "%s\\n" "$DRIFTED_RUNNING_IMAGE_ID"; else cat "$COMMAND_LOG.container-state"; fi; return 0; fi',
-    '  case " $* " in *" ps -q app "*) [ ! -f "$COMMAND_LOG.container-state" ] || printf "fake-app-container\\n" ;; esac',
-    '  if [[ " $* " == *" up --pull never -d --no-build app "* ]]; then count=0; [ -f "$COMMAND_LOG.up-count" ] && count="$(cat "$COMMAND_LOG.up-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.up-count"; if [ "${FAKE_RECOVERY_UP_FAIL:-0}" = "1" ] && [ "$count" -ge 2 ]; then return 20; fi; cat "$COMMAND_LOG.image-state" > "$COMMAND_LOG.container-state"; fi',
+    '  if [ "$1" = "inspect" ]; then',
+    '    target="${@: -1}"',
+    '    if [ -f "$COMMAND_LOG.postgres-container-id-state" ] && [ "$target" = "$(cat "$COMMAND_LOG.postgres-container-id-state")" ]; then',
+    '      [ -f "$COMMAND_LOG.postgres-container-state" ] || return 1',
+    '      if [[ " $* " == *" --format {{json .}} "* ]]; then',
+    '        postgres_health="${FAKE_POSTGRES_HEALTH:-healthy}"; postgres_running="${FAKE_POSTGRES_RUNNING:-true}"; postgres_mount_type="${FAKE_POSTGRES_MOUNT_TYPE:-volume}"; postgres_volume_name="${FAKE_POSTGRES_VOLUME_NAME:-easyboost-staging_postgres-data}"; postgres_volume_source="${FAKE_POSTGRES_VOLUME_SOURCE:-$(cat "$COMMAND_LOG.postgres-volume-source-state")}"',
+    '        printf \'{"Id":"%s","Image":"%s","Config":{"Labels":{"com.docker.compose.project":"%s","com.docker.compose.service":"%s","com.docker.compose.oneoff":"%s"}},"State":{"Running":%s,"Health":{"Status":"%s"}},"Mounts":[{"Type":"%s","Name":"%s","Source":"%s","Destination":"%s","Driver":"%s","Mode":"%s","Propagation":"%s","RW":%s}]}\\n\' "$target" "$(cat "$COMMAND_LOG.postgres-container-state")" "${FAKE_POSTGRES_PROJECT:-easyboost-staging}" "${FAKE_POSTGRES_SERVICE:-postgres}" "${FAKE_POSTGRES_ONEOFF:-False}" "$postgres_running" "$postgres_health" "$postgres_mount_type" "$postgres_volume_name" "$postgres_volume_source" "${FAKE_POSTGRES_MOUNT_DESTINATION:-/var/lib/postgresql/data}" "${FAKE_POSTGRES_MOUNT_DRIVER:-local}" "${FAKE_POSTGRES_MOUNT_MODE:-z}" "${FAKE_POSTGRES_MOUNT_PROPAGATION:-}" "${FAKE_POSTGRES_MOUNT_RW:-true}"',
+    '      else cat "$COMMAND_LOG.postgres-container-state"; fi',
+    '    else',
+    '      [ -f "$COMMAND_LOG.container-state" ] || return 1',
+    '      if [ "${FAKE_RUNNING_IMAGE_DRIFT:-0}" = "1" ]; then printf "%s\\n" "$DRIFTED_RUNNING_IMAGE_ID"; else cat "$COMMAND_LOG.container-state"; fi',
+    '    fi',
+    '    return 0',
+    '  fi',
+    '  case " $* " in *" ps -q app "*) [ ! -f "$COMMAND_LOG.container-state" ] || printf "%s\\n" "$APP_CONTAINER_ID" ;; esac',
+    '  if [[ " $* " == *" up --pull never -d --no-build --no-deps app "* ]]; then count=0; [ -f "$COMMAND_LOG.up-count" ] && count="$(cat "$COMMAND_LOG.up-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.up-count"; if [ "${FAKE_RECOVERY_UP_FAIL:-0}" = "1" ] && [ "$count" -ge 2 ]; then return 20; fi; cat "$COMMAND_LOG.image-state" > "$COMMAND_LOG.container-state"; [ "${FAKE_POSTGRES_DRIFT_AFTER_APP_UP:-0}" != "1" ] || printf "%s\\n" "$DRIFTED_POSTGRES_CONTAINER_ID" > "$COMMAND_LOG.postgres-container-id-state"; [ "${FAKE_POSTGRES_MOUNT_DRIFT_AFTER_APP_UP:-0}" != "1" ] || printf "/var/lib/docker/volumes/foreign/_data\\n" > "$COMMAND_LOG.postgres-volume-source-state"; [ "${FAKE_POSTGRES_VOLUME_OBJECT_DRIFT_AFTER_APP_UP:-0}" != "1" ] || printf "/var/lib/docker/volumes/foreign-object/_data\\n" > "$COMMAND_LOG.postgres-volume-object-source-state"; fi',
     '  return 0',
     '}',
     'curl() { count=0; [ -f "$COMMAND_LOG.curl-count" ] && count="$(cat "$COMMAND_LOG.curl-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.curl-count"; up_count=0; [ -f "$COMMAND_LOG.up-count" ] && up_count="$(cat "$COMMAND_LOG.up-count")"; if [ "${FAKE_RECOVERY_READINESS_FAIL:-0}" = "1" ] && [ "$up_count" -ge 2 ]; then return 1; fi; if [ "${FAKE_READINESS_FAIL:-0}" = "1" ] && grep -q "$CANDIDATE_IMAGE_ID" "$COMMAND_LOG.image-state" 2>/dev/null; then return 1; fi; return 0; }',
@@ -250,7 +280,14 @@ async function createFixture() {
     ].join('\n'));
     await fs.chmod(executable, 0o755);
   }
-  return { appDir, bashEnv, commandLog, current, root, target };
+  return {
+    appDir,
+    bashEnv,
+    commandLog,
+    current,
+    root,
+    target,
+  };
 }
 
 function runRollback(fixture, sha = fixture.target.sha, extraEnv = {}, protocol = 'immutable-archive-v4',
@@ -390,11 +427,20 @@ test('staging rollback requires a full SHA and builds that retained exact archiv
   const build = log.findIndex((line) => line === `docker|build --file Dockerfile --tag easyboost-staging-app:release-${fixture.target.sha} -`);
   const stdin = log.findIndex((line) => line === `stdin-sha|${fixture.target.sha}`);
   const promote = log.findIndex((line) => line.includes(`image tag easyboost-staging-app:release-${fixture.target.sha} easyboost-staging-app:local`));
-  const up = log.findIndex((line) => /docker\|compose .* up --pull never -d --no-build app$/u.test(line));
+  const up = log.findIndex((line) => (
+    /docker\|compose .* up --pull never -d --no-build --no-deps app$/u.test(line)
+  ));
   const cleanup = log.findIndex((line) => line.includes(`image rm -f easyboost-staging-app:release-${fixture.target.sha}`));
   assert.ok(build >= 0 && stdin > build && promote > stdin && up > promote && cleanup > up, log.join('\n'));
   assert.equal(log.includes('build-after-mutation'), false);
   assert.doesNotMatch(log.join('\n'), /--build/u);
+  assert.doesNotMatch(log.join('\n'), /up --pull never -d --no-build app/u);
+  assert.equal(await fs.readFile(`${fixture.commandLog}.postgres-container-state`, 'utf8'),
+    `${POSTGRES_IMAGE_ID}\n`, 'rollback app activation must preserve the PostgreSQL image identity');
+  assert.equal(await fs.readFile(`${fixture.commandLog}.postgres-container-id-state`, 'utf8'),
+    `${POSTGRES_CONTAINER_ID}\n`, 'rollback app activation must preserve the PostgreSQL container identity');
+  assert.equal(await fs.readFile(`${fixture.commandLog}.postgres-volume-source-state`, 'utf8'),
+    `${POSTGRES_VOLUME_SOURCE}\n`, 'rollback app activation must preserve the PostgreSQL volume mount');
   assertComposeUsesCapturedPostgresAuthority(log.join('\n'), [
     'config', 'up',
   ]);
@@ -550,7 +596,7 @@ test('rollback readiness failure restores the previous image, code and marker', 
   const log = await fs.readFile(fixture.commandLog, 'utf8');
   assert.match(log,
     new RegExp(`docker\\|image tag ${PREVIOUS_IMAGE_ID} easyboost-staging-app:local`, 'u'));
-  assert.equal((log.match(/up --pull never -d --no-build app/gu) ?? []).length, 2, log);
+  assert.equal((log.match(/up --pull never -d --no-build --no-deps app/gu) ?? []).length, 2, log);
   await assert.rejects(fs.access(path.join(fixture.appDir, '.staging-recovery-required')),
     { code: 'ENOENT' });
   assert.match(result.stderr, /verified prior state restored/u);
@@ -721,11 +767,35 @@ test('rollback pins the PostgreSQL image through the final pre-activation bounda
   assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
     `${fixture.current.sha}\n`);
   const log = await fs.readFile(fixture.commandLog, 'utf8');
-  assert.equal((log.match(/up --pull never -d --no-build app/gu) ?? []).length, 1);
+  assert.equal((log.match(/up --pull never -d --no-build --no-deps app/gu) ?? []).length, 1);
   assertComposeUsesCapturedPostgresAuthority(log, [
     'config', 'up',
   ]);
 });
+
+test('rollback rejects an unhealthy PostgreSQL and fails closed on post-activation identity drift',
+  async (context) => {
+    const unhealthy = await createFixture();
+    context.after(() => fs.rm(unhealthy.root, { recursive: true, force: true }));
+    const preflight = runRollback(unhealthy, unhealthy.target.sha, {
+      FAKE_POSTGRES_HEALTH: 'starting',
+    });
+    assert.equal(preflight.status, 67, `${preflight.stdout}\n${preflight.stderr}`);
+    assert.doesNotMatch(await fs.readFile(unhealthy.commandLog, 'utf8'),
+      /docker\|build |image tag|up --pull never/iu);
+
+    const drifted = await createFixture();
+    context.after(() => fs.rm(drifted.root, { recursive: true, force: true }));
+    const drift = runRollback(drifted, drifted.target.sha, {
+      FAKE_POSTGRES_MOUNT_DRIFT_AFTER_APP_UP: '1',
+    });
+    assert.equal(drift.status, 70, `${drift.stdout}\n${drift.stderr}`);
+    assert.match(drift.stderr, /PostgreSQL.*(?:container|volume).*identity changed/iu);
+    assert.doesNotMatch(await fs.readFile(drifted.commandLog, 'utf8'), /down --volumes/iu);
+    assert.match(await fs.readFile(
+      path.join(drifted.appDir, '.staging-recovery-required'), 'utf8'),
+    /protected staging authority changed/iu);
+  });
 
 test('rollback recovery failures are diagnosed separately and block later operations', async (context) => {
   const probe = runBash(['--version']);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -9,15 +10,19 @@ import { deflateRawSync } from 'node:zlib';
 
 import {
   ARCHIVE_LIMITS,
+  completeReleaseCompose,
   createReleaseArchive,
+  emitReleaseCompose,
   extractReleaseArchive,
   prepareReleaseTreeForCopy,
   validateReleaseArchive,
   verifyReleaseTree,
+  verifyReleaseTreeTransition,
 } from '../scripts/staging-release-archive.js';
 import { gitTrackedFiles, readCandidateFileManifest } from '../scripts/verify-docker-context.js';
 
 const projectDirectory = path.resolve('.');
+const archiveTool = path.resolve('scripts/staging-release-archive.js');
 
 const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, byte) => {
   let value = byte;
@@ -113,6 +118,335 @@ test('canonical staging archive creation, extraction and exact tree verification
       verifyReleaseTree({ archivePath: archive, directory: destination }),
       /undeclared\.txt.*undeclared/u,
     );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('literal Compose emission validates the full archive before bounded exact-byte output',
+  async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-compose-emit-'));
+    try {
+      const source = path.join(root, 'source');
+      await fs.mkdir(source);
+      const compose = Buffer.from([
+        'services:',
+        '  app:',
+        '    image: easyboost-staging-app:local',
+        `    x-bounded-fixture: "${'x'.repeat(192 * 1024)}"`,
+        '',
+      ].join('\n'));
+      await Promise.all([
+        fs.writeFile(path.join(source, 'compose.staging.yml'), compose),
+        fs.writeFile(path.join(source, 'not-compose.yml'), 'foreign member\n'),
+      ]);
+      const archive = path.join(root, 'release.tar.gz');
+      await createReleaseArchive({
+        sourceDirectory: source,
+        files: ['compose.staging.yml', 'not-compose.yml'],
+        outputPath: archive,
+      });
+
+      const chunks = [];
+      let maximumRequested = 0;
+      const emitted = await emitReleaseCompose({
+        archivePath: archive,
+        writeChunk(chunk) {
+          maximumRequested = Math.max(maximumRequested, chunk.length);
+          const accepted = Math.min(chunk.length, 17 * 1024);
+          chunks.push(Buffer.from(chunk.subarray(0, accepted)));
+          return accepted;
+        },
+      });
+      assert.deepEqual(Buffer.concat(chunks), compose);
+      assert.equal(emitted.bytes, compose.length);
+      assert.equal(emitted.sha256, crypto.createHash('sha256').update(compose).digest('hex'));
+      assert.ok(maximumRequested <= 64 * 1024, 'Compose output chunks must remain bounded');
+
+      const cli = spawnSync(process.execPath, [archiveTool, 'emit-compose', archive], {
+        encoding: null,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+      assert.equal(cli.status, 0, cli.stderr.toString('utf8'));
+      assert.deepEqual(cli.stdout, compose, 'CLI stdout must contain only the literal member body');
+      assert.equal(cli.stderr.length, 0);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+test('literal Compose emission rejects missing, duplicate, corrupt, oversized and injected members before output',
+  async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-compose-reject-'));
+    try {
+      const missing = await writeArchive(root, rawArchive([
+        { name: 'Dockerfile', body: 'FROM scratch\n' },
+      ]), 'missing.tar.gz');
+      const duplicate = await writeArchive(root, rawArchive([
+        { name: 'compose.staging.yml', body: 'first\n' },
+        { name: 'compose.staging.yml', body: 'second\n' },
+      ]), 'duplicate.tar.gz');
+      const corrupt = await writeArchive(root, rawArchive([
+        { name: 'compose.staging.yml', body: 'services: {}\n' },
+      ], { corruptChecksum: true }), 'corrupt.tar.gz');
+      const valid = await writeArchive(root, rawArchive([
+        { name: 'compose.staging.yml', body: 'services: {}\n' },
+      ]), 'valid.tar.gz');
+
+      for (const [label, archive, options, pattern] of [
+        ['missing', missing, {}, /exactly one literal member/u],
+        ['duplicate', duplicate, {}, /canonical producer order|duplicate/u],
+        ['corrupt', corrupt, {}, /checksum/u],
+        ['oversized', valid, {
+          limits: { ...ARCHIVE_LIMITS, maxFileBytes: 1 },
+        }, /byte bound|overflow/u],
+      ]) {
+        let outputCalls = 0;
+        await assert.rejects(emitReleaseCompose({
+          archivePath: archive,
+          ...options,
+          writeChunk() {
+            outputCalls += 1;
+            return 1;
+          },
+        }), pattern, label);
+        assert.equal(outputCalls, 0, `${label} archive must not emit partial output`);
+      }
+
+      const injected = spawnSync(process.execPath, [
+        archiveTool, 'emit-compose', valid, 'Dockerfile',
+      ], { encoding: 'utf8' });
+      assert.notEqual(injected.status, 0);
+      assert.equal(injected.stdout, '');
+      assert.match(injected.stderr, /Usage: staging-release-archive/u,
+        'CLI must expose no arbitrary archive-member argument');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+test('Compose completion creates or resumes only an exact mode-0600 literal prefix', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-compose-complete-'));
+  try {
+    const source = path.join(root, 'source');
+    await fs.mkdir(source);
+    const compose = Buffer.from([
+      'services:',
+      '  app:',
+      '    image: easyboost-staging-app:local',
+      '    pull_policy: never',
+      '',
+    ].join('\n'));
+    await fs.writeFile(path.join(source, 'compose.staging.yml'), compose);
+    const archive = path.join(root, 'release.tar.gz');
+    await createReleaseArchive({
+      sourceDirectory: source,
+      files: ['compose.staging.yml'],
+      outputPath: archive,
+    });
+
+    const created = path.join(root, 'created-compose.yml');
+    const createdResult = await completeReleaseCompose({ archivePath: archive, outputPath: created });
+    assert.deepEqual(await fs.readFile(created), compose);
+    assert.equal((await fs.lstat(created)).mode & 0o777, 0o600);
+    assert.deepEqual(createdResult, {
+      bytes: compose.length,
+      complete: true,
+      sha256: crypto.createHash('sha256').update(compose).digest('hex'),
+    });
+
+    const resumed = path.join(root, 'resumed-compose.yml');
+    const prefixLength = Math.floor(compose.length / 2);
+    await fs.writeFile(resumed, compose.subarray(0, prefixLength), { mode: 0o600 });
+    await fs.chmod(resumed, 0o600);
+    await completeReleaseCompose({ archivePath: archive, outputPath: resumed });
+    assert.deepEqual(await fs.readFile(resumed), compose);
+    await completeReleaseCompose({ archivePath: archive, outputPath: resumed });
+    assert.deepEqual(await fs.readFile(resumed), compose, 'completed output must be idempotent');
+
+    const cliOutput = path.join(root, 'cli-compose.yml');
+    const cli = spawnSync(process.execPath, [archiveTool, 'complete-compose', archive, cliOutput], {
+      encoding: 'utf8',
+    });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.equal(cli.stdout, '');
+    assert.deepEqual(await fs.readFile(cliOutput), compose);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Compose completion preserves every foreign suffix, middle, symlink, hardlink and mode', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-compose-foreign-'));
+  try {
+    const source = path.join(root, 'source');
+    await fs.mkdir(source);
+    const compose = Buffer.from('services:\n  app:\n    image: easyboost-staging-app:local\n');
+    await fs.writeFile(path.join(source, 'compose.staging.yml'), compose);
+    const archive = path.join(root, 'release.tar.gz');
+    await createReleaseArchive({
+      sourceDirectory: source,
+      files: ['compose.staging.yml'],
+      outputPath: archive,
+    });
+
+    const suffix = path.join(root, 'suffix.yml');
+    const suffixBytes = Buffer.concat([compose, Buffer.from('foreign\n')]);
+    await fs.writeFile(suffix, suffixBytes, { mode: 0o600 });
+    await fs.chmod(suffix, 0o600);
+
+    const middle = path.join(root, 'middle.yml');
+    const middleBytes = Buffer.from(compose);
+    middleBytes[Math.floor(middleBytes.length / 2)] ^= 1;
+    await fs.writeFile(middle, middleBytes, { mode: 0o600 });
+    await fs.chmod(middle, 0o600);
+
+    const symlinkTarget = path.join(root, 'symlink-target.yml');
+    const symlinkBytes = Buffer.from('foreign symlink target\n');
+    await fs.writeFile(symlinkTarget, symlinkBytes, { mode: 0o600 });
+    const symlink = path.join(root, 'symlink.yml');
+    await fs.symlink(symlinkTarget, symlink);
+
+    const hardlinkTarget = path.join(root, 'hardlink-target.yml');
+    const hardlinkBytes = compose.subarray(0, 8);
+    await fs.writeFile(hardlinkTarget, hardlinkBytes, { mode: 0o600 });
+    await fs.chmod(hardlinkTarget, 0o600);
+    const hardlink = path.join(root, 'hardlink.yml');
+    await fs.link(hardlinkTarget, hardlink);
+
+    const wrongMode = path.join(root, 'wrong-mode.yml');
+    const wrongModeBytes = compose.subarray(0, 5);
+    await fs.writeFile(wrongMode, wrongModeBytes, { mode: 0o644 });
+    await fs.chmod(wrongMode, 0o644);
+
+    for (const [label, output, expected, pattern] of [
+      ['suffix', suffix, suffixBytes, /longer than/u],
+      ['middle', middle, middleBytes, /literal prefix/u],
+      ['symlink', symlink, symlinkBytes, /unsafe identity/u],
+      ['hardlink', hardlink, hardlinkBytes, /unsafe identity/u],
+      ['mode', wrongMode, wrongModeBytes, /unsafe identity/u],
+    ]) {
+      await assert.rejects(
+        completeReleaseCompose({ archivePath: archive, outputPath: output }),
+        pattern,
+        label,
+      );
+      const preserved = label === 'symlink' ? await fs.readFile(symlinkTarget) : await fs.readFile(output);
+      assert.deepEqual(preserved, expected, `${label} bytes must remain untouched`);
+    }
+    assert.equal((await fs.lstat(wrongMode)).mode & 0o777, 0o644,
+      'foreign output mode must remain untouched');
+    assert.equal((await fs.lstat(hardlinkTarget)).nlink, 2,
+      'foreign hardlink topology must remain untouched');
+    assert.equal((await fs.lstat(symlink)).isSymbolicLink(), true,
+      'foreign symlink must remain untouched');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('legacy cutover bridge permits only the declared Compose file to differ from the live tree', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-transition-'));
+  try {
+    const source = path.join(root, 'source');
+    const live = path.join(root, 'live');
+    await Promise.all([
+      fs.mkdir(path.join(source, 'nested'), { recursive: true }),
+      fs.mkdir(path.join(live, 'nested'), { recursive: true }),
+    ]);
+    await Promise.all([
+      fs.writeFile(path.join(source, 'compose.staging.yml'), 'services:\n  app:\n    image: easyboost-staging-app:local\n'),
+      fs.writeFile(path.join(source, 'nested', 'app.js'), 'export const release = "legacy";\n'),
+      fs.writeFile(path.join(live, 'compose.staging.yml'), 'services:\n  app:\n    build: .\n'),
+      fs.writeFile(path.join(live, 'nested', 'app.js'), 'export const release = "legacy";\n'),
+    ]);
+    const archive = path.join(root, 'bridge.tar.gz');
+    await createReleaseArchive({
+      sourceDirectory: source,
+      files: ['compose.staging.yml', 'nested/app.js'],
+      outputPath: archive,
+    });
+
+    const verified = await verifyReleaseTreeTransition({
+      archivePath: archive,
+      directory: live,
+      transitionFile: 'compose.staging.yml',
+    });
+
+    assert.equal(verified.transitionFile, 'compose.staging.yml');
+    assert.match(verified.liveTransitionSha256, /^[a-f0-9]{64}$/u);
+    assert.match(verified.archiveTransitionSha256, /^[a-f0-9]{64}$/u);
+    assert.notEqual(verified.liveTransitionSha256, verified.archiveTransitionSha256);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('legacy cutover bridge rejects every non-Compose inventory or byte difference', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-transition-mismatch-'));
+  try {
+    const source = path.join(root, 'source');
+    const live = path.join(root, 'live');
+    await Promise.all([fs.mkdir(source), fs.mkdir(live)]);
+    await Promise.all([
+      fs.writeFile(path.join(source, 'compose.staging.yml'), 'bridge\n'),
+      fs.writeFile(path.join(source, 'server.js'), 'trusted\n'),
+      fs.writeFile(path.join(live, 'compose.staging.yml'), 'legacy\n'),
+      fs.writeFile(path.join(live, 'server.js'), 'changed\n'),
+    ]);
+    const archive = path.join(root, 'bridge.tar.gz');
+    await createReleaseArchive({
+      sourceDirectory: source,
+      files: ['compose.staging.yml', 'server.js'],
+      outputPath: archive,
+    });
+
+    await assert.rejects(verifyReleaseTreeTransition({
+      archivePath: archive,
+      directory: live,
+      transitionFile: 'compose.staging.yml',
+    }), /server\.js.*bytes mismatch/u);
+
+    await fs.writeFile(path.join(live, 'server.js'), 'trusted\n');
+    await fs.writeFile(path.join(live, 'untracked.txt'), 'unexpected\n');
+    await assert.rejects(verifyReleaseTreeTransition({
+      archivePath: archive,
+      directory: live,
+      transitionFile: 'compose.staging.yml',
+    }), /inventory mismatch/u);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('legacy cutover bridge transition authority is fixed to compose.staging.yml', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-archive-transition-authority-'));
+  try {
+    const source = path.join(root, 'source');
+    const live = path.join(root, 'live');
+    await Promise.all([fs.mkdir(source), fs.mkdir(live)]);
+    await Promise.all([
+      fs.writeFile(path.join(source, 'compose.staging.yml'), 'same-compose\n'),
+      fs.writeFile(path.join(source, 'server.js'), 'bridge\n'),
+      fs.writeFile(path.join(live, 'compose.staging.yml'), 'same-compose\n'),
+      fs.writeFile(path.join(live, 'server.js'), 'legacy\n'),
+    ]);
+    const archive = path.join(root, 'bridge.tar.gz');
+    await createReleaseArchive({
+      sourceDirectory: source,
+      files: ['compose.staging.yml', 'server.js'],
+      outputPath: archive,
+    });
+
+    await assert.rejects(verifyReleaseTreeTransition({
+      archivePath: archive,
+      directory: live,
+      transitionFile: 'server.js',
+    }), /transition authority.*compose\.staging\.yml/u);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -9,6 +9,8 @@ import test from 'node:test';
 
 import {
   captureBoundedFileAuthority,
+  captureBoundedFilePrefixAuthority,
+  completeBoundedFilePrefix,
   copyBoundedStream,
   freezeBoundedFileIntoReservation,
   fsyncStagingFile,
@@ -16,6 +18,43 @@ import {
 import { captureReservation } from '../scripts/staging-runtime-authority.js';
 
 const copyScript = path.resolve('scripts/staging-bounded-stream.js');
+
+test('journal-owned archive copy resumes only an exact descriptor-bound prefix', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-bounded-prefix-'));
+  try {
+    const input = path.join(root, 'upload.tar.gz');
+    const output = path.join(root, 'journal-owned.tar.gz');
+    const bytes = crypto.randomBytes(256 * 1024 + 17);
+    await fs.writeFile(input, bytes, { mode: 0o600 });
+    await fs.chmod(input, 0o600);
+    const authority = captureBoundedFileAuthority({
+      inputPath: input, maximumBytes: bytes.length,
+    });
+    await fs.writeFile(output, bytes.subarray(0, 70_001), { mode: 0o600 });
+    await fs.chmod(output, 0o600);
+    const prefix = captureBoundedFilePrefixAuthority({
+      inputPath: input, outputPath: output, maximumBytes: bytes.length, authority,
+    });
+    const result = completeBoundedFilePrefix({
+      inputPath: input, outputPath: output, maximumBytes: bytes.length,
+      authority, outputAuthority: prefix,
+    });
+    assert.deepEqual(await fs.readFile(output), bytes);
+    assert.equal(result.bytes, bytes.length);
+    assert.equal(result.sha256, crypto.createHash('sha256').update(bytes).digest('hex'));
+
+    await fs.writeFile(output, Buffer.from('foreign'), { mode: 0o600 });
+    await fs.chmod(output, 0o600);
+    const foreign = await fs.readFile(output);
+    assert.throws(() => captureBoundedFilePrefixAuthority({
+      inputPath: input, outputPath: output, maximumBytes: bytes.length, authority,
+    }), /not an exact uploaded prefix/u);
+    assert.deepEqual(await fs.readFile(output), foreign,
+      'foreign deterministic-path bytes must remain untouched');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 async function runCopy({ chunks, limit, output }) {
   const child = spawn(process.execPath, [copyScript, output, String(limit)], {

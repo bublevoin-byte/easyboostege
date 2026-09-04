@@ -12,6 +12,7 @@ import { captureHelperBundle, HELPER_BUNDLE_FILES } from '../scripts/staging-hel
 import { verifyStagingComposeModel } from '../scripts/verify-staging-compose.js';
 
 const gitBash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+const cutoverScript = path.resolve('scripts/staging-cutover.sh');
 const deployScript = path.resolve('scripts/staging-deploy.sh');
 const deadlineHarness = path.resolve('test/staging-deadline-test-harness.js');
 const restartScript = path.resolve('scripts/staging-restart-app.sh');
@@ -25,6 +26,10 @@ const STALE_IMAGE_ID = `sha256:${'5'.repeat(64)}`;
 const STALE_RELEASE_IMAGE_ID = `sha256:${'6'.repeat(64)}`;
 const FOREIGN_IMAGE_ID = `sha256:${'7'.repeat(64)}`;
 const DRIFTED_RUNNING_IMAGE_ID = `sha256:${'8'.repeat(64)}`;
+const APP_CONTAINER_ID = 'a'.repeat(64);
+const POSTGRES_CONTAINER_ID = 'b'.repeat(64);
+const DRIFTED_POSTGRES_CONTAINER_ID = 'c'.repeat(64);
+const POSTGRES_VOLUME_SOURCE = '/var/lib/docker/volumes/easyboost-staging_postgres-data/_data';
 const STAGING_TEST_TRANSACTION_SECONDS = 120;
 const STAGING_TEST_RECOVERY_SECONDS = 60;
 
@@ -157,7 +162,7 @@ test('safe root-owned ancestors are accepted while the protected runtime stays i
     assert.match(foreignLeaf.stderr, /test runtime has a foreign owner/u);
   });
 
-test('workflow config validation uses one inert PostgreSQL identity and outer deploy time remains dominant',
+test('workflow pins canonical Node and sudo invokes only the authorized deploy entrypoint',
   async () => {
     const [ci, deployWorkflow] = await Promise.all([
       fs.readFile(path.resolve('.github/workflows/ci.yml'), 'utf8'),
@@ -173,16 +178,35 @@ test('workflow config validation uses one inert PostgreSQL identity and outer de
     assert.equal((ci.match(/EASYBOOST_STAGING_POSTGRES_IMAGE_ID:/gu) ?? []).length, 1,
       'the inert CI identity must not leak into an executable deployment step');
 
-    const outerMinutes = Number(deployWorkflow.match(/timeout-minutes:\s*(\d+)/u)?.[1]);
-    const remote = deployWorkflow.match(
-      /timeout --signal=TERM --kill-after=(\d+)s\s+(\d+)s\s+\/usr\/local\/sbin\/easyboost-staging-deploy/u,
-    );
-    assert.ok(remote, 'the remote deployment supervisor bounds must remain explicit');
-    const [, killAfterSeconds, commandSeconds] = remote.map(Number);
-    const preparationAndTransportMarginSeconds = 5 * 60;
-    assert.ok(outerMinutes * 60
-      > commandSeconds + killAfterSeconds + preparationAndTransportMarginSeconds,
-    'the workflow must outlive remote TERM/KILL settlement plus a five-minute preparation margin');
+    for (const [label, workflow] of [['CI', ci], ['deploy', deployWorkflow]]) {
+      assert.match(workflow, /^\s*node-version:\s*22\.23\.2\s*$/mu,
+        `${label} canonical archive producer Node must stay exact`);
+      assert.doesNotMatch(workflow, /^\s*node-version:\s*22\s*$/mu,
+        `${label} must not float across Node 22 patch releases`);
+    }
+    assert.match(deployWorkflow,
+      /"sudo \/usr\/local\/sbin\/easyboost-staging-deploy \/tmp\/easyboost-staging-release\.tar\.gz '\$release_sha' immutable-archive-v4 '\$helper_sha'"/u,
+      'sudo must invoke the allowlisted helper directly');
+    assert.doesNotMatch(deployWorkflow, /sudo\s+(?:\/usr\/bin\/)?timeout\b/u,
+      'sudoers does not authorize an outer timeout executable');
+    assert.match(deployWorkflow, /^\s*timeout-minutes:\s*60\s*$/mu,
+      'job remains the outer bounded workflow');
+  });
+
+test('cutover has no unsafe legacy worktree fallback and the release lock has no crash sibling',
+  async () => {
+    const [cutoverSource, commonSource] = await Promise.all([
+      fs.readFile(path.resolve('scripts/staging-cutover.sh'), 'utf8'),
+      fs.readFile(commonScript, 'utf8'),
+    ]);
+    assert.doesNotMatch(cutoverSource, /rm -rf|run_archive_extract|\bextract\b/u);
+    assert.doesNotMatch(cutoverSource, /cp\s+--(?:reflink=never\s+)?--/u,
+      'journal-reserved cutover entries must only use descriptor-bound prefix completion');
+    assert.doesNotMatch(commonSource, /\.staging-release\.lock\.new\.\$\$/u,
+      'the stable release lock must not have a random crash-residue sibling');
+    assert.match(commonSource,
+      /set -o noclobber; : > "\$lock_file"[\s\S]*:600:1:0/u,
+      'the final lock path is created no-replace and proven private, zero-byte, and single-link');
   });
 
 async function createRelease(root, name, marker) {
@@ -258,6 +282,10 @@ async function writeFakeCommands(root) {
     `STALE_RELEASE_IMAGE_ID=${STALE_RELEASE_IMAGE_ID}`,
     `FOREIGN_IMAGE_ID=${FOREIGN_IMAGE_ID}`,
     `DRIFTED_RUNNING_IMAGE_ID=${DRIFTED_RUNNING_IMAGE_ID}`,
+    `APP_CONTAINER_ID=${APP_CONTAINER_ID}`,
+    `POSTGRES_CONTAINER_ID=${POSTGRES_CONTAINER_ID}`,
+    `DRIFTED_POSTGRES_CONTAINER_ID=${DRIFTED_POSTGRES_CONTAINER_ID}`,
+    `POSTGRES_VOLUME_SOURCE=${POSTGRES_VOLUME_SOURCE}`,
     'flock() { if [ "${FAKE_LOCK_BUSY:-0}" = "1" ]; then return 1; fi; return 0; }',
     'timeout() {',
     '  while [ "$#" -gt 0 ]; do case "$1" in --signal=*|--kill-after=*) shift ;; *s) shift; break ;; *) break ;; esac; done',
@@ -299,14 +327,18 @@ async function writeFakeCommands(root) {
     '}',
     'if [ "${FAKE_COMMANDS_INITIALIZED:-0}" != "1" ]; then',
     '  export FAKE_COMMANDS_INITIALIZED=1',
-    '  if [ "${FAKE_NO_PREVIOUS_IMAGE:-0}" = "1" ]; then /usr/bin/rm -f "$COMMAND_LOG.image-state" "$COMMAND_LOG.container-state" "$COMMAND_LOG.postgres-container-state" "$COMMAND_LOG.volume-state" "$COMMAND_LOG.network-state" "$COMMAND_LOG.release-state"; else printf "%s\\n" "$PREVIOUS_IMAGE_ID" > "$COMMAND_LOG.image-state"; printf "%s\\n" "$PREVIOUS_IMAGE_ID" > "$COMMAND_LOG.container-state"; printf "postgres\\n" > "$COMMAND_LOG.postgres-container-state"; : > "$COMMAND_LOG.volume-state"; : > "$COMMAND_LOG.network-state"; fi',
+    '  if [ "${FAKE_NO_PREVIOUS_IMAGE:-0}" = "1" ]; then /usr/bin/rm -f "$COMMAND_LOG.image-state" "$COMMAND_LOG.container-state" "$COMMAND_LOG.postgres-container-state" "$COMMAND_LOG.postgres-container-id-state" "$COMMAND_LOG.postgres-volume-source-state" "$COMMAND_LOG.volume-state" "$COMMAND_LOG.network-state" "$COMMAND_LOG.release-state"; else printf "%s\\n" "$PREVIOUS_IMAGE_ID" > "$COMMAND_LOG.image-state"; printf "%s\\n" "$PREVIOUS_IMAGE_ID" > "$COMMAND_LOG.container-state"; printf "%s\\n" "$POSTGRES_IMAGE_ID" > "$COMMAND_LOG.postgres-container-state"; printf "%s\\n" "$POSTGRES_CONTAINER_ID" > "$COMMAND_LOG.postgres-container-id-state"; printf "%s\\n" "$POSTGRES_VOLUME_SOURCE" > "$COMMAND_LOG.postgres-volume-source-state"; : > "$COMMAND_LOG.volume-state"; : > "$COMMAND_LOG.network-state"; fi',
     '  [ "${FAKE_FIRST_STALE_STABLE:-0}" != "1" ] || printf "%s\\n" "$STALE_IMAGE_ID" > "$COMMAND_LOG.image-state"',
     '  [ "${FAKE_FIRST_STALE_RELEASE:-0}" != "1" ] || printf "%s\\n" "$STALE_RELEASE_IMAGE_ID" > "$COMMAND_LOG.release-state"',
     '  [ "${FAKE_FIRST_STALE_CONTAINER:-0}" != "1" ] || printf "%s\\n" "$STALE_IMAGE_ID" > "$COMMAND_LOG.container-state"',
+    '  [ "${FAKE_MISSING_APP_CONTAINER:-0}" != "1" ] || /usr/bin/rm -f "$COMMAND_LOG.container-state"',
+    '  [ "${FAKE_MISSING_POSTGRES_CONTAINER:-0}" != "1" ] || /usr/bin/rm -f "$COMMAND_LOG.postgres-container-state" "$COMMAND_LOG.postgres-container-id-state" "$COMMAND_LOG.postgres-volume-source-state"',
+    '  [ "${FAKE_DRIFTED_RUNNING_POSTGRES:-0}" != "1" ] || printf "%s\\n" "$DRIFTED_POSTGRES_IMAGE_ID" > "$COMMAND_LOG.postgres-container-state"',
     'fi',
     'if [ "${FAKE_NONCANONICAL_IMAGE_IDENTITIES:-0}" = "1" ]; then printf "sha256:not-canonical\\n" > "$COMMAND_LOG.image-state"; printf "sha256:not-canonical\\n" > "$COMMAND_LOG.container-state"; fi',
     'cp() {',
     '  if [ "${FAKE_RECOVERY_COPY_FAIL:-0}" = "1" ] && [[ "$*" == *"/previous/."* ]]; then return 12; fi',
+    '  if [ "${FAKE_CUTOVER_COMPOSE_COPY_SIDE_EFFECT_FAIL:-0}" = "1" ] && [[ "${@: -1}" == "$STAGING_APP_DIR/.compose.staging.yml.cutover-"* ]]; then /usr/bin/cp "$@"; return 37; fi',
     '  if [ "${FAKE_RELEASE_ARCHIVE_WRITE_FAIL:-0}" = "1" ]; then case "${@: -1}" in "$STAGING_APP_DIR"/rollbacks/releases/.release-*.tar.gz.tmp.*) /usr/bin/cp "$@"; return 31 ;; esac; fi',
     '  /usr/bin/cp "$@"',
     '}',
@@ -346,11 +378,12 @@ async function writeFakeCommands(root) {
     'ln() { destination="${@: -1}"; if [ "${FAKE_RELEASE_FINAL_PUBLICATION_REPLACE:-0}" = "1" ]; then case "$destination" in "$STAGING_APP_DIR"/rollbacks/releases/release-*.tar.gz) printf "foreign replacement\\n" > "$destination"; /usr/bin/chmod 600 "$destination" ;; esac; fi; if [ "${FAKE_RELEASE_ARCHIVE_MV_FAIL:-0}" = "1" ]; then case "$destination" in "$STAGING_APP_DIR"/rollbacks/releases/release-*.tar.gz) /usr/bin/ln "$@"; return 33 ;; esac; fi; if [ "${FAKE_RELEASE_SIDECAR_MV_FAIL:-0}" = "1" ]; then case "$destination" in "$STAGING_APP_DIR"/rollbacks/releases/release-*.tar.gz.sha256) /usr/bin/ln "$@"; return 34 ;; esac; fi; /usr/bin/ln "$@"; }',
     'docker() {',
     '  printf "docker|%s\\n" "$*" >> "$COMMAND_LOG"',
-    '  if [ "$1" = "compose" ]; then action=other; case " $* " in *" config --format json "*) action=config ;; *" up --pull never -d --no-build app "*|*" up --pull never -d --no-build --no-deps app "*) action=up ;; *" down --volumes --remove-orphans "*) action=down ;; *" exec -T postgres "*) action=exec ;; *" ps "*) action=ps ;; esac; printf "compose-postgres-authority|%s|%s\\n" "${EASYBOOST_STAGING_POSTGRES_IMAGE_ID:-unset}" "$action" >> "$COMMAND_LOG"; fi',
+    '  if [ "$1" = "compose" ]; then action=other; case " $* " in *" config --format json "*) action=config ;; *" up --pull never -d --no-build --no-deps app "*) action=up ;; *" up --pull never -d --no-build --no-deps postgres "*) action=postgres-up ;; *" down --volumes --remove-orphans "*) action=down ;; *" exec -T postgres "*) action=exec ;; *" ps "*) action=ps ;; esac; printf "compose-postgres-authority|%s|%s\\n" "${EASYBOOST_STAGING_POSTGRES_IMAGE_ID:-unset}" "$action" >> "$COMMAND_LOG"; fi',
     '  if [ "$1" = "ps" ] && [[ " $* " == *"label=com.docker.compose.project=easyboost-staging"* ]]; then',
-    '    if [[ " $* " == *"label=com.docker.compose.service=app"* ]]; then [ ! -f "$COMMAND_LOG.container-state" ] || printf "fake-app-container\\n"; else [ ! -f "$COMMAND_LOG.container-state" ] || printf "fake-app-container\\n"; [ ! -f "$COMMAND_LOG.postgres-container-state" ] || printf "fake-postgres-container\\n"; fi',
+    '    if [[ " $* " == *"label=com.docker.compose.service=app"* ]]; then [ ! -f "$COMMAND_LOG.container-state" ] || printf "%s\\n" "$APP_CONTAINER_ID"; elif [[ " $* " == *"label=com.docker.compose.service=postgres"* ]]; then [ ! -f "$COMMAND_LOG.postgres-container-state" ] || cat "$COMMAND_LOG.postgres-container-id-state"; else [ ! -f "$COMMAND_LOG.container-state" ] || printf "%s\\n" "$APP_CONTAINER_ID"; [ ! -f "$COMMAND_LOG.postgres-container-state" ] || cat "$COMMAND_LOG.postgres-container-id-state"; fi',
     '    return 0',
     '  fi',
+    '  if [ "$1" = "volume" ] && [ "$2" = "inspect" ]; then [ -f "$COMMAND_LOG.volume-state" ] || return 1; volume_source="${FAKE_POSTGRES_VOLUME_OBJECT_MOUNTPOINT:-$(cat "$COMMAND_LOG.postgres-volume-source-state")}"; [ ! -f "$COMMAND_LOG.postgres-volume-object-source-state" ] || volume_source="$(cat "$COMMAND_LOG.postgres-volume-object-source-state")"; printf \'{"Name":"%s","Driver":"%s","Scope":"%s","Mountpoint":"%s","Labels":{"com.docker.compose.project":"%s","com.docker.compose.volume":"%s"},"Options":null}\\n\' "${FAKE_POSTGRES_VOLUME_OBJECT_NAME:-easyboost-staging_postgres-data}" "${FAKE_POSTGRES_VOLUME_OBJECT_DRIVER:-local}" "${FAKE_POSTGRES_VOLUME_OBJECT_SCOPE:-local}" "$volume_source" "${FAKE_POSTGRES_VOLUME_OBJECT_PROJECT:-easyboost-staging}" "${FAKE_POSTGRES_VOLUME_OBJECT_LABEL:-postgres-data}"; return 0; fi',
     '  if [ "$1" = "volume" ] && [ "$2" = "ls" ]; then [ ! -f "$COMMAND_LOG.volume-state" ] || printf "easyboost-staging_postgres-data\\n"; return 0; fi',
     '  if [ "$1" = "network" ] && [ "$2" = "ls" ]; then [ ! -f "$COMMAND_LOG.network-state" ] || printf "easyboost-staging_backend\\n"; return 0; fi',
     '  if [[ " $* " == *" config --format json "* ]]; then',
@@ -407,27 +440,40 @@ async function writeFakeCommands(root) {
     '    if [ "${@: -1}" = "easyboost-staging-app:local" ] && [ -f "$COMMAND_LOG.container-state" ]; then return 19; fi',
     '    case "${@: -1}" in easyboost-staging-app:local) rm -f "$COMMAND_LOG.image-state" ;; easyboost-staging-app:release-*) rm -f "$COMMAND_LOG.release-state"; [ -z "${FAKE_RELEASE_INSPECT_AFTER_RM_STATUS:-}" ] || : > "$COMMAND_LOG.inspect-after-release-rm" ;; esac; return 0',
     '  fi',
-    '  if [ "$1" = "inspect" ]; then [ -f "$COMMAND_LOG.container-state" ] || return 1; if [ "${FAKE_RUNNING_IMAGE_DRIFT:-0}" = "1" ]; then printf "%s\\n" "$DRIFTED_RUNNING_IMAGE_ID"; else cat "$COMMAND_LOG.container-state"; fi; return 0; fi',
+    '  if [ "$1" = "inspect" ]; then',
+    '    target="${@: -1}"',
+    '    if [ -f "$COMMAND_LOG.postgres-container-id-state" ] && [ "$target" = "$(cat "$COMMAND_LOG.postgres-container-id-state")" ]; then',
+    '      [ -f "$COMMAND_LOG.postgres-container-state" ] || return 1',
+    '      if [[ " $* " == *" --format {{json .}} "* ]]; then',
+    '        postgres_health="${FAKE_POSTGRES_HEALTH:-healthy}"; postgres_running="${FAKE_POSTGRES_RUNNING:-true}"; postgres_mount_type="${FAKE_POSTGRES_MOUNT_TYPE:-volume}"; postgres_volume_name="${FAKE_POSTGRES_VOLUME_NAME:-easyboost-staging_postgres-data}"; postgres_volume_source="${FAKE_POSTGRES_VOLUME_SOURCE:-$(cat "$COMMAND_LOG.postgres-volume-source-state")}"',
+    '        printf \'{"Id":"%s","Image":"%s","Config":{"Labels":{"com.docker.compose.project":"%s","com.docker.compose.service":"%s","com.docker.compose.oneoff":"%s"}},"State":{"Running":%s,"Health":{"Status":"%s"}},"Mounts":[{"Type":"%s","Name":"%s","Source":"%s","Destination":"%s","Driver":"%s","Mode":"%s","Propagation":"%s","RW":%s}]}\\n\' "$target" "$(cat "$COMMAND_LOG.postgres-container-state")" "${FAKE_POSTGRES_PROJECT:-easyboost-staging}" "${FAKE_POSTGRES_SERVICE:-postgres}" "${FAKE_POSTGRES_ONEOFF:-False}" "$postgres_running" "$postgres_health" "$postgres_mount_type" "$postgres_volume_name" "$postgres_volume_source" "${FAKE_POSTGRES_MOUNT_DESTINATION:-/var/lib/postgresql/data}" "${FAKE_POSTGRES_MOUNT_DRIVER:-local}" "${FAKE_POSTGRES_MOUNT_MODE:-z}" "${FAKE_POSTGRES_MOUNT_PROPAGATION:-}" "${FAKE_POSTGRES_MOUNT_RW:-true}"',
+    '      else cat "$COMMAND_LOG.postgres-container-state"; fi',
+    '    else',
+    '      [ -f "$COMMAND_LOG.container-state" ] || return 1',
+    '      if [ "${FAKE_RUNNING_IMAGE_DRIFT:-0}" = "1" ]; then printf "%s\\n" "$DRIFTED_RUNNING_IMAGE_ID"; else cat "$COMMAND_LOG.container-state"; fi',
+    '    fi',
+    '    return 0',
+    '  fi',
     '  case " $* " in',
-    '    *" ps -a -q app "*) [ ! -f "$COMMAND_LOG.container-state" ] || printf "fake-app-container\\n" ;;',
-    '    *" ps -q app "*) [ ! -f "$COMMAND_LOG.container-state" ] || printf "fake-app-container\\n" ;;',
+    '    *" ps -a -q app "*) [ ! -f "$COMMAND_LOG.container-state" ] || printf "%s\\n" "$APP_CONTAINER_ID" ;;',
+    '    *" ps -q app "*) [ ! -f "$COMMAND_LOG.container-state" ] || printf "%s\\n" "$APP_CONTAINER_ID" ;;',
     '    *" ps --status running postgres --quiet "*) printf "postgres\\n" ;;',
     '    *" exec -T postgres "*) printf "database-backup\\n"; if [ "${FAKE_PG_DUMP_FAIL:-0}" = "1" ]; then return 23; fi ;;',
     '  esac',
     '  if [[ " $* " == *" down --volumes --remove-orphans "* ]]; then',
     '    [ "${FAKE_COMPOSE_DOWN_FAIL:-0}" != "1" ] || return 22',
     '    [ "${FAKE_APP_CONTAINER_RESIDUE:-0}" = "1" ] || rm -f "$COMMAND_LOG.container-state"',
-    '    [ "${FAKE_POSTGRES_CONTAINER_RESIDUE:-0}" = "1" ] || rm -f "$COMMAND_LOG.postgres-container-state"',
+    '    [ "${FAKE_POSTGRES_CONTAINER_RESIDUE:-0}" = "1" ] || rm -f "$COMMAND_LOG.postgres-container-state" "$COMMAND_LOG.postgres-container-id-state" "$COMMAND_LOG.postgres-volume-source-state"',
     '    [ "${FAKE_VOLUME_RESIDUE:-0}" = "1" ] || rm -f "$COMMAND_LOG.volume-state"',
     '    [ "${FAKE_NETWORK_RESIDUE:-0}" = "1" ] || rm -f "$COMMAND_LOG.network-state"',
     '    return 0',
     '  fi',
     '  if [[ " $* " == *" rm -f -s app "* ]]; then if [ "${FAKE_CONTAINER_RM_FAIL:-0}" = "1" ]; then return 22; fi; rm -f "$COMMAND_LOG.container-state"; return 0; fi',
-    '  if [[ " $* " == *" up --pull never -d --no-build app "* || " $* " == *" up --pull never -d --no-build --no-deps app "* ]]; then count=0; [ -f "$COMMAND_LOG.up-count" ] && count="$(cat "$COMMAND_LOG.up-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.up-count"; if [ "${FAKE_RECOVERY_UP_FAIL:-0}" = "1" ] && [ "$count" -ge 2 ]; then return 20; fi; fi',
-    '  if [[ " $* " == *" up --pull never -d --no-build app "* || " $* " == *" up --pull never -d --no-build --no-deps app "* ]]; then cat "$COMMAND_LOG.image-state" > "$COMMAND_LOG.container-state"; printf "postgres\\n" > "$COMMAND_LOG.postgres-container-state"; : > "$COMMAND_LOG.volume-state"; : > "$COMMAND_LOG.network-state"; fi',
+    '  if [[ " $* " == *" up --pull never -d --no-build --no-deps postgres "* ]]; then printf "%s\\n" "$POSTGRES_IMAGE_ID" > "$COMMAND_LOG.postgres-container-state"; printf "%s\\n" "$POSTGRES_CONTAINER_ID" > "$COMMAND_LOG.postgres-container-id-state"; printf "%s\\n" "$POSTGRES_VOLUME_SOURCE" > "$COMMAND_LOG.postgres-volume-source-state"; : > "$COMMAND_LOG.volume-state"; : > "$COMMAND_LOG.network-state"; return 0; fi',
+    '  if [[ " $* " == *" up --pull never -d --no-build --no-deps app "* ]]; then count=0; [ -f "$COMMAND_LOG.up-count" ] && count="$(cat "$COMMAND_LOG.up-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.up-count"; if [ "${FAKE_RECOVERY_UP_FAIL:-0}" = "1" ] && [ "$count" -ge 2 ]; then return 20; fi; cat "$COMMAND_LOG.image-state" > "$COMMAND_LOG.container-state"; [ "${FAKE_POSTGRES_DRIFT_AFTER_APP_UP:-0}" != "1" ] || printf "%s\\n" "$DRIFTED_POSTGRES_CONTAINER_ID" > "$COMMAND_LOG.postgres-container-id-state"; [ "${FAKE_POSTGRES_MOUNT_DRIFT_AFTER_APP_UP:-0}" != "1" ] || printf "/var/lib/docker/volumes/foreign/_data\\n" > "$COMMAND_LOG.postgres-volume-source-state"; [ "${FAKE_POSTGRES_VOLUME_OBJECT_DRIFT_AFTER_APP_UP:-0}" != "1" ] || printf "/var/lib/docker/volumes/foreign-object/_data\\n" > "$COMMAND_LOG.postgres-volume-object-source-state"; fi',
     '  return 0',
     '}',
-    'curl() { count=0; [ -f "$COMMAND_LOG.curl-count" ] && count="$(cat "$COMMAND_LOG.curl-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.curl-count"; up_count=0; [ -f "$COMMAND_LOG.up-count" ] && up_count="$(cat "$COMMAND_LOG.up-count")"; if [ "${FAKE_RESTART_READINESS_FAIL:-0}" = "1" ] && [ "$up_count" -ge 1 ]; then return 1; fi; if [ "${FAKE_RECOVERY_READINESS_FAIL:-0}" = "1" ] && [ "$up_count" -ge 2 ]; then return 1; fi; if [ "${FAKE_READINESS_FAIL:-0}" = "1" ] && grep -q "$CANDIDATE_IMAGE_ID" "$COMMAND_LOG.image-state" 2>/dev/null; then return 1; fi; return 0; }',
+    'curl() { count=0; [ -f "$COMMAND_LOG.curl-count" ] && count="$(cat "$COMMAND_LOG.curl-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.curl-count"; up_count=0; [ -f "$COMMAND_LOG.up-count" ] && up_count="$(cat "$COMMAND_LOG.up-count")"; if [ "${FAKE_PRECUTOVER_READINESS_FAIL:-0}" = "1" ]; then return 1; fi; if [ "${FAKE_RESTART_READINESS_FAIL:-0}" = "1" ] && [ "$up_count" -ge 1 ]; then return 1; fi; if [ "${FAKE_RECOVERY_READINESS_FAIL:-0}" = "1" ] && [ "$up_count" -ge 2 ]; then return 1; fi; if [ "${FAKE_READINESS_FAIL:-0}" = "1" ] && grep -q "$CANDIDATE_IMAGE_ID" "$COMMAND_LOG.image-state" 2>/dev/null; then return 1; fi; return 0; }',
     'sleep() { return 0; }',
     'install() { return 0; }',
     'source() {',
@@ -439,6 +485,7 @@ async function writeFakeCommands(root) {
     '      run_bounded() {',
     '        local requested="$1" remaining bound',
     '        shift',
+    '        if [ "${FAKE_CUTOVER_COMPOSE_COMPLETE_SIDE_EFFECT_FAIL:-0}" = "1" ] && [ "${1:-}" = node ] && [ "${3:-}" = complete-compose ] && [ ! -f "$COMMAND_LOG.cutover-compose-prefix-failed" ]; then command node "$2" emit-compose "$4" | head -c 17 > "$5" || return 37; chmod 600 -- "$5" || return 37; : > "$COMMAND_LOG.cutover-compose-prefix-failed"; return 37; fi',
     '        remaining="$requested"',
     '        if [ "$transaction_deadline" -gt 0 ]; then',
     '          remaining=$((transaction_deadline - SECONDS))',
@@ -581,6 +628,46 @@ function runDeploy(fixture, extraEnv = {}) {
   });
 }
 
+function runCutover(fixture, {
+  bridge = fixture.previous,
+  legacyMarkerSha,
+  legacyComposeSha,
+  legacyAppMode = '700',
+  legacyMarkerMode = '644',
+  legacyComposeMode = '664',
+  extraEnv = {},
+} = {}) {
+  const arguments_ = [
+    posixPath(bridge.archive), bridge.sha, legacyMarkerSha, legacyComposeSha,
+    legacyAppMode, legacyMarkerMode, legacyComposeMode,
+    'immutable-archive-v4', sourceBundleDigest,
+  ];
+  const configuration = Buffer.from(JSON.stringify({
+    arguments: arguments_,
+    bash: gitBash,
+    controlKey: `staging-deadline-test:cutover:${cutoverScript}:${JSON.stringify(arguments_)}`,
+    recoverySeconds: STAGING_TEST_RECOVERY_SECONDS,
+    script: posixPath(cutoverScript),
+    transactionSeconds: STAGING_TEST_TRANSACTION_SECONDS,
+  })).toString('base64url');
+  return spawnSync(process.execPath, [deadlineHarness, configuration], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BASH_ENV: posixPath(fixture.bashEnv),
+      PATH: `${path.dirname(fixture.bashEnv)}${path.delimiter}${process.env.PATH}`,
+      COMMAND_LOG: posixPath(fixture.commandLog),
+      CANDIDATE_RELEASE_SHA: bridge.sha,
+      FAKE_RESOLVED_COMPOSE_JSON: JSON.stringify(approvedComposeModel(fixture.appDir)),
+      EASYBOOST_HOST_OPERATION_LOCK_DIR: posixPath(path.join(fixture.root, 'host-operation.lock')),
+      EASYBOOST_STAGING_DEADLINE_TEST_CONTROL_ROOT: path.join(fixture.root, 'deadline-controls'),
+      EASYBOOST_STAGING_SESSION_TEST_CONTROL_ROOT: path.join(fixture.root, 'session-controls'),
+      STAGING_APP_DIR: posixPath(fixture.appDir),
+      ...extraEnv,
+    },
+  });
+}
+
 function runRestart(fixture, extraEnv = {}) {
   const arguments_ = [sourceBundleDigest];
   const configuration = Buffer.from(JSON.stringify({
@@ -637,6 +724,190 @@ test('root-owned staging restart preserves release authority and fails closed on
       /manual recovery required[\s\S]*staging app environment restart readiness/iu);
     assert.equal(await fs.readFile(path.join(unavailable.appDir, '.release-sha256'), 'utf8'),
       unavailable.previous.sha + '\n');
+  });
+
+test('explicit legacy cutover provisions a missing store and adopts the running release without rebuilding or touching PostgreSQL',
+  async (context) => {
+    if (process.platform === 'win32') {
+      return context.skip('production cutover requires Linux /proc and POSIX lock semantics');
+    }
+    const probe = runBash(['--version']);
+    if (!probe) return context.skip('Git Bash is not installed');
+    const fixture = await createFixture();
+    context.after(() => removeFixture(fixture.root));
+    const releaseStore = path.join(fixture.appDir, 'rollbacks', 'releases');
+    await fs.rm(releaseStore, { recursive: true });
+    const legacyMarkerSha = 'a'.repeat(64);
+    const legacyCompose = 'name: easyboost-staging\nservices:\n  app:\n    build: .\n';
+    const legacyComposeSha = crypto.createHash('sha256').update(legacyCompose).digest('hex');
+    await Promise.all([
+      fs.writeFile(path.join(fixture.appDir, '.release-sha256'), `${legacyMarkerSha}\n`),
+      fs.writeFile(path.join(fixture.appDir, 'compose.staging.yml'), legacyCompose),
+    ]);
+    await fs.chmod(fixture.appDir, 0o700);
+    await fs.chmod(path.join(fixture.appDir, '.release-sha256'), 0o644);
+    await fs.chmod(path.join(fixture.appDir, 'compose.staging.yml'), 0o664);
+
+    const result = runCutover(fixture, { legacyMarkerSha, legacyComposeSha });
+
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
+      `${fixture.previous.sha}\n`);
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'compose.staging.yml'), 'utf8'),
+      await fs.readFile(path.join(fixture.previous.directory, 'compose.staging.yml'), 'utf8'));
+    const retained = path.join(releaseStore, `release-${fixture.previous.sha}.tar.gz`);
+    assert.deepEqual(await fs.readFile(retained), await fs.readFile(fixture.previous.archive));
+    assert.equal(await fs.readFile(`${retained}.sha256`, 'utf8'), `${fixture.previous.sha}\n`);
+    if (process.platform !== 'win32') {
+      assert.equal((await fs.stat(releaseStore)).mode & 0o777, 0o700);
+      assert.equal((await fs.stat(path.join(fixture.appDir, '.release-sha256'))).mode & 0o777, 0o600);
+    }
+    assert.equal(await fs.readFile(path.join(fixture.appDir, '.env.staging'), 'utf8'),
+      'APP_PORT=3001\nSECRET=preserved\n');
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+    const log = await fs.readFile(fixture.commandLog, 'utf8');
+    assert.doesNotMatch(log, /docker\|(?:build|compose .* (?:up|down)|volume rm)/u);
+    const protectedFiles = [
+      path.join(fixture.appDir, '.release-sha256'),
+      path.join(fixture.appDir, 'compose.staging.yml'),
+      retained,
+      `${retained}.sha256`,
+    ];
+    const identitiesBeforeRetry = await Promise.all(protectedFiles.map((file) => fs.stat(file, { bigint: true })));
+    const retryLogOffset = Buffer.byteLength(log);
+
+    const retry = runCutover(fixture, { legacyMarkerSha, legacyComposeSha });
+
+    assert.equal(retry.status, 0, `${retry.stdout}\n${retry.stderr}`);
+    const identitiesAfterRetry = await Promise.all(protectedFiles.map((file) => fs.stat(file, { bigint: true })));
+    const identity = (stat) => [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeNs, stat.ctimeNs];
+    assert.deepEqual(identitiesAfterRetry.map(identity), identitiesBeforeRetry.map(identity),
+      'an exact second invocation must not rewrite committed release metadata');
+    const retryLog = (await fs.readFile(fixture.commandLog, 'utf8')).slice(retryLogOffset);
+    assert.doesNotMatch(retryLog,
+      /docker\|(?:build|image tag|image rm|compose .* (?:up|down)|volume rm)/u);
+    await assert.rejects(fs.access(path.join(fixture.appDir, '.staging-recovery-required')),
+      { code: 'ENOENT' });
+  });
+
+test('journaled cutover completes an exact deterministic Compose prefix left by its predecessor',
+  async (context) => {
+    if (process.platform === 'win32') {
+      return context.skip('production cutover requires Linux /proc and POSIX lock semantics');
+    }
+    const probe = runBash(['--version']);
+    if (!probe) return context.skip('Git Bash is not installed');
+    const fixture = await createFixture();
+    context.after(() => removeFixture(fixture.root));
+    const releaseStore = path.join(fixture.appDir, 'rollbacks', 'releases');
+    await fs.rm(releaseStore, { recursive: true });
+    const legacyMarkerSha = 'b'.repeat(64);
+    const legacyCompose = 'name: easyboost-staging\nservices:\n  app:\n    build: .\n';
+    const legacyComposeSha = crypto.createHash('sha256').update(legacyCompose).digest('hex');
+    await Promise.all([
+      fs.writeFile(path.join(fixture.appDir, '.release-sha256'), `${legacyMarkerSha}\n`),
+      fs.writeFile(path.join(fixture.appDir, 'compose.staging.yml'), legacyCompose),
+    ]);
+    await fs.chmod(fixture.appDir, 0o700);
+    await fs.chmod(path.join(fixture.appDir, '.release-sha256'), 0o644);
+    await fs.chmod(path.join(fixture.appDir, 'compose.staging.yml'), 0o664);
+
+    const interrupted = runCutover(fixture, {
+      legacyMarkerSha,
+      legacyComposeSha,
+      extraEnv: { FAKE_CUTOVER_COMPOSE_COMPLETE_SIDE_EFFECT_FAIL: '1' },
+    });
+    assert.notEqual(interrupted.status, 0, `${interrupted.stdout}\n${interrupted.stderr}`);
+    assert.match(interrupted.stderr, /roll forward/iu);
+    const journal = path.join(fixture.appDir, '.staging-recovery-required');
+    const temporary = path.join(
+      fixture.appDir, `.compose.staging.yml.cutover-${fixture.previous.sha}`,
+    );
+    await fs.access(journal);
+    await fs.access(temporary);
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'compose.staging.yml'), 'utf8'),
+      legacyCompose, 'failed copy must not replace the live Compose file');
+
+    const resumed = runCutover(fixture, { legacyMarkerSha, legacyComposeSha });
+    assert.equal(resumed.status, 0, `${resumed.stdout}\n${resumed.stderr}`);
+    assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
+      `${fixture.previous.sha}\n`);
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'compose.staging.yml'), 'utf8'),
+      await fs.readFile(path.join(fixture.previous.directory, 'compose.staging.yml'), 'utf8'));
+    await assert.rejects(fs.access(journal), { code: 'ENOENT' });
+    await assert.rejects(fs.access(temporary), { code: 'ENOENT' });
+  });
+
+test('legacy cutover proves bridge and running-service preconditions before metadata normalization',
+  async (context) => {
+    if (process.platform === 'win32') {
+      return context.skip('production cutover requires Linux /proc and POSIX lock semantics');
+    }
+    const probe = runBash(['--version']);
+    if (!probe) return context.skip('Git Bash is not installed');
+    const cases = [
+      ['missing app', { FAKE_MISSING_APP_CONTAINER: '1' }, 67, {}],
+      ['missing postgres', { FAKE_MISSING_POSTGRES_CONTAINER: '1' }, 67, {}],
+      ['wrong postgres image', { FAKE_DRIFTED_RUNNING_POSTGRES: '1' }, 67, {}],
+      ['unready app', { FAKE_PRECUTOVER_READINESS_FAIL: '1' }, 67, {}],
+      ['invalid bridge Compose', null, 65, {}],
+      ['wrong approved mode tuple', {}, 67, { legacyAppMode: '755' }],
+    ];
+    for (const [label, environment, expectedStatus, cutoverOptions] of cases) {
+      const fixture = await createFixture();
+      context.after(() => removeFixture(fixture.root));
+      const releaseStore = path.join(fixture.appDir, 'rollbacks', 'releases');
+      await fs.rm(releaseStore, { recursive: true });
+      const legacyMarkerSha = 'c'.repeat(64);
+      const legacyCompose = 'name: easyboost-staging\nservices:\n  app:\n    build: .\n';
+      const legacyComposeSha = crypto.createHash('sha256').update(legacyCompose).digest('hex');
+      await Promise.all([
+        fs.writeFile(path.join(fixture.appDir, '.release-sha256'), `${legacyMarkerSha}\n`),
+        fs.writeFile(path.join(fixture.appDir, 'compose.staging.yml'), legacyCompose),
+      ]);
+      await fs.chmod(fixture.appDir, 0o700);
+      await fs.chmod(path.join(fixture.appDir, '.release-sha256'), 0o644);
+      await fs.chmod(path.join(fixture.appDir, 'compose.staging.yml'), 0o664);
+      const protectedPaths = [
+        fixture.appDir,
+        path.join(fixture.appDir, '.release-sha256'),
+        path.join(fixture.appDir, 'compose.staging.yml'),
+      ];
+      const before = await Promise.all(protectedPaths.map((file) => fs.stat(file, { bigint: true })));
+      const invalidModel = approvedComposeModel(fixture.appDir);
+      invalidModel.services.app.image = 'unapproved.example/app:latest';
+      const extraEnv = environment ?? {
+        FAKE_RESOLVED_COMPOSE_JSON: JSON.stringify(invalidModel),
+      };
+
+      const rejected = runCutover(fixture, {
+        legacyMarkerSha, legacyComposeSha, extraEnv, ...cutoverOptions,
+      });
+      assert.equal(rejected.status, expectedStatus,
+        `${label}: ${rejected.stdout}\n${rejected.stderr}`);
+      const after = await Promise.all(protectedPaths.map((file) => fs.stat(file, { bigint: true })));
+      const identity = (stat) => [
+        stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeNs, stat.ctimeNs,
+      ];
+      assert.deepEqual(after.map(identity), before.map(identity),
+        `${label}: rejected precondition must preserve exact legacy metadata`);
+      assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
+        `${legacyMarkerSha}\n`, label);
+      assert.equal(await fs.readFile(path.join(fixture.appDir, 'compose.staging.yml'), 'utf8'),
+        legacyCompose, label);
+      await assert.rejects(fs.access(releaseStore), { code: 'ENOENT' }, label);
+      await assert.rejects(fs.access(path.join(fixture.appDir, '.staging-recovery-required')),
+        { code: 'ENOENT' }, label);
+      await assert.rejects(fs.access(path.join(fixture.appDir, '.staging-release.lock')),
+        { code: 'ENOENT' }, label);
+      await assert.rejects(fs.access(path.join(fixture.root, 'host-operation.lock')),
+        { code: 'ENOENT' }, label);
+      const dockerLog = await fs.readFile(fixture.commandLog, 'utf8').catch(() => '');
+      assert.doesNotMatch(dockerLog, /docker\|(?:build|image tag|image rm|compose .*\bup\b|volume rm)/u,
+        label);
+      assert.equal(await fs.readFile(`${fixture.commandLog}.image-state`, 'utf8'),
+        `${PREVIOUS_IMAGE_ID}\n`, label);
+    }
   });
 
 test('staging release owns the shared host-operation guard through mutation and rejects contention',
@@ -718,11 +989,20 @@ test('staging deploy builds the verified archive before activation and retains e
   const build = log.findIndex((line) => line === `docker|build --file Dockerfile --tag easyboost-staging-app:release-${fixture.candidate.sha} -`);
   const input = log.findIndex((line) => line === `stdin-sha|${fixture.candidate.sha}`);
   const promote = log.findIndex((line) => line === `docker|image tag easyboost-staging-app:release-${fixture.candidate.sha} easyboost-staging-app:local`);
-  const up = log.findIndex((line) => /docker\|compose .* up --pull never -d --no-build app$/u.test(line));
+  const up = log.findIndex((line) => (
+    /docker\|compose .* up --pull never -d --no-build --no-deps app$/u.test(line)
+  ));
   const cleanup = log.findIndex((line) => line === `docker|image rm -f easyboost-staging-app:release-${fixture.candidate.sha}`);
   assert.ok(build >= 0 && input > build && promote > input && up > promote && cleanup > up, log.join('\n'));
   assert.equal(log.includes('build-after-mutation'), false);
   assert.doesNotMatch(log.join('\n'), /--build/u);
+  assert.doesNotMatch(log.join('\n'), /up --pull never -d --no-build app/u);
+  assert.equal(await fs.readFile(`${fixture.commandLog}.postgres-container-state`, 'utf8'),
+    `${POSTGRES_IMAGE_ID}\n`, 'app activation must preserve the PostgreSQL image identity');
+  assert.equal(await fs.readFile(`${fixture.commandLog}.postgres-container-id-state`, 'utf8'),
+    `${POSTGRES_CONTAINER_ID}\n`, 'app activation must preserve the PostgreSQL container identity');
+  assert.equal(await fs.readFile(`${fixture.commandLog}.postgres-volume-source-state`, 'utf8'),
+    `${POSTGRES_VOLUME_SOURCE}\n`, 'app activation must preserve the PostgreSQL volume mount');
   assertComposeUsesCapturedPostgresAuthority(log.join('\n'), [
     'config', 'up',
   ]);
@@ -833,7 +1113,7 @@ test('readiness failure restores the previous stable image, code tree and marker
   const log = await fs.readFile(fixture.commandLog, 'utf8');
   assert.match(log,
     new RegExp(`docker\\|image tag ${PREVIOUS_IMAGE_ID} easyboost-staging-app:local`, 'u'));
-  assert.equal((log.match(/up --pull never -d --no-build app/gu) ?? []).length, 2,
+  assert.equal((log.match(/up --pull never -d --no-build --no-deps app/gu) ?? []).length, 2,
     `${log}\n${result.stderr}`);
   assertComposeUsesCapturedPostgresAuthority(log, [
     'config', 'up',
@@ -1679,7 +1959,7 @@ test('pinned PostgreSQL image identity is rechecked immediately before activatio
   assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
     `${fixture.previous.sha}\n`);
   const log = await fs.readFile(fixture.commandLog, 'utf8');
-  assert.equal((log.match(/up --pull never -d --no-build app/gu) ?? []).length, 1,
+  assert.equal((log.match(/up --pull never -d --no-build --no-deps app/gu) ?? []).length, 1,
     'only the verified predecessor recovery may run after the drift is cleared');
   assertComposeUsesCapturedPostgresAuthority(log, [
     'config', 'up',
@@ -1701,6 +1981,54 @@ test('captured PostgreSQL ID remains Compose authority when the lookup tag is re
       new RegExp(`unset|${DRIFTED_POSTGRES_IMAGE_ID}`, 'u'));
     assert.doesNotMatch(log, /docker\|(?:build |.* up --pull never )/u,
       'retag drift must fail before build or activation');
+  });
+
+test('deploy rejects unhealthy or incorrectly mounted PostgreSQL before active-state mutation',
+  async (context) => {
+    for (const [label, extraEnv] of [
+      ['not running', { FAKE_POSTGRES_RUNNING: 'false' }],
+      ['not healthy', { FAKE_POSTGRES_HEALTH: 'starting' }],
+      ['wrong volume name', { FAKE_POSTGRES_VOLUME_NAME: 'foreign-volume' }],
+      ['noncanonical mount source', { FAKE_POSTGRES_VOLUME_SOURCE: 'relative-volume-source' }],
+      ['read-only data mount', { FAKE_POSTGRES_MOUNT_RW: 'false' }],
+      ['wrong volume object driver', { FAKE_POSTGRES_VOLUME_OBJECT_DRIVER: 'nfs' }],
+      ['wrong volume object label', { FAKE_POSTGRES_VOLUME_OBJECT_LABEL: 'foreign' }],
+      ['volume object does not match mount', { FAKE_POSTGRES_VOLUME_OBJECT_MOUNTPOINT: '/foreign' }],
+    ]) {
+      const fixture = await createFixture();
+      context.after(() => removeFixture(fixture.root));
+      const result = runDeploy(fixture, extraEnv);
+      assert.equal(result.status, 67, `${label}: ${result.stdout}\n${result.stderr}`);
+      const log = await fs.readFile(fixture.commandLog, 'utf8');
+      assert.doesNotMatch(log, /docker\|build |image tag|up --pull never/iu, label);
+      assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'),
+        `${fixture.previous.sha}\n`, label);
+      assert.equal(await fs.readFile(path.join(fixture.appDir, 'old-only.txt'), 'utf8'),
+        'old-only\n', label);
+    }
+  });
+
+test('deploy fails closed if the PostgreSQL container or volume identity changes during app activation',
+  async (context) => {
+    for (const [label, flag] of [
+      ['container', 'FAKE_POSTGRES_DRIFT_AFTER_APP_UP'],
+      ['volume', 'FAKE_POSTGRES_MOUNT_DRIFT_AFTER_APP_UP'],
+      ['volume object', 'FAKE_POSTGRES_VOLUME_OBJECT_DRIFT_AFTER_APP_UP'],
+    ]) {
+      const fixture = await createFixture();
+      context.after(() => removeFixture(fixture.root));
+      const result = runDeploy(fixture, { [flag]: '1' });
+      assert.equal(result.status, 70, `${label}: ${result.stdout}\n${result.stderr}`);
+      assert.match(result.stderr, /PostgreSQL.*(?:container|volume).*identity changed/iu, label);
+      const log = await fs.readFile(fixture.commandLog, 'utf8');
+      assert.match(log, /up --pull never -d --no-build --no-deps app/u, label);
+      assert.doesNotMatch(log, /down --volumes/iu,
+        'external PostgreSQL drift must never authorize destructive empty-state recovery');
+      assert.match(await fs.readFile(
+        path.join(fixture.appDir, '.staging-recovery-required'), 'utf8'),
+      /protected staging authority changed/iu, label);
+      await fs.access(`${fixture.commandLog}.volume-state`);
+    }
   });
 
 test('deploy rejects an uploaded archive whose frozen bytes do not match the requested checksum', async (context) => {
@@ -1980,8 +2308,8 @@ test('staging Compose validation is transaction-deadline bounded before mutation
   const started = Date.now();
   const result = runDeploy(fixture, { FAKE_BOUNDED_COMPOSE_TIMEOUT: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.ok(Date.now() - started < 15_000,
-    'bounded validation plus canonical preflight must return promptly');
+  assert.ok(Date.now() - started < 20_000,
+    'bounded validation plus canonical PostgreSQL preflight must return promptly');
   assert.match(result.stderr, /Compose|timeout|deadline|invalid/iu);
   const log = await fs.readFile(fixture.commandLog, 'utf8').catch(() => '');
   assert.doesNotMatch(log, /docker\|build /u);
@@ -2099,11 +2427,11 @@ test('staging Compose, workflow and operator docs expose only the immutable arch
     /staging-helper-bundle\.js digest scripts[\s\S]*easyboost-staging-deploy \/tmp\/easyboost-staging-release\.tar\.gz '\$release_sha' immutable-archive-v4 '\$helper_sha'/u);
   assert.doesNotMatch(deploySource, /up -d --build|up --build/u);
   assert.match(deploySource, /unset EASYBOOST_STAGING_BUILD_CONTEXT/u);
-  assert.match(deploySource, /up --pull never -d --no-build app/u);
+  assert.match(deploySource, /up --pull never -d --no-build --no-deps app/u);
   assert.doesNotMatch(rollbackSource, /code-before-|up -d --build|up --build/u);
   assert.match(rollbackSource, /unset EASYBOOST_STAGING_BUILD_CONTEXT/u);
   assert.match(rollbackSource, /Usage: \$0 EXACT_RELEASE_SHA256/u);
-  assert.match(rollbackSource, /up --pull never -d --no-build app/u);
+  assert.match(rollbackSource, /up --pull never -d --no-build --no-deps app/u);
   assert.match(restartSource, /acquire_release_lock[\s\S]*acquire_host_operation_lock staging-release/u);
   assert.match(restartSource,
     /up --pull never -d --no-build --no-deps app[\s\S]*verify_running_image[\s\S]*wait_for_readiness/u);
@@ -2139,6 +2467,28 @@ test('staging Compose, workflow and operator docs expose only the immutable arch
     /easyboost-staging-rollback \\\r?\n\s*<full-release-sha256> immutable-archive-v4 \\\r?\n\s*"\$\(sudo cat [^)]+\/current\)"/u);
   assert.match(readme, /bootstrap-staging-release-host\.sh/u);
   assert.match(readme, /install-staging-release-helpers\.sh/u);
+  for (const [name, document] of [
+    ['README_DEPLOY.md', readme],
+    ['docs/KNOWN_LIMITATIONS.md', knownLimitations],
+  ]) {
+    assert.match(document,
+      /easyboost-staging-cutover \\\r?\n\s*"\$bridge_archive" \\\r?\n\s*"\$bridge_sha" \\\r?\n\s*"\$legacy_marker_sha" \\\r?\n\s*"\$legacy_compose_sha" \\\r?\n\s*700 644 664 \\\r?\n\s*immutable-archive-v4 \\\r?\n\s*"\$helper_sha"/u,
+      `${name} must document the exact nine-argument legacy cutover`);
+    assert.match(document,
+      /easyboost-staging-recover bridge \\\r?\n\s*deploy \\\r?\n\s*"\$archive" \\\r?\n\s*"\$archive_sha" \\\r?\n\s*immutable-archive-v4 \\\r?\n\s*"\$old_bundle_sha" \\\r?\n\s*"\$current_bundle_sha" \\\r?\n\s*--recovery-authority \\\r?\n\s*"\$authority_json"/u,
+      `${name} must document the exact cross-generation recovery bridge`);
+    assert.match(document, /manual seeding|ручное создание/iu,
+      `${name} must explicitly forbid manual active-release seeding`);
+    assert.match(document,
+      /normal deploy remains forbidden|обычный deploy нельзя запускать/iu,
+      `${name} must block normal deploy until cutover proof succeeds`);
+    const installerIndex = document.indexOf('install-staging-release-helpers.sh');
+    const recoveryIndex = document.indexOf('easyboost-staging-recover bridge');
+    const cutoverIndex = document.indexOf('easyboost-staging-cutover');
+    assert.ok(installerIndex >= 0 && installerIndex < recoveryIndex
+      && recoveryIndex < cutoverIndex,
+    `${name} must order helper install, old transaction recovery, then cutover`);
+  }
   assert.match(readme, /никогда автоматически не[\s\S]{0,80}down-migrate PostgreSQL schema\/data/iu);
   assert.match(checklist,
     /easyboost-staging-rollback \\\r?\n\s*<full-release-sha256> immutable-archive-v4 \\\r?\n\s*"\$\(sudo cat [^)]+\/current\)"/u);
