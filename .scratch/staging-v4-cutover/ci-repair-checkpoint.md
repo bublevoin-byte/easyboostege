@@ -318,3 +318,18 @@ gate merely because context resumes. Working branch/HEAD remain authorized proto
 index is empty, unrelated/deferred untracked paths remain excluded. Next: explicit per-ticket
 commits09/10/11, exact helper-package Git-blob proof, final secret/history checks, authorized branch
 push and actual Linux CI. No upload/install/recover/cutover/deploy has occurred.
+
+## Local commit/artifact checkpoint
+
+- Issue09 source commit:567bfaf28db8853c0385de67081bc0686beddb9b (13 explicit scoped files).
+- Issue10 fixture commit:b5c073e01a802a798199786702c5bfdaae454c4d (2 explicit scoped files).
+- Each commit had an exact staged inventory, whitespace check and fresh secret scan;1552/1553
+  tracked files respectively. No deferred05/prototype or other user path was staged.
+- All18 helper package files match exact Git blobs at567bfaf. Bundle7ab70170/archiveb7194b54
+  canonical inspection and source-tree proof passed again. Both exact task-owned packaging temp
+  roots89b506d5 and7ab70170 were removed after absolute-path, inventory and no-reparse checks.
+  Archives/logs in the repo are retained. Do not try to access removed source directories.
+- Issue11 local repair is complete and prepared for its separate commit with final coordinator
+  evidence. No source/test logic changed after the successful final gate; only tracker/report text.
+- Next: final commit11, source/hash/index check, secret history scan, authorized prototype push,
+  actual GitHub Linux CI. No live operation has occurred; owner installation remains gated.

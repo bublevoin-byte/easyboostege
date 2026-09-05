@@ -268,7 +268,7 @@ Premium; внутренний Base может сохраниться тольк�
 | 08 | Исправление шести тестовых fixtures/contracts Linux CI | implemented; local gates passed, Linux CI pending |
 | 09 | Приватные временные файлы релиза на диске staging вместо RAM | local gates passed; Linux CI pending |
 | 10 | Непустой backup stream в Linux lock fixture | local gates passed; Linux CI pending |
-| 11 | Завершение локальной тестовой оболочки при тайм-ауте | local gates passed; commit pending |
+| 11 | Завершение локальной тестовой оболочки при тайм-ауте | done; local gates passed |
 
 Локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
 secret/history scans зелёные. Отдельно на Linux: recovery/standalone 224/224, cutover 3/3,
@@ -281,7 +281,8 @@ Issue09 Linux20/20 и cutover3/3, исходные review0/0. Windows gate54201 
 отказами; reviewed follow-ups09/11 уже интегрированы, focused3/3 и16/16 на pinned Node22.23.2.
 Итоговый gate10669 завершён:3233tests,3132passed,101штатный skip,0failed/cancelled,3720.7s;
 pinned Node22.23.2 parent/child, concurrency2, TAP. Все7 исходников сохранили frozen SHA.
-Lint/check/secrets и reviews также пройдены. Коммиты09–11, новый Linux CI и owner action ещё впереди.
+Lint/check/secrets и reviews также пройдены. Source09 сохранён в567bfaf, fixture10 — вb5c073e,
+локальный harness11 — отдельным следующим коммитом. Новый Linux CI и owner action ещё впереди.
 
 ## Полный пробный ЕГЭ-2026
 

@@ -11,7 +11,7 @@
 | 08 — CI fixtures | implemented; local gates passed, Linux CI pending | Шесть причин устранены; host-lock/installer 17/17; real-flock integration требует GitHub Linux. |
 | 09 — Disk-backed workspace | implemented; local gates passed, Linux CI pending | Linux20/20 и cutover3/3; final focused3/3 и common3233/0fail, helpers frozen. |
 | 10 — Lock-fixture backup | implemented; local gates passed, Linux CI pending | Точный pg_dump fixture исправлен, Windows/Linux regression1/1 и reviews0/0; real-flock CI ещё обязателен. |
-| 11 — Windows fixture settlement | implemented; local gates passed, commit pending | Точная reviewed правка интегрирована; pinned Node22 parent/child16/16, common3233/0fail, Standards/Spec0/0. |
+| 11 — Windows fixture settlement | done | Точная reviewed правка интегрирована; pinned Node22 parent/child16/16, common3233/0fail, Standards/Spec0/0; отдельный коммит. |
 
 Общий Windows gate: 3218 tests, 3119 passed, 99 штатных skips, 0 failed (2999.1 s).
 Linux recovery/standalone 224/224; lint/check, secret/history scans и оба независимых review зелёные.

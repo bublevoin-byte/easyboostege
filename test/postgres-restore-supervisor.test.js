@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -73,15 +73,72 @@ async function runBashFixture({ environment, fixtureLabel, input, spawnArguments
     const stdout = [];
     const stderr = [];
     let settled = false;
-    const timer = setTimeout(() => {
+    let closeFixture;
+    const fixtureClosed = new Promise((closed) => { closeFixture = closed; });
+    const timer = setTimeout(async () => {
       if (settled) return;
       settled = true;
-      child.kill();
       const error = new Error(
         `Bash behavioral fixture ${fixtureLabel} exceeded ${timeoutMs}ms`,
       );
       error.code = null;
       error.killed = true;
+      if (process.platform === 'win32') {
+        // Keep the owned launcher alive until taskkill has captured its tree.
+        // Killing only Git Bash's launcher first loses its descendants and pipes.
+        let cleanupError;
+        if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
+          cleanupError = new Error('Timed-out Bash launcher already exited; tree settlement is unproven');
+        } else {
+          const cleanup = spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+            encoding: 'utf8',
+            killSignal: 'SIGKILL',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 1000,
+            windowsHide: true,
+          });
+          if (cleanup.error || cleanup.status !== 0) {
+            cleanupError = new Error('Timed-out Bash process tree termination failed', {
+              cause: cleanup.error || new Error(`taskkill exited ${cleanup.status}: ${cleanup.stderr}`),
+            });
+          }
+        }
+        // Exact tree termination is attempted before closing inherited pipe ends.
+        // Failure remains explicit even when the launcher can be stopped locally.
+        if (cleanupError) {
+          try { child.kill('SIGKILL'); } catch (cause) {
+            cleanupError = new AggregateError([cleanupError, cause],
+              'Timed-out Bash tree and launcher termination failed');
+          }
+        }
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        let closeTimer;
+        const closed = await Promise.race([
+          fixtureClosed.then(() => true),
+          new Promise((resolveClose) => {
+            closeTimer = setTimeout(() => resolveClose(false), 1000);
+          }),
+        ]);
+        clearTimeout(closeTimer);
+        if (!closed) {
+          cleanupError = new Error('Timed-out Bash launcher did not close within 1000ms', {
+            cause: cleanupError,
+          });
+          // Match the existing bounded-child uncertainty contract: report failure
+          // after attempted termination instead of retaining a hung worker handle.
+          child.unref();
+        }
+        if (cleanupError) {
+          error.childSettlementUnproven = true;
+          error.cause = cleanupError;
+        }
+      } else {
+        child.kill();
+      }
+      error.stderr = Buffer.concat(stderr).toString('utf8');
+      error.stdout = Buffer.concat(stdout).toString('utf8');
       reject(error);
     }, timeoutMs);
     child.stdout.on('data', (chunk) => { stdout.push(chunk); });
@@ -94,6 +151,7 @@ async function runBashFixture({ environment, fixtureLabel, input, spawnArguments
       reject(error);
     });
     child.on('close', (code, signal) => {
+      closeFixture();
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -128,6 +186,93 @@ async function runBashScript(script, arguments_ = [], environment = {}, timeoutM
     timeoutMs,
   });
 }
+
+function runBashTimeoutWorker(input) {
+  const workerSource = `
+    import { spawn, spawnSync } from 'node:child_process';
+    const bashExecutable = ${JSON.stringify(bashExecutable)};
+    const runBashFixture = ${runBashFixture.toString()};
+    try {
+      await runBashFixture({
+        environment: { FIXTURE_NODE: ${JSON.stringify(toBashPath(process.execPath))} },
+        fixtureLabel: 'owned-descendant-timeout',
+        input: ${JSON.stringify(input)},
+        spawnArguments: ['-seu', '--'],
+        timeoutMs: 1000,
+      });
+      throw new Error('fixture unexpectedly succeeded');
+    } catch (error) {
+      console.log(JSON.stringify({
+        code: error.code, killed: error.killed, message: error.message,
+        stdout: error.stdout, stderr: error.stderr,
+        childSettlementUnproven: error.childSettlementUnproven,
+        cause: error.cause?.message, cleanupCause: error.cause?.cause?.message,
+      }));
+    }
+  `;
+  const startedAt = performance.now();
+  const worker = spawnSync(process.execPath, ['--input-type=module', '--eval', workerSource], {
+    encoding: 'utf8',
+    timeout: 12_000,
+    windowsHide: true,
+  });
+  const elapsedMs = performance.now() - startedAt;
+  assert.equal(worker.status, 0, `${worker.error || ''}\n${worker.stderr}`);
+  assert.ok(elapsedMs < 3000,
+    `timed-out fixture worker must exit before its finite child: ${Math.round(elapsedMs)}ms`);
+  return JSON.parse(worker.stdout.trim());
+}
+
+test('Windows Bash fixture timeout settles its owned descendant and releases the worker', {
+  skip: process.platform !== 'win32',
+}, () => {
+  // A finite child keeps this regression bounded even against the broken harness.
+  const failure = runBashTimeoutWorker([
+    "printf 'fixture diagnostic\\n' >&2",
+    `"$FIXTURE_NODE" -e 'console.log("OWNED_CHILD=" + process.pid); setTimeout(() => {}, 8000)' &`,
+    'wait',
+    '',
+  ].join('\n'));
+  assert.equal(failure.killed, true, 'bounded cleanup must not turn timeout into success');
+  assert.equal(failure.code, null);
+  assert.match(failure.message, /owned-descendant-timeout exceeded 1000ms/u);
+  assert.match(failure.stderr, /fixture diagnostic/u);
+  assert.notEqual(failure.childSettlementUnproven, true, JSON.stringify(failure));
+  const childPid = Number(failure.stdout?.match(/OWNED_CHILD=(\d+)/u)?.[1]);
+  assert.ok(Number.isSafeInteger(childPid) && childPid > 0,
+    'the real descendant must start before the fixture deadline');
+  assert.throws(() => process.kill(childPid, 0), { code: 'ESRCH' },
+    'prompt worker exit must also settle the exact owned descendant');
+});
+
+test('Windows Bash fixture reports an exited launcher with inherited pipes as unproven', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const failure = runBashTimeoutWorker([
+    `"$FIXTURE_NODE" -e 'console.log("OWNED_CHILD=" + process.pid); setTimeout(() => {}, 3000)' &`,
+    'exit 0',
+    '',
+  ].join('\n'));
+  assert.equal(failure.killed, true);
+  assert.equal(failure.code, null);
+  assert.match(failure.message, /owned-descendant-timeout exceeded 1000ms/u);
+  assert.equal(failure.childSettlementUnproven, true,
+    'closing inherited pipes cannot prove that an exited launcher has no descendants');
+  assert.match(failure.cause, /launcher already exited/u);
+  const childPid = Number(failure.stdout?.match(/OWNED_CHILD=(\d+)/u)?.[1]);
+  assert.ok(Number.isSafeInteger(childPid) && childPid > 0);
+  // This deliberately orphaned descendant is finite; retain responsibility for
+  // observing its natural exit without using its exited parent as kill authority.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try { process.kill(childPid, 0); } catch (error) {
+      assert.equal(error.code, 'ESRCH');
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail('the finite uncertainty fixture descendant did not settle');
+});
 
 async function retryReadOnlyWindowsGitBash(operation, {
   deadlineMs,

@@ -62,14 +62,17 @@ the common helper's bytes. Retain it as historical evidence, never install it as
 ## Integrated workspace helper candidate — provisional, do not install
 
 `easyboost-staging-helper-bootstrap-7ab70170.tar.gz` contains the exact integrated issue09 helpers.
-Final common gates, commit/source-blob comparison and actual Linux CI are still required.
+Final common gates and exact commit/source-blob comparison passed. Actual Linux CI is still required
+before owner installation; this is not a deployment or live recovery result.
 
 - Helper bundle SHA256: `7ab70170bd696eed3be82a067e04faa379ff7d2c2398f7262a9cb10d86732701`.
 - Archive SHA256: `b7194b5492277c42e4ee8b79c28121a26d06f44166c9368c1c087691deb16f68`.
 - Archive/expanded bytes: `172800` / `904791`; files: `18`.
 - Producer: Node22.23.2, zlib1.3.1-e00f703. Canonical inspection and exact tree verification passed.
-- Inputs:15 exact b2b0b0f Git blobs plus3 exact integrated working helpers, all18 byte-compared.
-  Temporary source directory is retained at
-  `C:/Users/Ригер/AppData/Local/Temp/easyboost-helper-package-20260905-7ab70170/source`
-  for exact post-commit Git-blob comparison. No upload/install/live action has been performed.
+- Initial inputs:15 exact b2b0b0f Git blobs plus3 exact integrated working helpers. After commit,
+  all18 packaged files were byte-compared with raw Git blobs at
+  `567bfaf28db8853c0385de67081bc0686beddb9b`; canonical archive and tree verification passed again.
+  The two task-owned temporary packaging roots89b506d5/7ab70170 were removed only after exact
+  path/inventory/no-reparse validation. All repository archives and logs are preserved; their bytes
+  remain recoverable from the verified archives and Git. No upload/install/live action was performed.
 - Issue10 and11 are test-only and do not alter this helper digest.
