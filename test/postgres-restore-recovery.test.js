@@ -51,6 +51,224 @@ function fileSystemWith(overrides) {
   });
 }
 
+async function withHostLockFailureEvidence(context, action, operation) {
+  const startedAt = process.hrtime.bigint();
+  try {
+    return await operation();
+  } catch (error) {
+    try {
+      const settled = error?.hostOperationActionSettled;
+      const succeeded = error?.hostOperationActionSucceeded;
+      const cause = error?.cause ?? (succeeded === true ? undefined : error);
+      const causeCode = cause?.code;
+      context.diagnostic(`[host-lock-settlement] ${JSON.stringify({
+        action: ['release', 'retention'].includes(action) ? action : 'unknown',
+        elapsedMs: Math.min(Number.MAX_SAFE_INTEGER,
+          Math.round(Number(process.hrtime.bigint() - startedAt) / 1_000_000)),
+        hostOperationActionSettled: typeof settled === 'boolean' ? settled : null,
+        hostOperationActionSucceeded: typeof succeeded === 'boolean' ? succeeded : null,
+        causeClass: cause === undefined ? 'none'
+          : ['EIO', 'ENOSPC', 'EACCES', 'EPERM', 'ENOENT', 'EEXIST'].includes(causeCode)
+            ? causeCode : 'other',
+      })}`);
+    } catch {
+      // Evidence must never replace the operation's original failure.
+    }
+    throw error;
+  }
+}
+
+test('host lock failure evidence preserves settled successful timeout errors', async () => {
+  for (const action of ['release', 'retention']) {
+    const diagnostics = [];
+    let originalError;
+    let settled = false;
+    const adapter = async () => {
+      await new Promise((resolve) => { setTimeout(resolve, 30); });
+      settled = true;
+    };
+    adapter.retain = adapter;
+    await assert.rejects(withHostLockFailureEvidence({
+      diagnostic: (message) => diagnostics.push(message),
+    }, action, async () => {
+      try {
+        return action === 'release'
+          ? await releaseHostOperationLock(adapter, 5)
+          : await retainHostOperationLock(adapter, 5, {});
+      } catch (error) {
+        originalError = error;
+        throw error;
+      }
+    }), (error) => {
+      assert.equal(error, originalError);
+      assert.match(error.message, new RegExp(`lock ${action} timed out after 5ms`, 'u'));
+      assert.equal(error.hostOperationActionSettled, true);
+      assert.equal(error.hostOperationActionSucceeded, true);
+      return true;
+    });
+    assert.equal(settled, true);
+    assert.equal(diagnostics.length, 1);
+    assert.ok(diagnostics[0].length <= 256);
+    assert.match(diagnostics[0], /^\[host-lock-settlement\] /u);
+    const evidence = JSON.parse(diagnostics[0].slice('[host-lock-settlement] '.length));
+    assert.ok(Number.isFinite(evidence.elapsedMs) && evidence.elapsedMs >= 20);
+    assert.deepEqual(evidence, {
+      action,
+      elapsedMs: evidence.elapsedMs,
+      hostOperationActionSettled: true,
+      hostOperationActionSucceeded: true,
+      causeClass: 'none',
+    });
+  }
+});
+
+test('host lock failure evidence classifies settled failed timeout causes without details',
+  async () => {
+    for (const action of ['release', 'retention']) {
+      for (const code of ['EIO', 'private-path-or-environment-value'.repeat(100)]) {
+        const diagnostics = [];
+        const cause = new Error('private operation details must not reach diagnostics');
+        cause.code = code;
+        let originalError;
+        const adapter = async () => {
+          await new Promise((resolve) => { setTimeout(resolve, 30); });
+          throw cause;
+        };
+        adapter.retain = adapter;
+        await assert.rejects(withHostLockFailureEvidence({
+          diagnostic: (message) => diagnostics.push(message),
+        }, action, async () => {
+          try {
+            return action === 'release'
+              ? await releaseHostOperationLock(adapter, 5)
+              : await retainHostOperationLock(adapter, 5, {});
+          } catch (error) {
+            originalError = error;
+            throw error;
+          }
+        }), (error) => {
+          assert.equal(error, originalError);
+          assert.match(error.message, new RegExp(`lock ${action} timed out after 5ms`, 'u'));
+          assert.equal(error.cause, cause);
+          assert.equal(error.hostOperationActionSettled, true);
+          assert.equal(error.hostOperationActionSucceeded, false);
+          return true;
+        });
+        assert.equal(diagnostics.length, 1);
+        assert.ok(diagnostics[0].length <= 256);
+        assert.doesNotMatch(diagnostics[0], /private/u);
+        const evidence = JSON.parse(diagnostics[0].slice('[host-lock-settlement] '.length));
+        assert.ok(Number.isFinite(evidence.elapsedMs) && evidence.elapsedMs >= 20);
+        assert.deepEqual(evidence, {
+          action,
+          elapsedMs: evidence.elapsedMs,
+          hostOperationActionSettled: true,
+          hostOperationActionSucceeded: false,
+          causeClass: code === 'EIO' ? 'EIO' : 'other',
+        });
+      }
+    }
+  });
+
+test('host lock failure evidence preserves direct action errors without inventing settlement',
+  async () => {
+    for (const action of ['release', 'retention']) {
+      const diagnostics = [];
+      const originalError = new Error('private direct action failure');
+      originalError.code = 'ENOSPC';
+      const adapter = async () => { throw originalError; };
+      adapter.retain = adapter;
+      await assert.rejects(withHostLockFailureEvidence({
+        diagnostic: (message) => diagnostics.push(message),
+      }, action, () => action === 'release'
+        ? releaseHostOperationLock(adapter, 100)
+        : retainHostOperationLock(adapter, 100, {})), (error) => error === originalError);
+      assert.equal(Object.hasOwn(originalError, 'hostOperationActionSettled'), false);
+      assert.equal(Object.hasOwn(originalError, 'hostOperationActionSucceeded'), false);
+      assert.equal(diagnostics.length, 1);
+      assert.ok(diagnostics[0].length <= 256);
+      assert.doesNotMatch(diagnostics[0], /private/u);
+      const evidence = JSON.parse(diagnostics[0].slice('[host-lock-settlement] '.length));
+      assert.ok(Number.isFinite(evidence.elapsedMs) && evidence.elapsedMs >= 0);
+      assert.deepEqual(evidence, {
+        action,
+        elapsedMs: evidence.elapsedMs,
+        hostOperationActionSettled: null,
+        hostOperationActionSucceeded: null,
+        causeClass: 'ENOSPC',
+      });
+    }
+  });
+
+test('host lock failure evidence leaves successful operations and retention values intact',
+  async () => {
+    for (const action of ['release', 'retention']) {
+      let calls = 0;
+      let diagnosticCalls = 0;
+      const retentionEvidence = { reason: 'APP_MUTATION_SETTLEMENT_UNPROVEN' };
+      const adapter = async () => { calls += 1; return 'completed'; };
+      adapter.retain = async (evidence) => {
+        assert.equal(evidence, retentionEvidence);
+        return adapter();
+      };
+      const result = await withHostLockFailureEvidence({
+        diagnostic: () => { diagnosticCalls += 1; },
+      }, action, () => action === 'release'
+        ? releaseHostOperationLock(adapter, 100)
+        : retainHostOperationLock(adapter, 100, retentionEvidence));
+      assert.equal(result, action === 'release' ? undefined : 'completed');
+      assert.equal(calls, 1);
+      assert.equal(diagnosticCalls, 0);
+    }
+  });
+
+test('host lock failure evidence cannot replace errors when diagnostic reading or writing fails',
+  async () => {
+    for (const action of ['release', 'retention']) {
+      for (const failure of ['read', 'write']) {
+        let originalError;
+        let calls = 0;
+        let diagnosticCalls = 0;
+        const cause = new Error('underlying action failure');
+        if (failure === 'read') {
+          Object.defineProperty(cause, 'code', {
+            get() { throw new Error('diagnostic cause unavailable'); },
+          });
+        }
+        const adapter = async () => {
+          calls += 1;
+          await new Promise((resolve) => { setTimeout(resolve, 30); });
+          throw cause;
+        };
+        adapter.retain = adapter;
+        await assert.rejects(withHostLockFailureEvidence({
+          diagnostic: () => {
+            diagnosticCalls += 1;
+            throw new Error('diagnostic output unavailable');
+          },
+        }, action, async () => {
+          try {
+            return action === 'release'
+              ? await releaseHostOperationLock(adapter, 5)
+              : await retainHostOperationLock(adapter, 5, {});
+          } catch (error) {
+            originalError = error;
+            throw error;
+          }
+        }), (error) => {
+          assert.equal(error, originalError);
+          assert.match(error.message, new RegExp(`lock ${action} timed out after 5ms`, 'u'));
+          assert.equal(error.cause, cause);
+          assert.equal(error.hostOperationActionSettled, true);
+          assert.equal(error.hostOperationActionSucceeded, false);
+          return true;
+        });
+        assert.equal(calls, 1);
+        assert.equal(diagnosticCalls, failure === 'write' ? 1 : 0);
+      }
+    }
+  });
+
 test('host guard timeout rejects only after release and retain mutations have settled',
   async () => {
     let releaseSettled = false;
@@ -386,7 +604,7 @@ test('host guard acquisition cannot leave a canonical wedge when abandoned evide
   });
 
 test('next acquisition settles an exact abandoned canonical directory after rename failure',
-  async () => {
+  async (context) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-acquire-resume-'));
     const hostLockDirectory = path.join(directory, 'host.lock');
     const ownerFile = path.join(hostLockDirectory, 'owner');
@@ -429,7 +647,8 @@ test('next acquisition settles an exact abandoned canonical directory after rena
         lockDirectory: hostLockDirectory,
         operation: 'production-app-lifecycle',
       });
-      await releaseHostOperationLock(release, 100);
+      await withHostLockFailureEvidence(context, 'release',
+        () => releaseHostOperationLock(release, 100));
       await assert.rejects(fs.access(hostLockDirectory), { code: 'ENOENT' });
       assert.equal((await fs.readdir(directory)).some(
         (entry) => entry.startsWith('host.lock.abandoned-'),
@@ -440,7 +659,7 @@ test('next acquisition settles an exact abandoned canonical directory after rena
   });
 
 test('retained lifecycle guard atomically publishes typed evidence beside the active owner',
-  async () => {
+  async (context) => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-lifecycle-evidence-'));
     const hostLockDirectory = path.join(directory, 'host.lock');
     try {
@@ -451,7 +670,7 @@ test('retained lifecycle guard atomically publishes typed evidence beside the ac
       const activeMarker = await fs.readFile(path.join(hostLockDirectory, 'owner'), 'utf8');
       assert.doesNotMatch(activeMarker, /^RETAINED$/mu);
 
-      await retainHostOperationLock(release, 100, {
+      await withHostLockFailureEvidence(context, 'retention', () => retainHostOperationLock(release, 100, {
         currentContainerId: replacementAppContainerId,
         lastProof: 'exact-stop-proof-rejected',
         lastState: 'mutation-settlement-unproven',
@@ -460,7 +679,7 @@ test('retained lifecycle guard atomically publishes typed evidence beside the ac
         previousContainerId: appContainerId,
         previousImageId: previousApplicationImageId,
         reason: 'APP_MUTATION_SETTLEMENT_UNPROVEN',
-      });
+      }));
 
       assert.equal(await fs.readFile(path.join(hostLockDirectory, 'owner'), 'utf8'), [
         'protocol=easyboost-host-operation-v1',

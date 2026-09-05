@@ -267,8 +267,10 @@ Premium; внутренний Base может сохраниться тольк�
 | 07 | Исправление ошибки nonce первого перехода staging | implemented; local gates passed, Linux CI pending |
 | 08 | Исправление шести тестовых fixtures/contracts Linux CI | implemented; local gates passed, Linux CI pending |
 | 09 | Приватные временные файлы релиза на диске staging вместо RAM | local gates passed; Linux CI pending |
-| 10 | Непустой backup stream в Linux lock fixture | local gates passed; Linux CI pending |
+| 10 | Непустой backup stream в Linux lock fixture | backup gate passed; CI123 rollback/tree timeout under diagnosis |
 | 11 | Завершение локальной тестовой оболочки при тайм-ауте | done; local gates passed |
+| 12 | Короткий журнал этапов проблемного Linux lock scenario | implemented; reviews0/0 and common gate passed, actual CI pending |
+| 13 | Причина отказа и завершённость операции при host-lock timeout | implemented; reviews0/0 and common gate passed, actual CI pending |
 
 Локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
 secret/history scans зелёные. Отдельно на Linux: recovery/standalone 224/224, cutover 3/3,
@@ -282,7 +284,12 @@ Issue09 Linux20/20 и cutover3/3, исходные review0/0. Windows gate54201 
 Итоговый gate10669 завершён:3233tests,3132passed,101штатный skip,0failed/cancelled,3720.7s;
 pinned Node22.23.2 parent/child, concurrency2, TAP. Все7 исходников сохранили frozen SHA.
 Lint/check/secrets и reviews также пройдены. Source09 сохранён в567bfaf, fixture10 — вb5c073e,
-локальный harness11 — отдельным следующим коммитом. Новый Linux CI и owner action ещё впереди.
+локальный harness11 — коммит0898f55. LinuxCI123 завершён:3205tests,3141passed,61skipped,3failed,
+0cancelled. Два100ms release/retention отказа и rollback/tree barrier разбираются через12/13;
+последующие release/browser stages не выполнялись. Owner action остаётся заблокирован.
+Диагностика12/13: общий pinned WindowsNode22.23.2/Bash gate3241tests,3140passed,101skips,
+0failed/cancelled,3758.4s; lint/check/secret scan и независимые reviews0/0passed, hashes unchanged.
+Это подготовка точного журнала следующего CI, не исправление неизвестной причины его отказов.
 
 ## Полный пробный ЕГЭ-2026
 
