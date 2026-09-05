@@ -471,3 +471,49 @@ process-control framework, recovery authority mutation or claim the application 
 GitHub documents a fresh hosted runner image per job, with standard Ubuntu runners using VMs:
 [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 This outer disposal boundary is not evidence of the production helper's own successful cleanup.
+
+## Reduced rollback phase progression after the unchanged assertion
+
+### Problem Statement
+
+The first native reduced rollback exceeds120seconds after build-complete, rather than the full
+scenario's config-json-complete snapshot. Its launcher is still unsettled after150seconds. This
+does not distinguish slow forward progress from a stopped operation or prove the cause.
+
+### Solution and User Stories
+
+1. As the owner, I want measured phase progression before selecting a production change.
+2. As the maintainer, I want the original120second failure preserved even if completion is late.
+3. As the owner, I want this extra observation bounded and restricted to the disposable native job.
+
+### Implementation Decisions
+
+- Keep the actual tree assertion at120000ms, original full test, every production helper/guard,
+  prepared fixture, invocation and workflow unchanged. A late tree or clean exit never erases the
+  frozen initial failure or turns the diagnostic green.
+- Observe only the existing allowlisted fake-Docker phase file and tree marker. Capture a bounded
+  timeline of observed phase-file updates, not raw command arguments or internal authority data.
+  The same phase name can recur at different rollback sites; sampled modification metadata may
+  distinguish observed rewrites, but cannot establish exact call counts or capture every fast write.
+  Use a low-rate bounded poll (at most once per500ms), a fixed maximum16rows and explicit omitted
+  count; one report must fit the existing2048byte line cap. This is sampling, not exact CPU timing.
+- After capturing the initial assertion, release the same fixture barrier and allow up to180000ms
+  of further observation/settlement. Raise only the disposable diagnostic process's outer watchdog
+  to330000ms, still inside the existing6minute dedicated-job limit. These are evidence-collection
+  budgets, not production timeouts or a relaxed120second assertion. The outer bound takes priority.
+- Track any late tree appearance and final phase separately from initial snapshot and actual
+  launcher exit/pipe settlement. Preserve exact child failure and uncertain-descendant evidence;
+  do not signal or erase unproved descendants. No new supervisor, generic profiler or command CLI.
+
+### Testing Decisions
+
+Use the existing real child/observer seam with finite synthetic children that advance the existing
+phase file and create a late tree marker. Test the same orchestration used by the actual command
+with a short injected observation budget only through its module test seam, never CLI/env input.
+Prove a late successful child cannot erase the earlier failed assertion, nonzero exit is retained,
+and timeline/output bounds hold. No120second local retry; native publication remains root-owned.
+
+### Out of Scope
+
+No production fix, altered canonical or full-test deadline/assertion, dependency download, VPS
+mutation, machine-wide process control, arbitrary trace output or premature cause/readiness claim.

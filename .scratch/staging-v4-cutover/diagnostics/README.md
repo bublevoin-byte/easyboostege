@@ -148,11 +148,12 @@ node --test .scratch/staging-v4-cutover/debug/ci126-rollback-only.test.mjs
 node .scratch/staging-v4-cutover/debug/ci126-rollback-only.mjs
 ```
 
-The six existing contracts must pass before the real rollback runs as the last user-defined step.
+The focused contracts must pass before the real rollback runs as the last user-defined step.
 The command accepts no arguments, creates its own private `/tmp/easyboost-ci126-rollback-*` fixture,
 checks the reviewed synthetic post-deploy boundary, and invokes the real installed rollback launcher.
-Its120000ms tree assertion,210000ms diagnostic lifetime,30000ms later settlement budget, child status
-tracking and fixture inputs are unchanged. Output retains separate barrier and settlement results;
+Its120000ms tree assertion, child status tracking and fixture inputs remain unchanged. Ticket19
+extends only later observation to180000ms and the disposable diagnostic watchdog to330000ms.
+Output retains separate barrier and settlement results;
 raw child streams and authority values remain private. Ticket17 records the boundary proof and
 the successful-deployment history omitted from this reduced attempt.
 
@@ -165,8 +166,44 @@ that all descendants have settled. GitHub provides a fresh
 hosted environment per job ([runner documentation](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)).
 That outer machine lifetime is separate from the production helper's own cleanup contract.
 
-No native rollback-only result is available yet. The known local attempt refused maintenance-lock
+Ticket18 records the first native reduced result: the120second assertion failed after an observed
+build-complete phase, and a further30seconds did not establish settlement. Phase names may recur
+within one rollback, so that snapshot alone does not order progress against the original full
+scenario's config-json-complete timeout. The known local attempt refused maintenance-lock
 evidence at841ms with child125; it did not reproduce the120-second native timeout and is not repeated
 here. Root owns the reviewed publication and one native result, including timing, stage, status and
 settlement limits. A reached barrier, timeout, environment refusal or retained fixture is diagnostic
 evidence; none establishes a production repair or deployment readiness.
+
+## Reduced rollback phase progression — ticket19
+
+The same fixed commands above run the extended diagnostic; there are no CLI arguments or environment
+overrides. `observeRollback` is the shared orchestration used by that command and by finite-child
+module contracts. Its initial tree observation uses the original120000ms default and freezes that
+verdict before releasing the same `release-tree` fixture barrier. A late tree or child exit0 never
+changes the failed assertion into success. The final result preserves a real nonzero child status;
+an unsettled child with no known exit still reports124. Fixture preparation, helper invocation,
+production guards and all original full-test/workflow deadlines remain unchanged.
+
+The added phase sampler reads only the existing private `phase-tree` file and tree marker, at most
+once per500ms. It reads at most128bytes and accepts only the original fake-Docker phase allowlist.
+The existing file's modification time distinguishes sampled rewrites of the same value; that raw
+metadata is never reported. A single `phase-timeline` row contains up to16 `{elapsedMs, phase}`
+entries plus `omittedCount`. Changes seen after the cap continue incrementing that count. Invalid,
+missing or truncated values do not become timeline entries. Fixed barrier/final snapshots are
+separate from periodic sampling. Each JSON output row retains the2048byte cap; private child
+streams remain capped in memory and are reported only as byte counts.
+
+`settlement` separately reports `lateTree`, its first-observed time since rollback (or null),
+`finalPhase`, elapsed observation time, launcher status and pipe closure. `lateTree: not-late`
+means the initial snapshot already saw the marker. Observation waits up to180000ms after release,
+stopping when pipes close; the330000ms outer process watchdog takes priority even during setup.
+Both fit within the unchanged6-minute dedicated job. No signals, active-fixture recursive cleanup,
+new supervisor or process profiler are added; the disposable environment still owns uncertain
+descendants. Clean helper completion remains distinct from an independent descendant census.
+
+These are sampled file states and rewrites, not exact phase durations, CPU work or invocation
+counts. Writes faster than the poll, overwritten values and unchanged modification timestamps can
+be missed. A final snapshot can show a phase absent from the bounded timeline. Extra observation
+can affect timing and cannot establish a cause or make the native failure equivalent to the full
+scenario. Ticket19 records focused RED/GREEN validation; root owns the next native result.

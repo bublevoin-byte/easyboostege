@@ -9,6 +9,122 @@ import * as diagnostic from './ci126-rollback-only.mjs';
 
 const command = fileURLToPath(new URL('./ci126-rollback-only.mjs', import.meta.url));
 
+for (const [childStatus, expectedStatus] of [[0, 1], [23, 23]]) {
+  test(`late tree and child exit${childStatus} preserve the original failed assertion at the CLI observation seam`, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ci126-late-'));
+    let handle;
+    try {
+      handle = diagnostic.startChild(process.execPath, ['--input-type=module', '-e', `
+        import fs from 'node:fs/promises';
+        import path from 'node:path';
+        const root = process.argv[1];
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        await fs.writeFile(path.join(root, 'phase-tree'), 'build-complete\\n');
+        const deadline = performance.now() + 3000;
+        while (performance.now() < deadline) {
+          if (await fs.stat(path.join(root, 'release-tree')).then(() => true, () => false)) break;
+          await sleep(25);
+        }
+        await fs.writeFile(path.join(root, 'phase-tree'), 'up-barrier\\n');
+        await fs.writeFile(path.join(root, 'tree'), 'ready\\n');
+        await sleep(650);
+        await fs.writeFile(path.join(root, 'phase-tree'), 'up-complete\\n');
+        process.stderr.write('private-output\\n');
+        process.exitCode = ${childStatus};
+      `, root], {});
+      const rows = [];
+      const outcome = await diagnostic.observeRollback({ barriers: root,
+        factories: { lockFixturePhases: new Set(['build-complete', 'up-barrier', 'up-complete']) } },
+      handle, { barrierTimeoutMs: 300, settlementTimeoutMs: 2000, emit: (row) => rows.push(row) });
+      const initial = rows.find((row) => row.event === 'tree-barrier');
+      assert.equal(initial.verdict, 'other-timeout');
+      assert.equal(initial.deadlineReached, true);
+      assert.equal(initial.tree, 'absent');
+      assert.equal(initial.lastPhase, 'build-complete');
+      assert.equal(initial.status, null);
+      assert.equal(initial.closed, false);
+      assert.equal(initial.stderrBytes, 0);
+      const settlement = rows.find((row) => row.event === 'settlement');
+      assert.equal(settlement.exited, true);
+      assert.equal(settlement.closed, true);
+      assert.equal(settlement.status, childStatus);
+      assert.equal(settlement.lateTree, 'present');
+      assert.ok(settlement.lateTreeElapsedMs >= initial.elapsedMs);
+      assert.equal(settlement.finalPhase, 'up-complete');
+      assert.equal(settlement.stdoutBytes, 0);
+      assert.equal(settlement.stderrBytes, 15);
+      assert.equal(outcome, expectedStatus, 'late settlement preserves failure and the exact nonzero child status');
+      assert.ok(rows.every((row) => Buffer.byteLength(JSON.stringify(row)) <= 2048));
+      assert.equal(JSON.stringify(rows).includes('private-output'), false);
+    } finally {
+      // This finite child ends naturally even if observation fails before releasing its marker.
+      if (handle) await handle.done;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test('later observation expires without claiming settlement or erasing the still-active finite fixture', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ci126-unsettled-'));
+  let handle;
+  try {
+    handle = diagnostic.startChild(process.execPath, ['--input-type=module', '-e', `
+      import fs from 'node:fs/promises';
+      import path from 'node:path';
+      await fs.writeFile(path.join(process.argv[1], 'phase-tree'), 'build-complete\\n');
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    `, root], {});
+    const rows = [];
+    const outcome = await diagnostic.observeRollback({ barriers: root,
+      factories: { lockFixturePhases: new Set(['build-complete']) } },
+    handle, { barrierTimeoutMs: 300, settlementTimeoutMs: 100, emit: (row) => rows.push(row) });
+    const settlement = rows.find((row) => row.event === 'settlement');
+    assert.equal(outcome, 124);
+    assert.equal(settlement.exited, false);
+    assert.equal(settlement.closed, false);
+    assert.equal(settlement.status, null);
+    assert.equal(settlement.helperCompletedCleanly, false);
+    assert.equal(settlement.fixtureRetained, true);
+    assert.equal(settlement.cleanup, 'disposable-environment-lifecycle');
+    assert.equal(settlement.finalPhase, 'build-complete');
+    assert.ok(settlement.elapsedMs >= 100 && settlement.elapsedMs < 1000);
+    assert.equal(await fs.readFile(path.join(root, 'release-tree'), 'utf8'), 'go\n');
+  } finally {
+    if (handle) await handle.done;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('separate observed rewrites of the same phase remain visible without exposing file metadata', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ci126-rewrites-'));
+  let handle;
+  try {
+    handle = diagnostic.startChild(process.execPath, ['--input-type=module', '-e', `
+      import fs from 'node:fs/promises';
+      import path from 'node:path';
+      const file = path.join(process.argv[1], 'phase-tree');
+      for (let index = 0; index < 3; index += 1) {
+        await fs.writeFile(file, 'config-json-complete\\n');
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      }
+    `, root], {});
+    const rows = [];
+    await diagnostic.observeRollback({ barriers: root,
+      factories: { lockFixturePhases: new Set(['config-json-complete']) } },
+    handle, { barrierTimeoutMs: 300, settlementTimeoutMs: 4000, emit: (row) => rows.push(row) });
+    const timeline = rows.find((row) => row.event === 'phase-timeline');
+    assert.equal(timeline.rows.length, 3, 'distinct sampled rewrites cannot collapse into one phase');
+    assert.equal(timeline.omittedCount, 0);
+    for (const row of timeline.rows) {
+      assert.equal(row.phase, 'config-json-complete');
+      assert.deepEqual(Object.keys(row).sort(), ['elapsedMs', 'phase']);
+    }
+  } finally {
+    if (handle) await handle.done;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('rollback diagnostic rejects arbitrary paths or commands before fixture creation', () => {
   const result = spawnSync(process.execPath, [command, 'private-command-or-production-path'], {
     encoding: 'utf8', timeout: 5000, maxBuffer: 1024,
@@ -17,6 +133,49 @@ test('rollback diagnostic rejects arbitrary paths or commands before fixture cre
   assert.equal(result.status, 64);
   assert.equal(result.stderr, '');
   assert.deepEqual(JSON.parse(result.stdout), { event: 'invalid-invocation', status: 64 });
+});
+
+test('real phase progression is allowlisted, sampled no faster than500ms and capped at16rows', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-ci126-phases-'));
+  let handle;
+  try {
+    handle = diagnostic.startChild(process.execPath, ['--input-type=module', '-e', `
+      import fs from 'node:fs/promises';
+      import path from 'node:path';
+      const file = path.join(process.argv[1], 'phase-tree');
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      await fs.writeFile(file, 'private-phase-must-never-appear\\n');
+      await sleep(900);
+      for (let index = 0; index < 24; index += 1) {
+        await fs.writeFile(file, index % 2 ? 'config-json-complete\\n' : 'config-json-enter\\n');
+        await sleep(600);
+      }
+      await fs.writeFile(file, 'up-complete\\n');
+    `, root], {});
+    const rows = [];
+    const outcome = await diagnostic.observeRollback({ barriers: root,
+      factories: { lockFixturePhases: new Set(['config-json-enter', 'config-json-complete', 'up-complete']) } },
+    handle, { barrierTimeoutMs: 300, settlementTimeoutMs: 18000, emit: (row) => rows.push(row) });
+    const timeline = rows.find((row) => row.event === 'phase-timeline');
+    assert.ok(timeline, 'the real operation must publish its sampled phase progression');
+    assert.equal(timeline.intervalMs, 500);
+    assert.equal(timeline.rows.length, 16);
+    assert.ok(timeline.omittedCount > 0, 'later phase changes remain counted after the row cap');
+    for (const [index, row] of timeline.rows.entries()) {
+      assert.ok(['config-json-enter', 'config-json-complete'].includes(row.phase));
+      if (index > 0) assert.ok(row.elapsedMs - timeline.rows[index - 1].elapsedMs >= 500);
+    }
+    const settlement = rows.find((row) => row.event === 'settlement');
+    assert.equal(settlement.finalPhase, 'up-complete', 'final phase is available even after the timeline fills');
+    assert.equal(settlement.lateTree, 'absent');
+    assert.equal(settlement.lateTreeElapsedMs, null);
+    assert.equal(outcome, 1);
+    assert.ok(rows.every((row) => Buffer.byteLength(JSON.stringify(row)) <= 2048));
+    assert.equal(JSON.stringify(rows).includes('private-phase'), false);
+  } finally {
+    if (handle) await handle.done;
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('only the unchanged120s empty-output config-json timeout matches the original symptom', () => {

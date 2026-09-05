@@ -200,15 +200,17 @@ async function waitClosed(handle, milliseconds) {
   } finally { clearTimeout(timer); }
 }
 
-async function boundedText(file, accepts) {
+async function boundedText(file, accepts, withMtime = false) {
   let opened;
+  const result = (value, mtimeMs = null) => withMtime ? { value, mtimeMs } : value;
   try {
     opened = await fs.open(file, 'r');
     const buffer = Buffer.alloc(128);
     const { bytesRead } = await opened.read(buffer, 0, buffer.length, 0);
     const value = buffer.subarray(0, bytesRead).toString('utf8').trim();
-    return bytesRead < 128 && accepts(value) ? value : 'unavailable';
-  } catch (error) { return error.code === 'ENOENT' ? 'missing' : 'unavailable'; }
+    if (bytesRead >= 128 || !accepts(value)) return result('unavailable');
+    return result(value, withMtime ? (await opened.stat()).mtimeMs : null);
+  } catch (error) { return result(error.code === 'ENOENT' ? 'missing' : 'unavailable'); }
   finally { await opened?.close().catch(() => {}); }
 }
 
@@ -228,8 +230,8 @@ async function barrierSnapshot(fixture, handle, deadlineReached) {
     deadlineReached, maintenanceRefusal };
 }
 
-export async function observeTreeBarrier(fixture, handle) {
-  const deadline = handle.startedAt + treeBoundMs;
+export async function observeTreeBarrier(fixture, handle, { timeoutMs = treeBoundMs, samplePhase } = {}) {
+  const deadline = handle.startedAt + timeoutMs;
   let nextProgress = handle.startedAt + 25_000;
   let deadlineReached = false;
   while (true) {
@@ -240,10 +242,65 @@ export async function observeTreeBarrier(fixture, handle) {
       report({ event: 'rollback-progress', elapsedMs: Math.round(performance.now() - handle.startedAt) });
       nextProgress += 25_000;
     }
+    await samplePhase?.();
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   const snapshot = await barrierSnapshot(fixture, handle, deadlineReached);
   return { verdict: handle.overflow ? 'output-limit' : barrierVerdict(snapshot), ...snapshot };
+}
+
+// Shorter budgets and captured reports are available only to module contracts, never the CLI.
+export async function observeRollback(fixture, handle, {
+  barrierTimeoutMs = treeBoundMs, settlementTimeoutMs = 180_000, emit = report,
+} = {}) {
+  const rows = [];
+  let omittedCount = 0;
+  let lastPhase;
+  let lastModifiedMs;
+  let nextSample = 0;
+  let firstTreeElapsedMs = null;
+  async function samplePhase() {
+    if (performance.now() < nextSample) return;
+    const [phaseSample, tree] = await Promise.all([
+      boundedText(path.join(fixture.barriers, 'phase-tree'), (value) => fixture.factories.lockFixturePhases.has(value), true),
+      exists(path.join(fixture.barriers, 'tree')),
+    ]);
+    const elapsedMs = Math.round(performance.now() - handle.startedAt);
+    // Space reads from completion, so slow reads cannot accelerate the next poll.
+    nextSample = performance.now() + 500;
+    if (tree && firstTreeElapsedMs === null) firstTreeElapsedMs = elapsedMs;
+    const { value: phase, mtimeMs } = phaseSample;
+    if (fixture.factories.lockFixturePhases.has(phase) && (phase !== lastPhase || mtimeMs !== lastModifiedMs)) {
+      if (rows.length < 16) rows.push({ elapsedMs, phase });
+      else omittedCount += 1;
+      lastPhase = phase;
+      lastModifiedMs = mtimeMs;
+    }
+  }
+  const initial = Object.freeze(await observeTreeBarrier(fixture, handle,
+    { timeoutMs: barrierTimeoutMs, samplePhase }));
+  emit({ event: 'tree-barrier', ...initial });
+  // Release this fixed fixture barrier even if the120s assertion failed first.
+  await fs.writeFile(path.join(fixture.barriers, 'release-tree'), 'go\n', { mode: 0o600 });
+  const beforeSettlement = performance.now();
+  const settlementDeadline = beforeSettlement + settlementTimeoutMs;
+  while (!handle.closed && performance.now() < settlementDeadline) {
+    await samplePhase();
+    const remainingMs = settlementDeadline - performance.now();
+    if (remainingMs > 0) await waitClosed(handle, Math.min(500, remainingMs));
+  }
+  const closed = handle.closed;
+  const final = await barrierSnapshot(fixture, handle, false);
+  const lateTree = initial.tree !== 'absent' ? 'not-late'
+    : firstTreeElapsedMs !== null || final.tree === 'present' ? 'present' : 'absent';
+  emit({ event: 'phase-timeline', intervalMs: 500, rows, omittedCount });
+  emit({ event: 'settlement', exited: final.exited, closed, status: final.status, signal: final.signal,
+    elapsedMs: Math.round(performance.now() - beforeSettlement), sinceRollbackMs: final.elapsedMs,
+    lateTree, lateTreeElapsedMs: lateTree === 'present' ? firstTreeElapsedMs ?? final.elapsedMs : null,
+    finalPhase: final.lastPhase, stdoutBytes: final.stdoutBytes, stderrBytes: final.stderrBytes,
+    fixtureRetained: true, cleanup: 'disposable-environment-lifecycle',
+    helperCompletedCleanly: closed && final.status === 0 });
+  return diagnosticExitStatus(initial.verdict, handle);
 }
 
 async function installFixture(fixture) {
@@ -317,7 +374,7 @@ async function attempt() {
   const watchdog = setTimeout(() => {
     report({ event: 'outer-deadline', stage, status: 124, fixtureRetained: true });
     process.exit(124);
-  }, 210_000);
+  }, 330_000);
   try {
     fixture = await prepareFixture(await fs.mkdtemp(`/tmp/${fixturePrefix}`));
     stage = 'install';
@@ -332,23 +389,13 @@ async function attempt() {
     handle = startChild('/bin/bash', [installed.launcher, fixture.current.sha,
       'immutable-archive-v4', installed.bundleDigest], { ...fixture.environment, BLOCK_AT: 'tree' });
     report({ event: 'rollback-start', elapsedMs: 0, treeBoundMs });
-    const snapshot = await observeTreeBarrier(fixture, handle);
-    const { verdict } = snapshot;
-    report({ event: 'tree-barrier', ...snapshot });
-    stage = 'settlement';
-    // Release this fixed fixture barrier even if the120s assertion failed first.
-    await fs.writeFile(path.join(fixture.barriers, 'release-tree'), 'go\n', { mode: 0o600 });
-    const beforeSettlement = performance.now();
-    const closed = await waitClosed(handle, 30_000);
-    report({ event: 'settlement', closed, status: handle.status, signal: handle.signal,
-      elapsedMs: Math.round(performance.now() - beforeSettlement),
-      sinceRollbackMs: Math.round(performance.now() - handle.startedAt), fixtureRetained: true,
-      cleanup: 'disposable-environment-lifecycle', helperCompletedCleanly: closed && handle.status === 0 });
+    stage = 'rollback-observation';
+    const status = await observeRollback(fixture, handle);
     // The helperCompletedCleanly flag reflects clean helper completion, not an
     // independent descendant census. Retain evidence for outer container/VM disposal.
     await fs.writeFile(path.join(fixture.root, 'rollback-stdout'), handle.stdout, { mode: 0o600 });
     await fs.writeFile(path.join(fixture.root, 'rollback-stderr'), handle.stderr, { mode: 0o600 });
-    return diagnosticExitStatus(verdict, handle);
+    return status;
   } catch (error) {
     const status = Number.isInteger(error.status) && error.status > 0 && error.status <= 255
       ? error.status : handle ? diagnosticExitStatus('observation-error', handle) : 1;

@@ -1,6 +1,6 @@
 # 18 — Attempt the reviewed reduced rollback on native Linux
 
-Status: in-progress
+Status: done
 Blocked by: 17 — reviewed local rollback-only command committed as5c59947
 Spec: .scratch/staging-v4-cutover/spec.md#native-rollback-only-diagnostic-execution
 
@@ -30,7 +30,7 @@ can collect one exact result without the successful-deploy prefix. This is diagn
 - [x] Dedicated native job has exact scope/runtime/resource/permission limits.
 - [x] Existing full diagnostic job and canonical CI remain unchanged.
 - [x] Existing reduced test contracts, syntax and explicit lint pass; changes reviewed independently.
-- [ ] Root commit/publication and native result recorded; until then leave in-progress, not done.
+- [x] Root commit/publication and native result recorded; diagnostic evidence is not repair completion.
 
 The known local actual rollback refused at841ms with child125; no local full rollback rerun.
 Use cached Linux only for focused contracts if needed. The only externally authorized publication
@@ -72,3 +72,20 @@ scripts, existing tests, package inputs and canonical CI are unchanged from5c599
 completed full Windows3241-test gate is reused only for those identical inputs. The old native
 full-scenario job is unchanged. Root approved a scoped commit and publication to the authorized
 prototype branch; actual native outcome is still pending, so the ticket remains in-progress.
+
+## Published native outcome
+
+Committed/pushed asbc6313c72874431c1303ecce48e8362532e31bf6; remote exact SHA confirmed.
+History388commitsPASS. Run33956320307/job101280204635 completed failed08:52:23UTC on Ubuntu24.04.4
+image20260831.293.1/Node22.23.2. Root read the complete raw job log through GitHub UI:
+six contracts6/6pass2133.66462ms, installer567ms/exit0, prepared equivalence2488ms.
+Rollback exceeded120000ms: snapshot120018ms, lastPhase=build-complete, upCount=missing,
+tree=absent, both stream counts0, launcher not exited and pipes not closed. Verdict is
+other-timeout, NOT the original config-json-complete signature. Separate settlement30030ms
+remained unclosed at150049ms since rollback; diagnostic exit124, fixture retained for hosted
+VM disposal. Neither successful settlement nor actual deadlock was proved.
+
+This delivers the requested native attempt and a materially shorter setup, but does not prove
+the omitted history is non-load-bearing or identify a cause. The existing full native job and
+canonical CI127 remain independent and were not cancelled. Next diagnostic work must retain the
+original120s verdict while observing phase progress and distinguishing late progress from a stall.
