@@ -48,6 +48,84 @@ const postgresVolumeInspection = {
   Options: null,
 };
 
+function lockFixtureDockerScript(current, candidate) {
+  return `#!/bin/bash
+set -eu
+if [ "\${1:-}" = ps ] \\
+  && [[ " $* " == *"label=com.docker.compose.project=easyboost-staging"* ]] \\
+  && [[ " $* " == *"label=com.docker.compose.service=postgres"* ]] \\
+  && [[ " $* " == *"label=com.docker.compose.oneoff=False"* ]]; then
+  echo ${postgresContainerId}
+  exit 0
+fi
+if [ "\${1:-}" = volume ] && [ "\${2:-}" = inspect ]; then
+  [ "\${@: -1}" = easyboost-staging_postgres-data ] || exit 1
+  printf '%s\\n' '${JSON.stringify(postgresVolumeInspection)}'
+  exit 0
+fi
+if [ "\${1:-}" = build ]; then
+  cat >/dev/null
+  if [ "\${BLOCK_AT:-}" = build ]; then
+    echo $$ > "$BARRIER_DIR/build-pid"
+    [ ! -e /proc/$$/fd/9 ] || touch "$BARRIER_DIR/inherited-lock-fd"
+    trap '' TERM
+    touch "$BARRIER_DIR/build"
+    while [ ! -e "$BARRIER_DIR/release-build" ]; do /bin/sleep 0.02; done
+  fi
+  case " $* " in
+    *" --tag easyboost-staging-app:release-${current.sha} "*) echo ${previousImageId} > "$RELEASE_STATE" ;;
+    *" --tag easyboost-staging-app:release-${candidate.sha} "*) echo ${candidateImageId} > "$RELEASE_STATE" ;;
+    *) exit 1 ;;
+  esac
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
+  target="\${@: -1}"
+  case "$target" in easyboost-staging-app:release-*) [ -f "$RELEASE_STATE" ] || exit 1; cat "$RELEASE_STATE" ;; easyboost-staging-app:local) cat "$IMAGE_STATE" ;; postgres:17-alpine) echo ${postgresImageId} ;; *) exit 1 ;; esac
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = tag ]; then
+  if [[ "$3" == sha256:* ]]; then printf '%s\n' "$3" > "$IMAGE_STATE"; else cat "$RELEASE_STATE" > "$IMAGE_STATE"; fi
+  exit 0
+fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = rm ]; then case "\${@: -1}" in easyboost-staging-app:release-*) rm -f "$RELEASE_STATE" ;; esac; exit 0; fi
+if [ "\${1:-}" = inspect ]; then
+  if [ "\${@: -1}" = ${postgresContainerId} ]; then
+    if [[ " $* " == *" --format {{json .}} "* ]]; then
+      printf '%s\\n' '${JSON.stringify(postgresContainerInspection)}'
+    else
+      echo ${postgresImageId}
+    fi
+  else
+    cat "$CONTAINER_STATE"
+  fi
+  exit 0
+fi
+if [ "\${1:-}" = compose ]; then
+  printf '%s\n' "$*" >> "$BARRIER_DIR/compose-invocations"
+  case " $* " in
+    *" config --format json "*) printf '%s' "$RESOLVED_COMPOSE_JSON" ;;
+    *" config --quiet "*) : ;;
+    *" ps -q app "*) echo fake-container ;;
+    *" ps --status running postgres --quiet "*) : ;;
+    *" exec -T postgres pg_dump -U easyboost_staging -d easyboost_staging --format=custom --no-owner --no-privileges ")
+      # Synthetic stream for the operator backup gate, not a restorable PostgreSQL archive.
+      printf '%s\\n' 'synthetic-lock-fixture-backup'
+      ;;
+    *" up --pull never -d --no-build --no-deps app "*)
+      count=0; [ ! -f "$BARRIER_DIR/up-count" ] || count="$(cat "$BARRIER_DIR/up-count")"; count=$((count+1)); echo "$count" > "$BARRIER_DIR/up-count"
+      cat "$IMAGE_STATE" > "$CONTAINER_STATE"
+      if { [ "\${BLOCK_AT:-}" = tree ] && [ "$count" -eq 1 ]; } || { [ "\${BLOCK_AT:-}" = recovery ] && [ "$count" -eq 2 ]; }; then
+        touch "$BARRIER_DIR/$BLOCK_AT"; while [ ! -e "$BARRIER_DIR/release-$BLOCK_AT" ]; do /bin/sleep 0.02; done
+      fi
+      ;;
+  esac
+  exit 0
+fi
+exit 0
+`;
+}
+
 function approvedComposeModel(appDirectory) {
   return {
     name: 'easyboost-staging',
@@ -368,6 +446,31 @@ test('lock integration cleanup settles every resource and bounds TERM-to-KILL es
   assert.equal(combined.errors[1], cleanupErrors[0]);
 });
 
+test('lock fixture emits a deterministic nonempty synthetic backup for the approved pg_dump command', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-lock-fixture-backup-'));
+  try {
+    await fs.writeFile(path.join(root, 'docker'), lockFixtureDockerScript(
+      { sha: 'a'.repeat(64) }, { sha: 'c'.repeat(64) },
+    ));
+    const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    const args = ['docker', 'compose', '-f', '/fixture/compose.staging.yml',
+      '--env-file', '/fixture/.env.staging', 'exec', '-T', 'postgres',
+      'pg_dump', '-U', 'easyboost_staging', '-d', 'easyboost_staging',
+      '--format=custom', '--no-owner', '--no-privileges'];
+    const options = { cwd: root, encoding: 'utf8', timeout: 5_000,
+      env: { ...process.env, BARRIER_DIR: '.' } };
+    const first = spawnSync(bash, args, options);
+    assert.equal(first.status, 0, first.stderr);
+    assert.ok(Buffer.byteLength(first.stdout) > 0,
+      'the fixture must emit a nonempty stream for the staging-deploy backup gate');
+    const repeated = spawnSync(bash, args, options);
+    assert.equal(repeated.status, 0, repeated.stderr);
+    assert.equal(repeated.stdout, first.stdout, 'the synthetic backup stream must be deterministic');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('real Linux flock excludes deploy and rollback through build, tree activation and recovery', {
   skip: process.platform !== 'linux' ? 'requires Linux /usr/bin/flock semantics' : false,
 }, async () => {
@@ -446,77 +549,7 @@ test('real Linux flock excludes deploy and rollback through build, tree activati
     await fs.writeFile(containerState, `${previousImageId}\n`);
 
     const docker = path.join(fakeBin, 'docker');
-    await fs.writeFile(docker, `#!/bin/bash
-set -eu
-if [ "\${1:-}" = ps ] \\
-  && [[ " $* " == *"label=com.docker.compose.project=easyboost-staging"* ]] \\
-  && [[ " $* " == *"label=com.docker.compose.service=postgres"* ]] \\
-  && [[ " $* " == *"label=com.docker.compose.oneoff=False"* ]]; then
-  echo ${postgresContainerId}
-  exit 0
-fi
-if [ "\${1:-}" = volume ] && [ "\${2:-}" = inspect ]; then
-  [ "\${@: -1}" = easyboost-staging_postgres-data ] || exit 1
-  printf '%s\\n' '${JSON.stringify(postgresVolumeInspection)}'
-  exit 0
-fi
-if [ "\${1:-}" = build ]; then
-  cat >/dev/null
-  if [ "\${BLOCK_AT:-}" = build ]; then
-    echo $$ > "$BARRIER_DIR/build-pid"
-    [ ! -e /proc/$$/fd/9 ] || touch "$BARRIER_DIR/inherited-lock-fd"
-    trap '' TERM
-    touch "$BARRIER_DIR/build"
-    while [ ! -e "$BARRIER_DIR/release-build" ]; do /bin/sleep 0.02; done
-  fi
-  case " $* " in
-    *" --tag easyboost-staging-app:release-${current.sha} "*) echo ${previousImageId} > "$RELEASE_STATE" ;;
-    *" --tag easyboost-staging-app:release-${candidate.sha} "*) echo ${candidateImageId} > "$RELEASE_STATE" ;;
-    *) exit 1 ;;
-  esac
-  exit 0
-fi
-if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
-  target="\${@: -1}"
-  case "$target" in easyboost-staging-app:release-*) [ -f "$RELEASE_STATE" ] || exit 1; cat "$RELEASE_STATE" ;; easyboost-staging-app:local) cat "$IMAGE_STATE" ;; postgres:17-alpine) echo ${postgresImageId} ;; *) exit 1 ;; esac
-  exit 0
-fi
-if [ "\${1:-}" = image ] && [ "\${2:-}" = tag ]; then
-  if [[ "$3" == sha256:* ]]; then printf '%s\n' "$3" > "$IMAGE_STATE"; else cat "$RELEASE_STATE" > "$IMAGE_STATE"; fi
-  exit 0
-fi
-if [ "\${1:-}" = image ] && [ "\${2:-}" = rm ]; then case "\${@: -1}" in easyboost-staging-app:release-*) rm -f "$RELEASE_STATE" ;; esac; exit 0; fi
-if [ "\${1:-}" = inspect ]; then
-  if [ "\${@: -1}" = ${postgresContainerId} ]; then
-    if [[ " $* " == *" --format {{json .}} "* ]]; then
-      printf '%s\\n' '${JSON.stringify(postgresContainerInspection)}'
-    else
-      echo ${postgresImageId}
-    fi
-  else
-    cat "$CONTAINER_STATE"
-  fi
-  exit 0
-fi
-if [ "\${1:-}" = compose ]; then
-  printf '%s\n' "$*" >> "$BARRIER_DIR/compose-invocations"
-  case " $* " in
-    *" config --format json "*) printf '%s' "$RESOLVED_COMPOSE_JSON" ;;
-    *" config --quiet "*) : ;;
-    *" ps -q app "*) echo fake-container ;;
-    *" ps --status running postgres --quiet "*) : ;;
-    *" up --pull never -d --no-build --no-deps app "*)
-      count=0; [ ! -f "$BARRIER_DIR/up-count" ] || count="$(cat "$BARRIER_DIR/up-count")"; count=$((count+1)); echo "$count" > "$BARRIER_DIR/up-count"
-      cat "$IMAGE_STATE" > "$CONTAINER_STATE"
-      if { [ "\${BLOCK_AT:-}" = tree ] && [ "$count" -eq 1 ]; } || { [ "\${BLOCK_AT:-}" = recovery ] && [ "$count" -eq 2 ]; }; then
-        touch "$BARRIER_DIR/$BLOCK_AT"; while [ ! -e "$BARRIER_DIR/release-$BLOCK_AT" ]; do /bin/sleep 0.02; done
-      fi
-      ;;
-  esac
-  exit 0
-fi
-exit 0
-`);
+    await fs.writeFile(docker, lockFixtureDockerScript(current, candidate));
     await fs.writeFile(path.join(fakeBin, 'curl'), `#!/bin/bash
 set -eu
 count=0; [ ! -f "$BARRIER_DIR/curl-count" ] || count="$(cat "$BARRIER_DIR/curl-count")"; count=$((count+1)); echo "$count" > "$BARRIER_DIR/curl-count"
