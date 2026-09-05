@@ -517,3 +517,45 @@ and timeline/output bounds hold. No120second local retry; native publication rem
 
 No production fix, altered canonical or full-test deadline/assertion, dependency download, VPS
 mutation, machine-wide process control, arbitrary trace output or premature cause/readiness claim.
+
+## Attribute successful bounded-command overhead before changing production
+
+### Problem and diagnostic phase decision
+
+Native ticket19 now reproduces the exact120second timeout in the reduced real rollback, then
+observes late tree144073ms and clean helper234109ms. This is slow forward progress on that run,
+not a proven deadlock. The original assertion itself cannot fail in seconds; requiring its full
+120seconds for each component experiment is not a useful tight loop. Explicitly retain that
+unchanged native scenario as the red-capable final validation, while using the already executed
+real bounded-command component (seconds, not minutes) for attribution. This is a justified
+performance-branch refinement of diagnosing-bugs phase1, not a bypass of original validation.
+
+### User stories and ranked predictions
+
+1. As the owner, I want the next production change selected by measurements, not another guess.
+2. As the maintainer, I want to separate useful child work from per-command admission/settlement.
+3. As the owner, I want investigation confined to synthetic local fixtures without touching the VPS.
+
+Ranked, potentially cumulative hypotheses announced to the owner before experiments:
+- Repeated command-supervision overhead: nearly-empty true commands still consume substantial
+  time, and sequential/nested totals grow with command count/depth. Existing matrix supports
+  investigating this pattern but does not attribute its cost to one function.
+- Repeated runtime/file verification: measured CPU/file work in real authority construction and
+  validation accounts for a material part of the empty command's cost. A bounded CPU/timing
+  profile should show that work rather than treating sampled process residency as CPU usage.
+- Fixed waits during child settlement: wall time after useful child completion exceeds measured
+  CPU/work and aligns with actual supervisor wait sites. Existing lifecycle seams should separate
+  these costs without substituting fake success, bypassing guards or signalling unknown processes.
+
+### Deliverable and boundaries
+
+Use the existing installed real bounded-command/component setup and finite true/Node children to
+attribute startup/invocation/settlement cost. Prefer existing seams and read-only profiling; add
+only a narrowly scoped local debug probe if necessary. Do not build a general profiler, additional
+workflow, process-control framework or production logging. Any added observer must have bounded
+output/lifetime and preserve real child errors; test that seam before claiming its evidence.
+Record exact commands/runtime/provenance, measurements, limitations and the best-supported next
+fix proposal in ticket20. No production edits in this ticket, raised deadline, weakened tests,
+dependency/network installation, arbitrary environment dump, full Docker Desktop rollback retry,
+VPS actions, publication by the worker or claim of readiness. Root retains scope/review/publication
+and original native validation. Do not repeat unchanged full suites or unchanged failed attempts.

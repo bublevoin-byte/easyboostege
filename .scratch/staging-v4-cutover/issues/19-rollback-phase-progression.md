@@ -1,6 +1,6 @@
 # 19 — Preserve the original timeout while observing late rollback progress
 
-Status: in-progress
+Status: done
 Blocked by: 18 — native reduced result captured, not original exact signature
 Spec: .scratch/staging-v4-cutover/spec.md#reduced-rollback-phase-progression-after-the-unchanged-assertion
 
@@ -31,7 +31,7 @@ does not choose or implement a production fix.
 - [x] Initial failed verdict stays frozen across late tree/success; exact child failure preserved.
 - [x] Bounded real-child phase timeline and output/settlement evidence tested at actual caller seam.
 - [x] Syntax/lint/focused tests and independent review completed; old production/test inputs intact.
-- [ ] Root records scoped publication and one native result before marking done.
+- [x] Root records scoped publication and one native result before marking done.
 
 Native baseline: run33956320307/job101280204635, commitbc6313c. Contracts6/6; installer567ms,
 equivalence2488ms;120018ms lastPhase build-complete/upCount missing/tree absent/empty streams,
@@ -100,3 +100,24 @@ ESLint2files passes. Scoped secret scan1571tracked+6explicit/1573unique files an
 Original product/scripts/tests/packages/canonicalCI are byte-identical to the completed full
 Windows baseline; no unchanged full-suite rerun. Diagnostic workflow remains byte-identical.
 Root publication and one native result are still pending; the ticket is not marked done yet.
+
+## Published native result
+
+Published ase3bac627308d077b32833e06cf8f6d9e4bf077a4 after the root gate above and secret-history
+scan389commitsPASS. Native run33957694010/job101283898728, Node22.23.2/Ubuntu24.04.4/image
+20260831.293.1, completed2026-09-05T09:24:33UTC (job4m29s). Focused contracts11/11pass,
+0skip/0fail23710.281199ms. Installer559ms/status0, prepared equivalence1012ms.
+
+The immutable initial observation reproduced the original signature at120024ms: config-json-complete,
+upCount missing, tree absent, empty stdout/stderr, launcher not exited and pipes not closed. The
+operation continued: tree first observed144073ms; clean launcher exit and pipe closure234109ms,
+status0, stdout138bytes/stderr0. Later observation114084ms; original failed assertion correctly
+kept the diagnostic exit1. No outer timeout or omitted timeline rows.
+
+Observed timeline (ms:phase), not exact calls/durations:3:child-started,33965:config-json-complete,
+45617:config-json-complete,90125:config-json-complete,101246:build-enter,101750:build-complete,
+112361:config-json-complete,139564:config-json-complete,144073:up-complete,
+195671:config-json-complete,224726:config-json-complete. This run proves forward progress and
+late successful helper completion, not independent descendant census or the cause of overhead.
+It does not relax the original test or clear CI/deployment. Ticket delivery is complete; root
+continues measured component diagnosis. No VPS changes or artifacts were installed.

@@ -276,7 +276,8 @@ Premium; внутренний Base может сохраниться тольк�
 | 16 | Сравнить короткую проверку служебных команд локально и на GitHub | done; native component5/5 and observer12/12 passed, original rollback timeout reproduced; no deploy clearance |
 | 17 | Укоротить воспроизведение задержки отката | done; prepared fixture verified, local environment refused before original bug; focused Linux6/6, reviews0/0; native attempt still needed |
 | 18 | Проверить сокращённый откат на обычном Linux в GitHub | done; native contracts6/6, rollback120s timeout after build (not exact original signature), no settled result by150s; cause unproved |
-| 19 | Записать движение отката по этапам после исходного тайм-аута | in progress; preserve120s failure, bounded later observation only; no production fix |
+| 19 | Записать движение отката по этапам после исходного тайм-аута | done; native exact120s timeout, late tree144s and clean helper234s; diagnostic correctly exit1; no deploy clearance |
+| 20 | Найти источник накладных расходов запуска служебных команд | done; real chain285–301ms, six pre-tree pair checks/42commands from source; reviews0/0, no production fix yet |
 
 Локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
 secret/history scans зелёные. Отдельно на Linux: recovery/standalone 224/224, cutover 3/3,
