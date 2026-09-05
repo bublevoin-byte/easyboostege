@@ -9,7 +9,44 @@ import { HELPER_BUNDLE_FILES } from '../scripts/staging-helper-bundle.js';
 import { createReleaseArchive } from '../scripts/staging-release-archive.js';
 
 const installerScript = path.resolve('scripts/install-staging-release-helpers.sh');
+const previousImageId = `sha256:${'1'.repeat(64)}`;
+const candidateImageId = `sha256:${'2'.repeat(64)}`;
 const postgresImageId = `sha256:${'3'.repeat(64)}`;
+const postgresContainerId = 'b'.repeat(64);
+const postgresVolumeSource = '/var/lib/docker/volumes/easyboost-staging_postgres-data/_data';
+const postgresContainerInspection = {
+  Id: postgresContainerId,
+  Image: postgresImageId,
+  Config: {
+    Labels: {
+      'com.docker.compose.project': 'easyboost-staging',
+      'com.docker.compose.service': 'postgres',
+      'com.docker.compose.oneoff': 'False',
+    },
+  },
+  State: { Running: true, Health: { Status: 'healthy' } },
+  Mounts: [{
+    Type: 'volume',
+    Name: 'easyboost-staging_postgres-data',
+    Source: postgresVolumeSource,
+    Destination: '/var/lib/postgresql/data',
+    Driver: 'local',
+    Mode: 'z',
+    Propagation: '',
+    RW: true,
+  }],
+};
+const postgresVolumeInspection = {
+  Name: 'easyboost-staging_postgres-data',
+  Driver: 'local',
+  Scope: 'local',
+  Mountpoint: postgresVolumeSource,
+  Labels: {
+    'com.docker.compose.project': 'easyboost-staging',
+    'com.docker.compose.volume': 'postgres-data',
+  },
+  Options: null,
+};
 
 function approvedComposeModel(appDirectory) {
   return {
@@ -405,12 +442,24 @@ test('real Linux flock excludes deploy and rollback through build, tree activati
     const imageState = path.join(root, 'image-state');
     const containerState = path.join(root, 'container-state');
     const releaseState = path.join(root, 'release-state');
-    await fs.writeFile(imageState, `sha256:${'1'.repeat(64)}\n`);
-    await fs.writeFile(containerState, `sha256:${'1'.repeat(64)}\n`);
+    await fs.writeFile(imageState, `${previousImageId}\n`);
+    await fs.writeFile(containerState, `${previousImageId}\n`);
 
     const docker = path.join(fakeBin, 'docker');
     await fs.writeFile(docker, `#!/bin/bash
 set -eu
+if [ "\${1:-}" = ps ] \\
+  && [[ " $* " == *"label=com.docker.compose.project=easyboost-staging"* ]] \\
+  && [[ " $* " == *"label=com.docker.compose.service=postgres"* ]] \\
+  && [[ " $* " == *"label=com.docker.compose.oneoff=False"* ]]; then
+  echo ${postgresContainerId}
+  exit 0
+fi
+if [ "\${1:-}" = volume ] && [ "\${2:-}" = inspect ]; then
+  [ "\${@: -1}" = easyboost-staging_postgres-data ] || exit 1
+  printf '%s\\n' '${JSON.stringify(postgresVolumeInspection)}'
+  exit 0
+fi
 if [ "\${1:-}" = build ]; then
   cat >/dev/null
   if [ "\${BLOCK_AT:-}" = build ]; then
@@ -420,7 +469,11 @@ if [ "\${1:-}" = build ]; then
     touch "$BARRIER_DIR/build"
     while [ ! -e "$BARRIER_DIR/release-build" ]; do /bin/sleep 0.02; done
   fi
-  echo sha256:${'2'.repeat(64)} > "$RELEASE_STATE"
+  case " $* " in
+    *" --tag easyboost-staging-app:release-${current.sha} "*) echo ${previousImageId} > "$RELEASE_STATE" ;;
+    *" --tag easyboost-staging-app:release-${candidate.sha} "*) echo ${candidateImageId} > "$RELEASE_STATE" ;;
+    *) exit 1 ;;
+  esac
   exit 0
 fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
@@ -429,11 +482,22 @@ if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   exit 0
 fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = tag ]; then
-  if [[ "$3" == sha256:* ]]; then printf '%s\n' "$3" > "$IMAGE_STATE"; else echo sha256:${'2'.repeat(64)} > "$IMAGE_STATE"; fi
+  if [[ "$3" == sha256:* ]]; then printf '%s\n' "$3" > "$IMAGE_STATE"; else cat "$RELEASE_STATE" > "$IMAGE_STATE"; fi
   exit 0
 fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = rm ]; then case "\${@: -1}" in easyboost-staging-app:release-*) rm -f "$RELEASE_STATE" ;; esac; exit 0; fi
-if [ "\${1:-}" = inspect ]; then cat "$CONTAINER_STATE"; exit 0; fi
+if [ "\${1:-}" = inspect ]; then
+  if [ "\${@: -1}" = ${postgresContainerId} ]; then
+    if [[ " $* " == *" --format {{json .}} "* ]]; then
+      printf '%s\\n' '${JSON.stringify(postgresContainerInspection)}'
+    else
+      echo ${postgresImageId}
+    fi
+  else
+    cat "$CONTAINER_STATE"
+  fi
+  exit 0
+fi
 if [ "\${1:-}" = compose ]; then
   printf '%s\n' "$*" >> "$BARRIER_DIR/compose-invocations"
   case " $* " in
@@ -456,7 +520,7 @@ exit 0
     await fs.writeFile(path.join(fakeBin, 'curl'), `#!/bin/bash
 set -eu
 count=0; [ ! -f "$BARRIER_DIR/curl-count" ] || count="$(cat "$BARRIER_DIR/curl-count")"; count=$((count+1)); echo "$count" > "$BARRIER_DIR/curl-count"
-if [ "\${FAIL_CANDIDATE_READY:-0}" = 1 ] && grep -q candidate "$IMAGE_STATE"; then exit 1; fi
+if [ "\${FAIL_CANDIDATE_READY:-0}" = 1 ] && grep -Fqx '${candidateImageId}' "$IMAGE_STATE"; then exit 1; fi
 exit 0
 `);
     await fs.writeFile(path.join(fakeBin, 'sleep'), '#!/bin/bash\nexit 0\n');
@@ -491,6 +555,7 @@ exit 0
     await fs.writeFile(path.join(barriers, 'release-build'), 'go\n');
     const built = await building.done;
     assert.equal(built.status, 0, built.stderr);
+    assert.equal(await fs.readFile(containerState, 'utf8'), `${candidateImageId}\n`);
 
     await fs.rm(path.join(barriers, 'up-count'), { force: true });
     activating = start('bash', [installedRollback, current.sha,
@@ -505,6 +570,7 @@ exit 0
     await fs.writeFile(path.join(barriers, 'release-tree'), 'go\n');
     const activated = await activating.done;
     assert.equal(activated.status, 0, activated.stderr);
+    assert.equal(await fs.readFile(containerState, 'utf8'), `${previousImageId}\n`);
 
     await fs.rm(path.join(barriers, 'up-count'), { force: true });
     await fs.rm(path.join(barriers, 'curl-count'), { force: true });
@@ -521,6 +587,7 @@ exit 0
     const recovered = await recovering.done;
     assert.equal(recovered.status, 1, recovered.stderr);
     assert.match(recovered.stderr, /verified prior state restored/u);
+    assert.equal(await fs.readFile(containerState, 'utf8'), `${previousImageId}\n`);
 
     await fs.rm(path.join(barriers, 'build'), { force: true });
     await fs.rm(path.join(barriers, 'release-build'), { force: true });

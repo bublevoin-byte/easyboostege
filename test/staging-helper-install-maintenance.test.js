@@ -9,7 +9,6 @@ import {
   HELPER_BUNDLE_FILES,
   STAGING_QUIESCENT_MAINTENANCE_LOCK_NAME,
   captureHelperBundle,
-  installStagingHelperBundle,
 } from '../scripts/staging-helper-bundle.js';
 
 const installerSource = path.resolve('scripts/install-staging-release-helpers.sh');
@@ -20,7 +19,13 @@ async function copyBundleSource(destination) {
   await Promise.all(HELPER_BUNDLE_FILES.map((name) => (
     fs.copyFile(path.resolve('scripts', name), path.join(destination, name))
   )));
-  await fs.copyFile(installerSource, path.join(destination, path.basename(installerSource)));
+  const source = await fs.readFile(installerSource, 'utf8');
+  const fixtureSource = source.replace(
+    "PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'",
+    'PATH="${EASYBOOST_TEST_INSTALLER_NODE_DIRECTORY}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
+  );
+  assert.notEqual(fixtureSource, source, 'fixture installer must select its private safe Node');
+  await fs.writeFile(path.join(destination, path.basename(installerSource)), fixtureSource);
 }
 
 async function makeWritable(candidate) {
@@ -145,10 +150,16 @@ test('crashed cutover A prevents helper B installation both before and after fd8
   const linkRoot = path.join(root, 'bin');
   const sourceA = path.join(root, 'source-a');
   const sourceB = path.join(root, 'source-b');
+  const nodeDirectory = path.join(root, 'node-authority');
+  const nodeExecutable = path.join(nodeDirectory, 'node');
   const hostLock = path.join(root, 'host-operations', 'host-operation.lock');
   let holder;
   try {
     await fs.mkdir(appRoot, { mode: 0o700 });
+    await fs.mkdir(nodeDirectory, { mode: 0o755 });
+    await fs.copyFile(process.execPath, nodeExecutable);
+    await fs.chmod(nodeDirectory, 0o755);
+    await fs.chmod(nodeExecutable, 0o755);
     await copyBundleSource(sourceA);
     await copyBundleSource(sourceB);
     const bundleA = captureHelperBundle({ sourceDirectory: sourceA });
@@ -157,13 +168,22 @@ test('crashed cutover A prevents helper B installation both before and after fd8
     const bundleB = captureHelperBundle({ sourceDirectory: sourceB });
     assert.notEqual(bundleB.bundleDigest, bundleA.bundleDigest);
 
-    await installStagingHelperBundle({
-      allowedPrefix: root,
-      appRoot,
-      installRoot,
-      linkRoot,
-      sourceDirectory: sourceA,
+    const environment = {
+      ...process.env,
+      EASYBOOST_HOST_OPERATION_LOCK_DIR: hostLock,
+      EASYBOOST_TEST_INSTALLER_NODE_DIRECTORY: nodeDirectory,
+      STAGING_APP_DIR: appRoot,
+      STAGING_HELPER_ALLOWED_PREFIX: root,
+      STAGING_HELPER_INSTALL_ROOT: installRoot,
+      STAGING_HELPER_LINK_ROOT: linkRoot,
+    };
+    const installed = spawnSync(nodeExecutable, [
+      path.join(sourceA, 'staging-helper-bundle.js'), 'install', sourceA, installRoot, linkRoot,
+    ], {
+      encoding: 'utf8',
+      env: environment,
     });
+    assert.equal(installed.status, 0, `${installed.stdout}\n${installed.stderr}`);
     const current = path.join(installRoot, 'current');
     const maintenance = path.join(installRoot, STAGING_QUIESCENT_MAINTENANCE_LOCK_NAME);
     assert.equal(await fs.readFile(current, 'utf8'), `${bundleA.bundleDigest}\n`);
@@ -192,14 +212,6 @@ test('crashed cutover A prevents helper B installation both before and after fd8
       '',
     ].join('\n')));
 
-    const environment = {
-      ...process.env,
-      EASYBOOST_HOST_OPERATION_LOCK_DIR: hostLock,
-      STAGING_APP_DIR: appRoot,
-      STAGING_HELPER_ALLOWED_PREFIX: root,
-      STAGING_HELPER_INSTALL_ROOT: installRoot,
-      STAGING_HELPER_LINK_ROOT: linkRoot,
-    };
     const installerB = path.join(sourceB, path.basename(installerSource));
     const whileLive = runInstaller(installerB, environment);
     assert.equal(whileLive.status, 75, `${whileLive.stdout}\n${whileLive.stderr}`);

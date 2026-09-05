@@ -33,3 +33,40 @@ Captured over pinned-host SSH before any cutover mutation on 2026-09-04.
 After cutover and after the first real deploy, the PostgreSQL container ID, image ID, volume name,
 mount source/destination and readiness storage must remain identical. The app container may change only
 during the real UI deploy, not during metadata-only cutover.
+
+## Recheck during CI repair — 2026-09-04 23:31–23:32 UTC
+
+Read-only SSH with the existing key and strict known-host checking; no remote files, processes,
+containers or database data were changed.
+
+- Local and public readiness both returned `{"status":"ready","storage":"postgres"}`.
+- App/PostgreSQL container IDs, PostgreSQL image/volume/mount, legacy marker and Compose SHA/modes
+  are identical to the baseline above. Both containers reported healthy and up for four weeks.
+- Installed helper remains `e08586835306c143a44c7be5a2dd8394798977d8a8846aa87a7e473e30827f4f`.
+- Release store is still absent; app recovery journal is absent. The old exact deadline namespace,
+  reserved retirement slot and POSIX session/baton plus four retained POSIX tombstones still exist.
+  No cleanup or retry was attempted by this check.
+- `df -Pm`: root filesystem available 4490 MiB; `/tmp` is a 982 MiB tmpfs with 778 MiB available.
+  This is only observed headroom, not proof of admission for a new build/deploy.
+- Local raw metadata log: `.scratch/staging-v4-cutover/artifacts/server-readonly-20260905.log`
+  (ignored; contains selected metadata only, no environment values or student records).
+- Additional anonymous-memory `memfd` probe acquired a flock in a child, waited for that child to
+  exit, and read the inherited descriptor's fdinfo: the staging host reported a positive recorder
+  PID, unlike the Docker Desktop PID-0 observation. The probe created no filesystem entry and
+  acquired no application/maintenance lock. No production parser change is warranted by the
+  local Docker Desktop limitation.
+
+## Deployment capacity warning — not a new UI change
+
+Do not infer deploy admission from the green readiness checks. The existing helper hard-codes its
+large private work directory under `/tmp`. With the already-known `b407...` candidate metrics
+(235145032 expanded / 213393995 compressed), the verified legacy bridge predecessor
+(61029623 / 55088746), a 256 MiB bounded DB backup and 64 MiB headroom, `admit_release_space`
+requires **900201716 bytes** available on that temporary device after candidate/predecessor archive
+copies have already been frozen. The observed tmpfs has only 778 MiB free before those copies.
+Even moving the upload elsewhere does not prove admission against the 982 MiB tmpfs capacity.
+
+This is a separate host-storage prerequisite for the real UI deploy, not a reason to weaken the
+capacity check or delete arbitrary files. Recompute for the exact new release. A disk-backed private
+workspace (or an explicitly approved host-storage configuration change) must be addressed before
+attempting deployment. No script, mount, `/tmp` configuration or live file was changed for this finding.

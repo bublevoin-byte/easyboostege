@@ -620,7 +620,8 @@ test('journal drift, malformed state, and replaced inode fail closed', {
     const displaced = `${current.lockDirectory}.foreign`;
     fs.renameSync(current.lockDirectory, displaced);
     fs.mkdirSync(current.lockDirectory, { mode: 0o700 });
-    fs.copyFileSync(capability.claimPath, path.join(current.lockDirectory, 'owner.json'));
+    fs.copyFileSync(path.join(displaced, path.basename(capability.claimPath)),
+      path.join(current.lockDirectory, 'owner.json'));
     fs.chmodSync(path.join(current.lockDirectory, 'owner.json'), 0o600);
     assert.throws(
       () => verifyStagingCutoverHostLock(capability, { ownerPid: process.pid }),
@@ -711,7 +712,7 @@ test('unrelated same-user live PID cannot be forged as the CLI owner', {
       BASE.bundleSha256,
     ]);
     assert.equal(result.status, 70);
-    assert.match(result.stderr, /not a bounded caller ancestor/u);
+    assert.match(result.stderr, /not a bounded caller ancestor|caller ancestry is not owned/u);
   } finally {
     unrelated.kill('SIGKILL');
     await new Promise((resolve) => unrelated.once('exit', resolve));

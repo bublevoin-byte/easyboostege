@@ -2006,7 +2006,7 @@ test('staging runbooks match the executable 60-minute workflow timeout', async (
     fs.readFile(path.join(projectDirectory, 'docs', 'AISY_PWA_RELEASE.md'), 'utf8'),
   ]);
   assert.match(workflow, /^\s*timeout-minutes:\s*60\s*$/mu);
-  assert.match(readme, /workflow timeout — 60 минут/u);
+  assert.match(readme, /Workflow timeout равен 60 минутам/u);
   assert.match(pwaGuide, /60-minute workflow/u);
   for (const document of [readme, pwaGuide]) {
     assert.doesNotMatch(document, /45-minute workflow|workflow timeout — 45 минут/u);

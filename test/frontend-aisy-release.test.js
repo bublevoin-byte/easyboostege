@@ -172,14 +172,14 @@ test('GitHub CI reserves an honest end-to-end release budget', () => {
     'the CI job must cover the ~31-minute unit phase, the rest of the wrapper, cross-browser gates and cold-run margin');
 });
 
-test('staging release helpers run on the project-supported Node major', () => {
+test('staging release helpers run on the exact project-supported Node runtime', () => {
   const setupNodeIndex = stagingDeployWorkflow.indexOf('- uses: actions/setup-node@v4');
   const archiveIndex = stagingDeployWorkflow.indexOf('- name: Create immutable release archive');
   assert.ok(setupNodeIndex >= 0 && setupNodeIndex < archiveIndex,
     'staging must select its supported Node runtime before invoking archive helpers');
   const setupNodeStep = stagingDeployWorkflow.slice(setupNodeIndex, archiveIndex);
-  assert.match(setupNodeStep, /^\s*node-version:\s*22\s*$/mu,
-    'staging release helpers must run on the same supported Node major as CI and package.json');
+  assert.match(setupNodeStep, /^\s*node-version:\s*22\.23\.2\s*$/mu,
+    'staging release helpers must run on the exact supported Node release pinned in CI');
 });
 
 test('PWA update focus restoration rejects document roots and verifies the focus move', () => {

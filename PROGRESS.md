@@ -265,7 +265,13 @@ Premium; внутренний Base может сохраниться тольк�
 |---|---|---|
 | 06 | Сохранение данных для завершения прерванного восстановления | implemented; local gates passed, Linux CI pending |
 | 07 | Исправление ошибки nonce первого перехода staging | implemented; local gates passed, Linux CI pending |
-| 08 | Исправление шести тестовых fixtures/contracts Linux CI | in progress |
+| 08 | Исправление шести тестовых fixtures/contracts Linux CI | implemented; local gates passed, Linux CI pending |
+
+Локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
+secret/history scans зелёные. Отдельно на Linux: recovery/standalone 224/224, cutover 3/3,
+host-lock/installer 17/17 без пропусков. Независимые Standards/Spec review — 0/0 findings.
+CI в GitHub ещё обязателен. Read-only preflight подтвердил healthy staging без изменений;
+до реального UI deploy отдельно требуется решить ограничение места в `/tmp` (см. server-baseline).
 
 ## Полный пробный ЕГЭ-2026
 
