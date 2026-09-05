@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/staging-lock-diagnostic.yml'
       - '.scratch/staging-v4-cutover/diagnostics/**'
+      - '.scratch/staging-v4-cutover/debug/ci126-rollback-only.mjs'
+      - '.scratch/staging-v4-cutover/debug/ci126-rollback-only.test.mjs'
       - 'test/staging-release-lock.integration.test.js'
       - 'scripts/staging-*.js'
       - 'scripts/staging-*.sh'
@@ -38,3 +40,20 @@ jobs:
       - name: Observe the unchanged real Linux flock scenario
         # This is early diagnostic feedback; the canonical CI release gate is still required.
         run: node .scratch/staging-v4-cutover/diagnostics/native-lock-profile.mjs
+
+  native-rollback-only-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      - name: Check reduced rollback contracts
+        run: node --test .scratch/staging-v4-cutover/debug/ci126-rollback-only.test.mjs
+      - name: Attempt the reduced real rollback
+        # Keep this last: the dedicated hosted VM retires retained fixtures/uncertain descendants.
+        # This outer lifetime does not prove successful cleanup by the production helper.
+        run: node .scratch/staging-v4-cutover/debug/ci126-rollback-only.mjs

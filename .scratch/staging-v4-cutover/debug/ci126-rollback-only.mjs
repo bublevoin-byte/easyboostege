@@ -311,7 +311,8 @@ async function attempt() {
   let stage = 'prepare';
   let fixture;
   let handle;
-  // A hard outer lifetime belongs to this disposable diagnostic process only.
+  // This hard lifetime ends only the diagnostic process; the disposable container
+  // or dedicated hosted VM owns any remaining fixture/descendant lifetime.
   // Never signal an unproven descendant or recursively remove an active fixture.
   const watchdog = setTimeout(() => {
     report({ event: 'outer-deadline', stage, status: 124, fixtureRetained: true });
@@ -342,8 +343,9 @@ async function attempt() {
     report({ event: 'settlement', closed, status: handle.status, signal: handle.signal,
       elapsedMs: Math.round(performance.now() - beforeSettlement),
       sinceRollbackMs: Math.round(performance.now() - handle.startedAt), fixtureRetained: true,
-      cleanup: 'disposable-container-lifecycle', descendantsProven: closed && handle.status === 0 });
-    // Retain private bounded evidence until the outer container stops, even on failure.
+      cleanup: 'disposable-environment-lifecycle', helperCompletedCleanly: closed && handle.status === 0 });
+    // The helperCompletedCleanly flag reflects clean helper completion, not an
+    // independent descendant census. Retain evidence for outer container/VM disposal.
     await fs.writeFile(path.join(fixture.root, 'rollback-stdout'), handle.stdout, { mode: 0o600 });
     await fs.writeFile(path.join(fixture.root, 'rollback-stderr'), handle.stderr, { mode: 0o600 });
     return diagnosticExitStatus(verdict, handle);
@@ -364,7 +366,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     report({ event: 'linux-required', status: 69 });
     process.exitCode = 69;
   } else {
-    // The command is intended only inside the documented disposable container.
+    // Run only in the documented disposable container or dedicated hosted VM;
+    // on the VM this must be the last user-defined step before machine retirement.
     // Explicit exit ends the harness if production settlement could not finish.
     process.exit(await attempt());
   }

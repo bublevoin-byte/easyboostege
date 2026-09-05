@@ -2,8 +2,9 @@
 
 Diagnostic preparation for ticket15. This does not fix a deployment or clear a release.
 The separate workflow starts on relevant pushes to `prototype/aisy-today-visual-v1`, alongside
-the unchanged canonical CI. It pins Node22.23.2, has a20-minute job limit, uses only a read-only
-repository token, and neither installs packages nor accesses any server or secret. The fixed test
+the unchanged canonical CI. Its existing `native-lock-diagnostic` job pins Node22.23.2, has a20-minute
+job limit, uses only a read-only repository token, and neither installs packages nor accesses any
+server or secret. The fixed test
 and installed helper import closure use Node builtins/local modules; the existing fixture supplies
 fake Docker/curl. Bash, Python3 and flock are provided by the same Ubuntu runner class as CI.
 
@@ -129,3 +130,43 @@ scenario run. A baseline failure fails the job and skips those later steps; it i
 to a green diagnostic verdict. The original sampler, full scenario, canonical CI and release gate
 are unchanged. Local Docker Desktop component success cannot establish native GitHub timings or
 full-flock success; ticket16 records local evidence, and root owns the subsequent native run.
+
+## Reduced real rollback on a dedicated native runner — ticket18
+
+The independent `native-rollback-only-diagnostic` job uses a standard GitHub-hosted `ubuntu-latest`
+VM, Node22.23.2 and a6-minute total job limit. Checkout does not persist credentials; the workflow
+grants only `contents: read`. The job has no container, services, secrets, dependency installation,
+SSH, server/provider requests or artifact uploads. Its helper children receive the existing explicit
+synthetic environment and fake Docker/curl, with no caller environment inherited. The only added
+push paths are the exact two reduced diagnostic files below. The existing full diagnostic job and
+canonical CI remain unchanged and independently report their own results.
+
+From the repository root on the dedicated native Linux VM, the fixed steps are:
+
+```sh
+node --test .scratch/staging-v4-cutover/debug/ci126-rollback-only.test.mjs
+node .scratch/staging-v4-cutover/debug/ci126-rollback-only.mjs
+```
+
+The six existing contracts must pass before the real rollback runs as the last user-defined step.
+The command accepts no arguments, creates its own private `/tmp/easyboost-ci126-rollback-*` fixture,
+checks the reviewed synthetic post-deploy boundary, and invokes the real installed rollback launcher.
+Its120000ms tree assertion,210000ms diagnostic lifetime,30000ms later settlement budget, child status
+tracking and fixture inputs are unchanged. Output retains separate barrier and settlement results;
+raw child streams and authority values remain private. Ticket17 records the boundary proof and
+the successful-deployment history omitted from this reduced attempt.
+
+The fixed `cleanup: disposable-environment-lifecycle` label covers either the documented local
+disposable container or this dedicated hosted VM. Fixture evidence and uncertain descendants are
+retained for outer disposal, without signalling unknown processes or recursively removing an active
+fixture. `helperCompletedCleanly` replaces the stronger `descendantsProven` label with the same
+condition: clean helper completion. Launcher exit or pipe closure alone is not an independent proof
+that all descendants have settled. GitHub provides a fresh
+hosted environment per job ([runner documentation](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)).
+That outer machine lifetime is separate from the production helper's own cleanup contract.
+
+No native rollback-only result is available yet. The known local attempt refused maintenance-lock
+evidence at841ms with child125; it did not reproduce the120-second native timeout and is not repeated
+here. Root owns the reviewed publication and one native result, including timing, stage, status and
+settlement limits. A reached barrier, timeout, environment refusal or retained fixture is diagnostic
+evidence; none establishes a production repair or deployment readiness.

@@ -417,3 +417,57 @@ removed safely, deliver the concrete evidence and retain the existing native rep
 
 No production optimisation or architectural rewrite, weakened test, new workflow push, live host
 work, dependency download, generic profiler, whole-machine process control or readiness claim.
+
+## Native rollback-only diagnostic execution
+
+### Problem Statement
+
+The reduced rollback fixture is now locally reviewed, but Docker Desktop refuses maintenance-lock
+evidence before the native failure. Another local attempt cannot establish whether removing the
+successful-deployment prefix preserves the original timeout. Native Linux is already available
+through the authorized diagnostic branch's GitHub Actions workflow.
+
+### Solution and User Stories
+
+1. As the owner, I want the reduced real rollback attempted on native Linux to shorten diagnosis.
+2. As the maintainer, I want exact barrier timing and launcher outcome separate from settlement.
+3. As the owner, I want a failed diagnostic confined to its disposable test machine, never my VPS.
+4. As the maintainer, I want the existing full reproduction and canonical release gate unchanged.
+
+### Implementation Decisions
+
+- Add one independent standard GitHub-hosted Ubuntu job, not a Docker container, self-hosted
+  runner or live server. Pin the same22.23.2 runtime. Its total job bound is6minutes.
+- Reuse the fixed reviewed rollback-only command and its focused contracts. No generic command
+  interface, extra parameters, new supervisor or alternate production implementation.
+- The actual rollback is the last user-defined step in its dedicated job. Retain the private
+  fixture and any uncertain descendants for outer disposable-machine retirement; never equate
+  launcher exit or pipe closure with independent proof that all descendants have settled.
+- Clarify the diagnostic's lifecycle label/documentation for either the existing disposable local
+  container or this dedicated hosted VM. Do not change its120000ms tree assertion,210000ms outer
+  lifetime,30000ms settlement budget, fake-Docker inputs or production safety authorities.
+- Checkout has no persisted credentials; contents-read permission only. No environment secrets,
+  npm installation, Docker service, server network requests, uploads, deployment or artifact reuse.
+- Preserve the existing component/sampler/full-scenario job and canonical workflow byte-for-byte
+  apart from the diagnostic workflow's added job and its exact reduced-script path trigger.
+- Root owns review, scoped commit/push to the authorized branch and collection of the native
+  result. Red, green, environment refusal and incomplete settlement are evidence, not clearance.
+
+### Testing Decisions
+
+Existing finite-child/status/equivalence diagnostic contracts are the test seam. Run focused
+contracts and syntax/lint after the lifecycle wording change; review the workflow configuration
+and execute the exact reviewed command on the new native job. Preserve the original scenario's
+independent result. Record native outcome once, including stage, timing, status and limitations.
+No unchanged full local suite repetition; existing input equality must be checked by root.
+
+### Out of Scope
+
+No production optimization, raised deadline, weakened assertion, dependency change, VPS action,
+process-control framework, recovery authority mutation or claim the application is ready to deploy.
+
+### Runner evidence
+
+GitHub documents a fresh hosted runner image per job, with standard Ubuntu runners using VMs:
+[GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+This outer disposal boundary is not evidence of the production helper's own successful cleanup.
