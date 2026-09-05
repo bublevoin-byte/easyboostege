@@ -281,7 +281,8 @@ Premium; внутренний Base может сохраниться тольк�
 | 21 | Объединить проверку архива и контрольной суммы без ослабления защиты | done; local3262/3153pass/109skip/0fail; published528f508; native5 faster but original120s timeout remains; CI129 sole original failure |
 | 22 | Измерить оставшуюся стоимость повторных проверок защищённого состояния | done; Compose1.02s/workspace0.70s/reservations2.73s; focused12/9pass/3skip; reviews0/0; production528 unchanged; local-only diagnostic commit |
 | 23 | Выполнять три измеренных блока проверок с меньшим числом запусков | published4e3b02c; Windows3286/3163pass/122skip/1permission failure, affected33/33 outside restriction; isolated native rollback111.7s passes then recovery120s fails; canonicalCI1303192pass/1original rollback120s failure, PG51/51; stable acceptance outstanding |
-| 24 | Отдельно воспроизводить задержку аварийного восстановления | in progress; corrected focused Linux28/28 and Windows18pass/10skip, Spec0/Standards0; additive6min native job reviewed, publication next; original120s unchanged, no production fix |
+| 24 | Отдельно воспроизводить задержку аварийного восстановления | publishedcb29558; native contracts28/28; exact timeout120020ms, late recovery199258ms/helperclosed1 at238706ms with expected diagnostic, independent final proof not-proven; permission-model defect under ticket25, no production fix |
+| 25 | Сверить права файлов в диагностике с реальным восстановлением | implementation verified; real077 RED/GREEN, Linux31/31, Windows18pass/13POSIXskip, Spec0/Standards0; exact400/600 model, corrected native feedback pending; original120s failure remains |
 
 Последний итог: CI130 завершился за36m39s,3258tests/3192pass/1fail/65skip; PostgreSQL51/51.
 Единственный отказ — исходное ожидание rollback/tree120004ms. В двух отдельных native6

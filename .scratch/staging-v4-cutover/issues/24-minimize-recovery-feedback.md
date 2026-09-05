@@ -280,3 +280,21 @@ Intended scoped commit: two new diagnostic files, this issue, final spec, PROGRE
 terminal CI evidence and the additive diagnostic workflow. Local checkpoint, artifact notes,
 historical owner handoff, manifests, baseline source TARs and unrelated files stay out.
 Commit, authorized branch push and actual native outcome will be recorded after execution.
+
+## Published native7 outcome — 2026-09-05
+
+Committedcb29558906b53fbb3abf1d076595cfa94098c22a and pushed only the authorized prototype
+branch; remote exactHEAD verified. Fresh394-commit secret history passes. Native7run33974726837,
+recovery job101329311878 final failure, full raw30731characters/393lines independently read.
+Node22.23.2/Ubuntu24.04.4; focused28/28,0fail/skip/cancel,23230.810258ms. Installer560ms,
+equivalence917ms. Original recovery observation fails at120020ms/config-json-complete,
+upCountmissing/recoveryabsent/staletreepresent/stdout3B/stderr0/exitedfalse/closedfalse.
+Later barrier199258ms, released; helper closes status1 at238706ms with expected75B restoration
+diagnostic, but independent finalState not-proven. Overall1, outputFailedfalse, fixture retained.
+Timeline10rows/0omissions, late upCount2, no unsettled auxiliary. This is neither an outer timeout
+nor a verified restored-state success. Native final-state mismatch requires ticket25.
+
+Root isolated real archive probe proves077 extraction0600/frozen0400, whereas this diagnostic
+expects0644/0444. That diagnostic-contract defect is distinct from the genuine120s delay.
+Ticket24 remains in-progress until corrected native feedback establishes all final-state proofs;
+its shorter exact-red timing loop is already observed, and its initial failure stays authoritative.

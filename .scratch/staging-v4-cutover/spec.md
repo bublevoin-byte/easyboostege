@@ -883,3 +883,63 @@ from diagnostic contracts. Existing production/default-test bytes remain unchang
 No production helper changes, original-test edits, raised limits, weakened cleanup or identity
 guards, new daemon/cache, dependency download, unrelated local environment repair, VPS access,
 artifact packaging, paid provider action, workflow rerun/cancellation or installation.
+
+## Match recovery diagnostic metadata to the real helper umask
+
+### Problem Statement
+
+Native7's reduced recovery reproduces the original120s timeout at120020ms. It later reaches
+the recovery barrier at199258ms and closes the real helper with expected status1/restoration
+diagnostic at238706ms, but the independent final-state proof fails. The diagnostic currently
+constructs frozen files0444 and expects recovered files0644. The actual deploy/rollback shell
+uses umask077; a root-run offline Linux probe through the real canonical archive producer and
+extractor confirms extracted0600 and frozen0400. This is a separate diagnostic-contract defect,
+not the cause or a repair of the original production timing failure.
+
+### Solution and User Stories
+
+Correct the diagnostic's exact metadata model and protect it with a real masked-extraction
+regression. Preserve the timeout failure and every other independent proof requirement.
+
+1. As the owner, I want a genuine restoration distinguished from a mistaken test expectation.
+2. As the maintainer, I want prepared file permissions derived from actual helper behavior.
+3. As the maintainer, I want finite successful fixtures to reproduce the real extraction mask.
+4. As the owner, I want late recovery to stay a failed timing check even when restoration verifies.
+5. As the maintainer, I want incorrect broad permissions rejected, not accepted as alternatives.
+6. As the owner, I want this diagnostic correction kept separate from production changes.
+
+### Implementation Decisions
+
+Reuse the existing prepared-state and finish-attempt seams. The imported rollback-only base
+fixture is independently checked using its existing model before conversion; do not modify that
+older diagnostic in this slice. Transform only the new recovery fixture to the actual frozen
+0400 current-file model and require0600 after real recovery. Marker0600, directories0700 and
+all retained identity/inventory/byte checks remain exact and unchanged. No acceptance ranges.
+
+Use a real canonical archive and extraction in a finite isolated child with inherited umask077
+to establish the model, avoiding process-global umask changes in a concurrent test runner.
+Finite recovered fixtures must derive actual source bytes/modes from this real extraction path
+instead of forcing the expected mode with chmod0644. Keep the existing28 behavioral contracts
+and their assertions; update only expectations shown wrong by real helper behavior, add explicit
+regressions rejecting0444 prepared and0644 recovered current files. Preserve all result status,
+expected diagnostic, closed-child, auxiliary124, stale-marker and bounded-output contracts.
+
+Do not add general-purpose logging or new production seams. If another final-state assertion
+fails after this correction, retain the failure and report it rather than broadening the scope.
+
+### Testing Decisions
+
+First add/run a real masked-extraction comparison that fails against the published diagnostic.
+Then correct the model and run all focused contracts on pinned Windows22.23.2 and cached offline
+Linux22.23.1; POSIX mode assertions skip explicitly on Windows. Use existing short finite-child
+test seams only. Do not rerun real local Linux flock/recovery in the known incompatible container.
+Root owns independent two-axis review, exact LF/source provenance, existing full-gate evidence,
+publication to the authorized prototype branch and native feedback. The original120s check and
+full canonical CI remain authoritative; a correctly failed diagnostic is not deployment clearance.
+
+### Out of Scope
+
+No production/default-test or workflow edits, modified archive semantics, deadline increases,
+authority bypass, real local recovery, external downloads, VPS mutation, release packaging or
+deployment. No claim that the native final-state mismatch is exclusively this defect until a
+corrected native run proves all remaining final-state assertions.

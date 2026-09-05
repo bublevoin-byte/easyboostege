@@ -44,14 +44,68 @@ async function withFixture(action) {
   }
 }
 
+test('prepared current modes match real canonical extraction and freezing under inherited umask077', {
+  skip: process.platform !== 'linux' && 'POSIX inherited umask and file mode semantics',
+}, async () => withFixture(async (fixture) => {
+  const archiveModule = new URL('../../../scripts/staging-release-archive.js', import.meta.url).href;
+  const child = spawnSync('/bin/bash', ['--noprofile', '--norc', '-c',
+    'umask 077; exec "$@"', 'masked-extraction', process.execPath, '--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import fs from 'node:fs/promises';
+    import path from 'node:path';
+    import { createReleaseArchive, extractReleaseArchive, verifyReleaseTree } from ${JSON.stringify(archiveModule)};
+    assert.equal(process.umask(), 0o077);
+    const [root, sourceDirectory] = process.argv.slice(1);
+    const files = ['.dockerignore', 'Dockerfile', 'compose.staging.yml', 'current.txt'];
+    const archivePath = path.join(root, 'masked-current.tar.gz');
+    const destination = path.join(root, 'masked-current');
+    await createReleaseArchive({ sourceDirectory, files, outputPath: archivePath });
+    await extractReleaseArchive({ archivePath, destination });
+    await verifyReleaseTree({ archivePath, directory: destination });
+    const modes = [];
+    for (const name of files) {
+      const file = path.join(destination, name);
+      const extracted = (await fs.lstat(file)).mode & 0o7777;
+      await fs.chmod(file, extracted & ~0o222);
+      modes.push({ name, extracted, frozen: (await fs.lstat(file)).mode & 0o7777 });
+    }
+    await verifyReleaseTree({ archivePath, directory: destination });
+    process.stdout.write(JSON.stringify(modes));
+  `, fixture.root, fixture.current.source], { encoding: 'utf8', timeout: 3000, maxBuffer: 4096 });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.signal, null);
+  assert.equal(child.stderr, '');
+  const modes = JSON.parse(child.stdout);
+  assert.deepEqual(modes, ['.dockerignore', 'Dockerfile', 'compose.staging.yml', 'current.txt']
+    .map((name) => ({ name, extracted: 0o600, frozen: 0o400 })));
+  await recovery.verifyPreparedRecovery(fixture);
+  for (const { name, frozen } of modes) {
+    assert.equal((await fs.lstat(path.join(fixture.app, name))).mode & 0o7777, frozen,
+      `${name}: prepared mode must match the real masked extraction followed by a-w`);
+  }
+}));
+
+test('prepared current proof rejects the formerly accepted broad0444 mode', {
+  skip: process.platform !== 'linux' && 'POSIX file mode semantics',
+}, async () => withFixture(async (fixture) => {
+  await recovery.verifyPreparedRecovery(fixture);
+  const current = path.join(fixture.app, 'current.txt');
+  assert.equal((await fs.lstat(current)).mode & 0o7777, 0o400);
+  await fs.chmod(current, 0o444);
+  await assert.rejects(recovery.verifyPreparedRecovery(fixture));
+}));
+
 function finiteRecovery(fixture, handles, { delayMs = 0, status = 1, evidence = true,
   restore = true, barrier = true, signal = false, lingerMs = 0, inheritedPipes = false,
-  outputBytes = 0 } = {}) {
+  outputBytes = 0, umask = 0o077 } = {}) {
+  const archiveModule = new URL('../../../scripts/staging-release-archive.js', import.meta.url).href;
   const handle = startChild(process.execPath, ['--input-type=module', '-e', `
     import fs from 'node:fs/promises';
     import path from 'node:path';
     import { spawn } from 'node:child_process';
-    const [root, prefix] = process.argv.slice(1);
+    import { extractReleaseArchive } from ${JSON.stringify(archiveModule)};
+    process.umask(${umask}); // Isolated finite child, never the concurrent test runner.
+    const [root, prefix, archivePath] = process.argv.slice(1);
     const barriers = path.join(root, 'barriers');
     const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     await fs.writeFile(path.join(barriers, 'phase-recovery'), 'config-json-complete\\n');
@@ -66,9 +120,15 @@ function finiteRecovery(fixture, handles, { delayMs = 0, status = 1, evidence = 
       }
     }
     if (${restore}) {
+      const destination = path.join(root, 'finite-recovered-current');
+      await extractReleaseArchive({ archivePath, destination });
       for (const name of ['.dockerignore', 'Dockerfile', 'compose.staging.yml', 'current.txt']) {
-        await fs.chmod(path.join(root, 'app', name), 0o644);
+        const current = path.join(root, 'app', name);
+        await fs.chmod(current, 0o600); // Permit removing the frozen file on Windows.
+        await fs.unlink(current);
+        await fs.rename(path.join(destination, name), current);
       }
+      await fs.rmdir(destination);
       await fs.writeFile(path.join(root, 'app/backups', 'easyboost-staging-20000102T000000Z-' + prefix + '-2.dump'),
         'synthetic-lock-fixture-backup\\n', { mode: 0o600 });
     }
@@ -81,7 +141,7 @@ function finiteRecovery(fixture, handles, { delayMs = 0, status = 1, evidence = 
     await pause(${lingerMs});
     if (${signal}) process.kill(process.pid, 'SIGTERM');
     else process.exitCode = ${status};
-  `, fixture.root, fixture.candidate.sha.slice(0, 12)], {});
+  `, fixture.root, fixture.candidate.sha.slice(0, 12), fixture.current.archive], {});
   handles.push(handle);
   return handle;
 }
@@ -451,4 +511,31 @@ test('on-time recovery and expected helper exit1 require independently restored 
     assert.equal(JSON.stringify(rows).includes('Primary staging'), false);
     assert.equal(await fs.readFile(path.join(fixture.root, 'recovery-stderr'), 'utf8'),
       'Primary staging deploy failed with status 1; verified prior state restored\n');
+    if (process.platform === 'linux') {
+      for (const name of ['.dockerignore', 'Dockerfile', 'compose.staging.yml', 'current.txt']) {
+        assert.equal((await fs.lstat(path.join(fixture.app, name))).mode & 0o7777, 0o600);
+      }
+    }
   }));
+
+test('on-time recovered current proof rejects broad0644 from real extraction under umask022', {
+  skip: process.platform !== 'linux' && 'POSIX inherited umask and file mode semantics',
+}, async () => withFixture(async (fixture, handles) => {
+  const handle = finiteRecovery(fixture, handles, { umask: 0o022 });
+  const rows = [];
+  assert.equal(await recovery.finishRecoveryAttempt(fixture, handle, {
+    barrierTimeoutMs: 2000, settlementTimeoutMs: 3000, emit: (row) => rows.push(row),
+  }), 1);
+  assert.equal(rows.find((row) => row.event === 'recovery-barrier').verdict, 'barrier-reached');
+  const settled = rows.find((row) => row.event === 'settlement');
+  assert.equal(settled.closed, true);
+  assert.equal(settled.status, 1);
+  assert.equal(settled.signal, null);
+  assert.equal(settled.expectedEvidence, true);
+  assert.equal(settled.finalState, 'not-proven');
+  assert.equal(settled.helperRecoveredAsExpected, false);
+  assert.equal(rows.at(-1).status, 1);
+  for (const name of ['.dockerignore', 'Dockerfile', 'compose.staging.yml', 'current.txt']) {
+    assert.equal((await fs.lstat(path.join(fixture.app, name))).mode & 0o7777, 0o644);
+  }
+}));

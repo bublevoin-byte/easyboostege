@@ -55,7 +55,8 @@ export async function prepareRecoveryFixture(root) {
   }
   for (const name of currentFiles) {
     await fs.rename(path.join(extracted, name), path.join(fixture.app, name));
-    await fs.chmod(path.join(fixture.app, name), 0o444);
+    // The real helper extracts canonical0644 under umask077, then removes a-w.
+    await fs.chmod(path.join(fixture.app, name), 0o400);
   }
   await fs.rmdir(extracted);
   await fs.writeFile(path.join(fixture.app, '.release-sha256'), `${fixture.current.sha}\n`);
@@ -83,7 +84,7 @@ exit 0
   }
   const prepared = new Map();
   for (const name of [...currentFiles, '.release-sha256']) {
-    prepared.set(name, await entry(path.join(fixture.app, name), false, name === '.release-sha256' ? 0o600 : 0o444));
+    prepared.set(name, await entry(path.join(fixture.app, name), false, name === '.release-sha256' ? 0o600 : 0o400));
   }
   captures.set(fixture, { retained, prepared, barriers: await entry(fixture.barriers, true, 0o700) });
   return fixture;
@@ -95,7 +96,7 @@ async function verifyCurrent(fixture, { recovered = false } = {}) {
   const retained = captures.get(fixture)?.retained;
   assert.ok(retained, 'fixture must have independently captured retained metadata');
   await verifyReleaseTree({ archivePath: current.archive, directory: app });
-  for (const name of currentFiles) await entry(path.join(app, name), false, recovered ? 0o644 : 0o444);
+  for (const name of currentFiles) await entry(path.join(app, name), false, recovered ? 0o600 : 0o400);
   assert.deepEqual((await fs.readdir(app)).sort(), [...currentFiles, '.env.staging', '.release-sha256',
     '.staging-release.lock', 'backups', 'rollbacks'].sort());
   await entry(path.join(app, '.release-sha256'), false, 0o600);
@@ -136,7 +137,7 @@ async function verifyCurrent(fixture, { recovered = false } = {}) {
 export async function verifyPreparedRecovery(fixture) {
   const state = await verifyCurrent(fixture);
   for (const [name, identity] of captures.get(fixture).prepared) {
-    assert.equal(await entry(path.join(fixture.app, name), false, name === '.release-sha256' ? 0o600 : 0o444), identity);
+    assert.equal(await entry(path.join(fixture.app, name), false, name === '.release-sha256' ? 0o600 : 0o400), identity);
   }
   assert.equal(await entry(fixture.barriers, true, 0o700), captures.get(fixture).barriers);
   assert.deepEqual((await fs.readdir(fixture.barriers)).sort(), ['phase-tree', 'release-tree', 'tree']);
