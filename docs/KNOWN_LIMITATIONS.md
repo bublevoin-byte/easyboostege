@@ -154,6 +154,15 @@ the canonical ID. A rebound/mismatched tag is preserved and the immutable ID is 
 One shared ordered
 finalizer owns image, reservations, workdir, transaction marker and the operation-specific state proof,
 without merging deploy publication/backup policy with rollback target semantics.
+Large deploy/rollback workspaces use private random directories under the captured
+`/opt/easyboost-staging/rollbacks` parent, beside (not inside) the retained `releases/` store.
+They therefore use the staging filesystem rather than a potentially small RAM-backed `/tmp`.
+The parent and workspace identities must remain exact through activation, recovery and cleanup;
+an unsafe or replaced path fails closed without deleting foreign contents. Backup files and retained
+archives are not workspace contents. Free-space admission and reservations remain unchanged and
+sum the requirements of every role sharing a device; a disk-backed workspace does not itself prove
+enough free space for a release. Operators must not bypass these checks or clear recovery evidence
+to make room.
 Cleanup is limited to the four recorded candidate paths; any identity mismatch, removal failure or store
 proof failure retains/rewrites the recovery marker and suppresses the success claim.
 Archive/sidecar final paths use atomic no-replace publication; identity-bound cleanup first moves the exact

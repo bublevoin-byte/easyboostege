@@ -70,12 +70,6 @@ if [ -e "$recovery_marker" ]; then
   exit 70
 fi
 
-work_dir="$(run_bounded "$COMMAND_SECONDS" \
-  mktemp -d "/tmp/easyboost-staging-deploy.XXXXXX")"
-frozen_archive="$work_dir/release.tar.gz"
-release_dir="$work_dir/candidate"
-previous_archive="$work_dir/previous.tar.gz"
-previous_tree="$work_dir/previous"
 candidate_pair_existed=0
 candidate_pair_publication_started=0
 candidate_pair_published=0
@@ -112,10 +106,11 @@ first_deploy_compose_file=''
 
 cleanup_incomplete_upload_reservation() {
   [ -n "$temporary_reservation_file" ] || return 0
+  reverify_release_workspace || return 1
   if [ -e "$temporary_reservation_file" ] || [ -L "$temporary_reservation_file" ]; then
     [ ! -L "$temporary_reservation_file" ] && [ -f "$temporary_reservation_file" ] \
       || return 1
-    run_bounded "$COMMAND_SECONDS" rm -f -- "$temporary_reservation_file" || return 1
+    run_workspace_bounded "$COMMAND_SECONDS" rm -f -- "$temporary_reservation_file" || return 1
   fi
   [ ! -e "$temporary_reservation_file" ] && [ ! -L "$temporary_reservation_file" ] \
     || return 1
@@ -124,6 +119,7 @@ cleanup_incomplete_upload_reservation() {
 }
 
 cleanup_frozen_archive_reservation() {
+  reverify_release_workspace || return 1
   if [ ! -e "$frozen_archive" ] && [ ! -L "$frozen_archive" ]; then
     frozen_archive_reservation_authority=''
     return 0
@@ -134,13 +130,14 @@ cleanup_frozen_archive_reservation() {
       "$frozen_archive" "$uploaded_archive_size" \
       "$frozen_archive_reservation_authority" || return 1
   fi
-  run_bounded "$COMMAND_SECONDS" rm -f -- "$frozen_archive" || return 1
+  run_workspace_bounded "$COMMAND_SECONDS" rm -f -- "$frozen_archive" || return 1
   [ ! -e "$frozen_archive" ] && [ ! -L "$frozen_archive" ] || return 1
   frozen_archive_reservation_authority=''
 }
 
 reserve_uploaded_archive_space() {
   local required available
+  reverify_release_workspace || return 1
   required=$((uploaded_archive_size + MINIMUM_DISK_HEADROOM_BYTES))
   available="$(run_bounded "$COMMAND_SECONDS" df --output=avail -B1 -- "$work_dir")" || {
     echo "Uploaded release archive capacity probe failed" >&2
@@ -157,8 +154,8 @@ reserve_uploaded_archive_space() {
     echo "Uploaded release archive capacity reservation could not be proven" >&2
     return 1
   fi
-  if ! run_bounded "$COMMAND_SECONDS" fallocate -l "$uploaded_archive_size" -- "$frozen_archive" \
-    || ! run_bounded "$COMMAND_SECONDS" chmod 600 "$frozen_archive"; then
+  if ! run_workspace_bounded "$COMMAND_SECONDS" fallocate -l "$uploaded_archive_size" -- "$frozen_archive" \
+    || ! run_workspace_bounded "$COMMAND_SECONDS" chmod 600 "$frozen_archive"; then
     cleanup_frozen_archive_reservation || :
     echo "Uploaded release archive output capacity could not be allocated" >&2
     return 1
@@ -293,6 +290,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+create_release_workspace deploy || exit 67
+frozen_archive="$work_dir/release.tar.gz"
+release_dir="$work_dir/candidate"
+previous_archive="$work_dir/previous.tar.gz"
+previous_tree="$work_dir/previous"
+
 validate_release_store || exit 67
 
 # Reject an invalid upload before inspecting Docker, the active image, or any mutable runtime state.
@@ -305,7 +308,7 @@ uploaded_archive_size="$(authority_field "$uploaded_archive_authority" size)" ||
 [[ "$uploaded_archive_size" =~ ^[0-9]+$ ]] \
   && [ "$uploaded_archive_size" -le "$MAX_RELEASE_ARCHIVE_BYTES" ] || exit 65
 reserve_uploaded_archive_space || exit 68
-frozen_record="$(run_bounded "$COMMAND_SECONDS" node "$bounded_stream_tool" \
+frozen_record="$(run_workspace_bounded "$COMMAND_SECONDS" node "$bounded_stream_tool" \
   freeze-reserved-file "$archive" "$frozen_archive" "$MAX_RELEASE_ARCHIVE_BYTES" \
   "$uploaded_archive_authority" "$frozen_archive_reservation_authority")" || {
   cleanup_frozen_archive_reservation || :
@@ -336,9 +339,9 @@ if [ -f "$compose_file" ] || [ -f "$app_dir/.release-sha256" ]; then
     "$app_dir/.release-sha256" 'active release marker')" || exit 67
   active_release=1
   reverify_release_store_identity || exit 67
-  run_bounded "$COMMAND_SECONDS" cp --reflink=never -- \
+  run_workspace_bounded "$COMMAND_SECONDS" cp --reflink=never -- \
     "$(release_archive_path "$previous_sha")" "$previous_archive"
-  run_bounded "$COMMAND_SECONDS" chmod 400 "$previous_archive"
+  run_workspace_bounded "$COMMAND_SECONDS" chmod 400 "$previous_archive"
   [ "$(sha256_file "$previous_archive")" = "$previous_sha" ] \
     || { echo "Active retained archive changed while freezing" >&2; exit 67; }
   read -r previous_expanded previous_compressed < <(archive_metrics "$previous_archive") \
@@ -370,12 +373,12 @@ reserve_release_space "$candidate_expanded" "$previous_expanded" \
   "$candidate_compressed" "$previous_compressed" "$backup_capacity" || exit 68
 if [ "$active_release" -eq 1 ]; then
   consume_reservation "$temporary_reservation_file" "$previous_expanded" || exit 68
-  run_bounded "$COMMAND_SECONDS" mkdir -m 700 "$previous_tree"
+  run_workspace_bounded "$COMMAND_SECONDS" mkdir -m 700 "$previous_tree"
   run_archive_extract "$previous_archive" "$previous_tree" || exit 67
   run_tree_verify "$previous_archive" "$previous_tree" || exit 67
 fi
 consume_reservation "$temporary_reservation_file" "$candidate_expanded" || exit 68
-run_bounded "$COMMAND_SECONDS" mkdir -m 700 "$release_dir"
+run_workspace_bounded "$COMMAND_SECONDS" mkdir -m 700 "$release_dir"
 run_archive_extract "$frozen_archive" "$release_dir" || exit 65
 for required in .dockerignore Dockerfile compose.staging.yml; do
   [ -f "$release_dir/$required" ] || { echo "unsafe release archive: missing $required" >&2; exit 65; }
@@ -383,7 +386,7 @@ done
 validate_staging_compose_contract "$release_dir/compose.staging.yml" || exit 65
 require_local_dependency_images || exit 65
 run_tree_verify "$frozen_archive" "$release_dir" || exit 65
-run_bounded "$COMMAND_SECONDS" chmod -R a-w "$release_dir"
+run_workspace_bounded "$COMMAND_SECONDS" chmod -R a-w "$release_dir"
 if [ "$active_release" -eq 0 ]; then
   first_deploy_compose_file="$release_dir/compose.staging.yml"
 fi
@@ -411,11 +414,11 @@ if [ "$database_backup_required" -eq 1 ]; then
   run_bounded 120 docker compose -f "$compose_file" --env-file "$env_file" exec -T postgres \
     pg_dump -U easyboost_staging -d easyboost_staging \
     --format=custom --no-owner --no-privileges \
-    | run_bounded 120 node "$bounded_stream_tool" "$backup_temp" "$MAX_DATABASE_BACKUP_BYTES"
+    | run_workspace_bounded 120 node "$bounded_stream_tool" "$backup_temp" "$MAX_DATABASE_BACKUP_BYTES"
   test -s "$backup_temp"
   backup_bytes="$(run_bounded "$COMMAND_SECONDS" stat -c '%s' -- "$backup_temp")"
   [ "$backup_bytes" -le "$MAX_DATABASE_BACKUP_BYTES" ] || exit 68
-  run_bounded "$COMMAND_SECONDS" chmod 600 "$backup_temp"
+  run_workspace_bounded "$COMMAND_SECONDS" chmod 600 "$backup_temp"
   verify_running_postgres_authority || exit 67
 fi
 
@@ -431,7 +434,7 @@ if [ "$backup_bytes" -gt 0 ]; then
   consume_reservation "$live_reservation_file" "$backup_bytes" || exit 68
   backup_destination="$app_dir/backups/easyboost-staging-$(run_bounded "$COMMAND_SECONDS" date -u +%Y%m%dT%H%M%SZ)-${expected_sha:0:12}-$$.dump"
   backup_staging="$backup_destination.tmp.$$"
-  run_bounded "$COMMAND_SECONDS" cp --reflink=never -- "$backup_temp" "$backup_staging"
+  run_workspace_bounded "$COMMAND_SECONDS" cp --reflink=never -- "$backup_temp" "$backup_staging"
   [ "$(sha256_file "$backup_staging")" = "$(sha256_file "$backup_temp")" ] || exit 70
   run_bounded "$COMMAND_SECONDS" chmod 600 "$backup_staging"
   durable_sync_file "$backup_staging" || exit 70
@@ -467,7 +470,7 @@ run_tree_verify "$frozen_archive" "$release_dir"
 tree_mutated=1
 consume_reservation "$live_reservation_file" "$candidate_expanded" || exit 68
 clear_release_tree
-run_bounded "$COMMAND_SECONDS" cp -a "$release_dir"/. "$app_dir"/
+run_workspace_bounded "$COMMAND_SECONDS" cp -a "$release_dir"/. "$app_dir"/
 run_bounded "$COMMAND_SECONDS" chmod 700 "$app_dir"
 compose_file="$app_dir/compose.staging.yml"
 run_tree_verify "$frozen_archive" "$app_dir"

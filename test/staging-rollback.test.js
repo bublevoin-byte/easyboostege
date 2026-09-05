@@ -164,13 +164,41 @@ async function createFixture() {
     `DRIFTED_POSTGRES_CONTAINER_ID=${DRIFTED_POSTGRES_CONTAINER_ID}`,
     `POSTGRES_VOLUME_SOURCE=${POSTGRES_VOLUME_SOURCE}`,
     'flock() { if [ "${FAKE_LOCK_BUSY:-0}" = "1" ]; then return 1; fi; return 0; }',
+    'rebind_workspace_parent() {',
+    '  parent="$STAGING_APP_DIR/rollbacks"',
+    '  /usr/bin/mv -- "$parent" "$parent.displaced" || return',
+    '  /usr/bin/mkdir -m 700 -- "$parent" || return',
+    '  /usr/bin/cp -a -- "$parent.displaced/releases" "$parent/releases" || return',
+    '  printf "foreign parent\\n" > "$parent/keep-foreign"',
+    '  : > "$COMMAND_LOG.workspace-parent-rebound"',
+    '}',
+    'rebind_workspace() {',
+    '  local workspace',
+    '  workspace="$(cat "$COMMAND_LOG.workdir")" || return',
+    '  /usr/bin/mv -- "$workspace" "$workspace.displaced" || return',
+    '  /usr/bin/mkdir -m 700 -- "$workspace" || return',
+    '  printf "foreign workspace\\n" > "$workspace/keep-foreign"',
+    '  : > "$COMMAND_LOG.workspace-rebound"',
+    '}',
     'timeout() {',
     '  while [ "$#" -gt 0 ]; do case "$1" in --signal=*|--kill-after=*) shift ;; *s) shift; break ;; *) break ;; esac; done',
+    '  if [ "${FAKE_WORKSPACE_PARENT_REBOUND_BEFORE_CREATE:-0}" = "1" ] && [[ " $* " == *"staging-runtime-authority.js capture-optional-file $STAGING_APP_DIR/.staging-recovery-required "* ]] && [ ! -f "$COMMAND_LOG.workspace-parent-rebound" ]; then "$@" || return; rebind_workspace_parent; return; fi',
     '  if [ "${FAKE_LIVE_COPY_TIMEOUT:-0}" = "1" ] && [ "${1:-}" = cp ] && [ "${2:-}" = -a ] && [[ "${3:-}" == */target/. ]]; then return 124; fi',
+    '  if [ "${FAKE_WORKSPACE_REBOUND_BEFORE_REMOVE:-0}" = "1" ] && [ "${1:-}" = chmod ] && [ "${2:-}" = -R ] && [ "${3:-}" = u+w ] && [[ "${@: -1}" == "$STAGING_APP_DIR/rollbacks/easyboost-staging-rollback."* ]] && [ ! -f "$COMMAND_LOG.workspace-rebound" ]; then "$@" || return; workspace="${@: -1}"; /usr/bin/mv -- "$workspace" "$workspace.displaced" || return; /usr/bin/mkdir -m 700 -- "$workspace" || return; printf "foreign workspace\\n" > "$workspace/keep-foreign"; : > "$COMMAND_LOG.workspace-rebound"; return 0; fi',
     '  if [ "${FAKE_RECOVERY_COPY_TIMEOUT:-0}" = "1" ] && [ "${1:-}" = cp ] && [ "${2:-}" = -a ] && [[ "${3:-}" == */previous/. ]]; then return 124; fi',
     '  "$@"',
     '}',
     'fallocate() { if [ ! -x /usr/bin/fallocate ]; then /usr/bin/truncate -s "$2" "$4"; else /usr/bin/fallocate "$@"; fi; }',
+    'mktemp() {',
+    '  if [ "${1:-}" = -d ] && [[ "${@: -1}" == *"/easyboost-staging-rollback."* ]]; then',
+    '    result="$(/usr/bin/mktemp "$@")" || return',
+    '    printf "%s\\n" "$result" > "$COMMAND_LOG.workdir"',
+    '    /usr/bin/stat -c "%d:%i:%f:%u:%g:%a" -- "$result" > "$COMMAND_LOG.workdir-identity"',
+    '    if [ "${FAKE_WORKSPACE_PARENT_REBOUND_DURING_CREATE:-0}" = "1" ]; then rebind_workspace_parent || return; /usr/bin/mkdir -m 700 -- "$result" || return; printf "foreign workspace\\n" > "$result/keep-foreign"; fi',
+    '    printf "%s\\n" "$result"; return 0',
+    '  fi',
+    '  /usr/bin/mktemp "$@"',
+    '}',
     'stat() { if [ "$1" = "-c" ] && [ "$2" = "%b" ] && [[ "${@: -1}" == *".staging-space-reservation"* ]]; then size="$(/usr/bin/stat -c "%s" -- "${@: -1}")"; printf "%s\\n" "$(((size + 511) / 512))"; return 0; fi; /usr/bin/stat "$@"; }',
     'sha256sum() {',
     '  last="${@: -1}"',
@@ -189,6 +217,7 @@ async function createFixture() {
     'cp() { if [ "${FAKE_RECOVERY_COPY_FAIL:-0}" = "1" ] && [[ "$*" == *"/previous/."* ]]; then return 12; fi; /usr/bin/cp "$@"; }',
     'find() { if [ "${FAKE_RECOVERY_REMOVE_FAIL:-0}" = "1" ] && [[ "$*" == *" -exec "* ]]; then count=0; [ -f "$COMMAND_LOG.find-count" ] && count="$(cat "$COMMAND_LOG.find-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.find-count"; if [ "$count" -ge 2 ]; then return 13; fi; fi; /usr/bin/find "$@"; }',
     'rm() {',
+    '  if [ "${1:-}" = -rf ] && [[ "${@: -1}" == "$STAGING_APP_DIR/rollbacks/easyboost-staging-rollback."* ]]; then /usr/bin/stat -c "%d:%i:%f:%u:%g:%a" -- "${@: -1}" > "$COMMAND_LOG.workdir-cleanup-identity"; fi',
     '  if [ "${FAKE_TRANSACTION_MARKER_RM_FAIL:-0}" = "1" ] && [[ "$*" == *".staging-recovery-required"* ]]; then /usr/bin/rm "$@"; return 21; fi',
     '  if [ "${FAKE_RESERVATION_RM_FAIL:-0}" = "1" ] && [[ "$*" == *".staging-space-reservation"* ]]; then return 26; fi',
     '  if [ "${FAKE_WORKDIR_RM_FAIL:-0}" = "1" ] && [ "${1:-}" = "-rf" ] && [[ "$*" == *"easyboost-staging-rollback."* ]]; then return 27; fi',
@@ -202,6 +231,7 @@ async function createFixture() {
     'mv() { if [ "${FAKE_ACTIVE_MARKER_PUBLISH_FAIL:-0}" = "1" ] && [ "${@: -1}" = "$STAGING_APP_DIR/.release-sha256" ]; then count=0; [ -f "$COMMAND_LOG.marker-mv-count" ] && count="$(cat "$COMMAND_LOG.marker-mv-count")"; count=$((count+1)); printf "%s\\n" "$count" > "$COMMAND_LOG.marker-mv-count"; [ "$count" -gt 1 ] || return 24; fi; /usr/bin/mv "$@"; }',
     'docker() {',
     '  printf "docker|%s\\n" "$*" >> "$COMMAND_LOG"',
+    '  if [ "${FAKE_WORKSPACE_REBOUND_AFTER_IMAGE_PROBE:-0}" = "1" ] && [ "${1:-}" = image ] && [ "${2:-}" = inspect ] && [ "${@: -1}" = easyboost-staging-app:local ] && [ ! -f "$COMMAND_LOG.workspace-rebound" ]; then rebind_workspace || return; fi',
     '  if [ "$1" = "compose" ]; then action=other; case " $* " in *" config --format json "*) action=config ;; *" up --pull never -d --no-build --no-deps app "*) action=up ;; *" down --volumes --remove-orphans "*) action=down ;; *" exec -T postgres "*) action=exec ;; *" ps "*) action=ps ;; esac; printf "compose-postgres-authority|%s|%s\\n" "${EASYBOOST_STAGING_POSTGRES_IMAGE_ID:-unset}" "$action" >> "$COMMAND_LOG"; fi',
   '  if [ "$1" = "ps" ] && [[ " $* " == *"label=com.docker.compose.project=easyboost-staging"* ]]; then',
     '    if [[ " $* " == *"label=com.docker.compose.service=app"* ]]; then [ ! -f "$COMMAND_LOG.container-state" ] || printf "%s\\n" "$APP_CONTAINER_ID"; elif [[ " $* " == *"label=com.docker.compose.service=postgres"* ]]; then [ ! -f "$COMMAND_LOG.postgres-container-state" ] || cat "$COMMAND_LOG.postgres-container-id-state"; fi',
@@ -269,7 +299,7 @@ async function createFixture() {
     '}',
     '',
   ].join('\n'));
-  for (const command of ['cp', 'curl', 'docker', 'fallocate', 'find', 'mv', 'rm',
+  for (const command of ['cp', 'curl', 'docker', 'fallocate', 'find', 'mktemp', 'mv', 'rm',
     'sha256sum', 'sleep', 'stat', 'timeout']) {
     const executable = path.join(root, command);
     await fs.writeFile(executable, [
@@ -282,6 +312,8 @@ async function createFixture() {
   }
   return {
     appDir,
+    backupIdentity: await fs.stat(path.join(appDir, 'backups', 'keep.dump')),
+    workspaceParentIdentity: await fs.stat(path.join(appDir, 'rollbacks')),
     bashEnv,
     commandLog,
     current,
@@ -318,6 +350,24 @@ function runRollback(fixture, sha = fixture.target.sha, extraEnv = {}, protocol 
       ...extraEnv,
     },
   });
+}
+
+async function assertPrivateRollbackWorkdirCleaned(fixture) {
+  const workspace = (await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim();
+  assert.ok(workspace.startsWith(`${posixPath(fixture.appDir)}/rollbacks/easyboost-staging-rollback.`),
+    `private rollback workspace must use the protected staging disk: ${workspace}`);
+  assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks')), ['releases']);
+  assert.equal(await fs.readFile(`${fixture.commandLog}.workdir-cleanup-identity`, 'utf8'),
+    await fs.readFile(`${fixture.commandLog}.workdir-identity`, 'utf8'),
+    'cleanup must act on the exact private directory captured at creation');
+  for (const [file, before] of [
+    [path.join(fixture.appDir, 'backups', 'keep.dump'), fixture.backupIdentity],
+    [path.join(fixture.appDir, 'rollbacks'), fixture.workspaceParentIdentity],
+  ]) {
+    const after = await fs.stat(file);
+    for (const field of ['dev', 'ino', 'uid', 'gid', 'mode']) assert.equal(after[field], before[field]);
+  }
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
 }
 
 function assertComposeUsesCapturedPostgresAuthority(log, requiredCommands = []) {
@@ -406,6 +456,129 @@ test('rollback requires the exact immutable-archive-v4 handshake and bundle dige
   }
 });
 
+test('rollback refuses a rebound workspace parent before creation and before sensitive files', async (context) => {
+  for (const phase of ['BEFORE_CREATE', 'DURING_CREATE']) {
+    const fixture = await createFixture();
+    context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+    const store = path.join(fixture.appDir, 'rollbacks', 'releases');
+    const inventory = (await fs.readdir(store)).sort();
+    const flags = { [`FAKE_WORKSPACE_PARENT_REBOUND_${phase}`]: '1' };
+    const result = runRollback(fixture, fixture.target.sha, flags);
+    assert.notEqual(result.status, 0, `${phase}: ${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /protected staging runtime authority changed/iu);
+    assert.doesNotMatch(result.stderr, /unbound variable/u,
+      'creation refusal must settle through the initialized cleanup trap');
+    await assert.rejects(fs.access(path.join(fixture.root, 'host-operation.lock')), { code: 'ENOENT' });
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'rollbacks', 'keep-foreign'), 'utf8'),
+      'foreign parent\n');
+    assert.deepEqual((await fs.readdir(store)).sort(), inventory);
+    assert.deepEqual((await fs.readdir(path.join(fixture.appDir, 'rollbacks.displaced', 'releases'))).sort(),
+      inventory, 'the captured parent and its retained releases must survive refusal');
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+    if (phase === 'BEFORE_CREATE') {
+      await assert.rejects(fs.access(`${fixture.commandLog}.workdir`), { code: 'ENOENT' },
+        'rebound parent must be rejected before creating a workspace');
+    } else {
+      const workspace = path.posix.basename((await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim());
+      assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks', workspace)), ['keep-foreign'],
+        'no archive or reservation may be written under the replacement parent');
+      assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks.displaced', workspace)), [],
+        'the captured empty workspace must remain untouched when its parent is displaced');
+    }
+    assert.equal(await fs.readFile(fixture.commandLog, 'utf8').catch(() => ''), '',
+      'parent authority failure must precede Docker');
+  }
+});
+
+test('rollback refuses an unsafe workspace parent before creation', async (context) => {
+  if (process.platform === 'win32') return context.skip('POSIX private mode enforcement requires Linux');
+  const fixture = await createFixture();
+  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  await fs.chmod(path.join(fixture.appDir, 'rollbacks'), 0o777);
+  const flags = {};
+  const result = runRollback(fixture, fixture.target.sha, flags);
+  assert.equal(result.status, 67, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /insecure write permissions/u);
+  await assert.rejects(fs.access(`${fixture.commandLog}.workdir`), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+});
+
+test('rollback refuses a symlink workspace parent before creation', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  const parent = path.join(fixture.appDir, 'rollbacks');
+  await fs.rename(parent, `${parent}.displaced`);
+  try {
+    await fs.symlink(`${parent}.displaced`, parent, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error.code === 'EPERM') return context.skip('Host cannot create a directory symlink');
+    throw error;
+  }
+  const flags = {};
+  const result = runRollback(fixture, fixture.target.sha, flags);
+  assert.equal(result.status, 67, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /symlink|real directory/u);
+  await assert.rejects(fs.access(`${fixture.commandLog}.workdir`), { code: 'ENOENT' });
+  assert.ok((await fs.lstat(parent)).isSymbolicLink(), 'foreign parent link must not be removed');
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+});
+
+test('rollback uses the protected staging disk and preserves backups on unknown target refusal', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  const callerTmp = path.join(fixture.root, 'caller-tmp');
+  await fs.mkdir(callerTmp);
+  const result = runRollback(fixture, 'e'.repeat(64), { TMPDIR: posixPath(callerTmp) });
+  const workspace = (await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim();
+  assert.ok(workspace.startsWith(`${posixPath(fixture.appDir)}/rollbacks/easyboost-staging-rollback.`),
+    `private rollback workspace must use the protected staging disk: ${workspace}`);
+  assert.equal(result.status, 65, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(await fs.readdir(callerTmp), [], 'caller-controlled TMPDIR must remain unused');
+  await assertPrivateRollbackWorkdirCleaned(fixture);
+  assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks')), ['releases']);
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+});
+
+test('rollback refuses to freeze archives into a workspace replaced after external verification', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  const store = path.join(fixture.appDir, 'rollbacks', 'releases');
+  const inventory = (await fs.readdir(store)).sort();
+  const before = await Promise.all(inventory.map((name) => fs.readFile(path.join(store, name))));
+  const result = runRollback(fixture, fixture.target.sha, { FAKE_WORKSPACE_REBOUND_AFTER_IMAGE_PROBE: '1' });
+  await assert.doesNotReject(fs.access(`${fixture.commandLog}.workspace-rebound`),
+    `workspace substitution must execute: ${result.stdout}\n${result.stderr}`);
+  const workspace = path.posix.basename((await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim());
+  assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks', workspace)), ['keep-foreign'],
+    'no archive or other transaction file may be written into the replacement workspace');
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'rollbacks', workspace, 'keep-foreign'), 'utf8'),
+    'foreign workspace\n');
+  assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /workspace identity changed/u);
+  assert.deepEqual((await fs.readdir(store)).sort(), inventory);
+  assert.deepEqual(await Promise.all(inventory.map((name) => fs.readFile(path.join(store, name)))), before);
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+  assert.doesNotMatch(await fs.readFile(fixture.commandLog, 'utf8').catch(() => ''), /docker\|build /u);
+});
+
+test('rollback preserves a workspace replaced at the final removal boundary', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
+  const result = runRollback(fixture, fixture.target.sha, { FAKE_WORKSPACE_REBOUND_BEFORE_REMOVE: '1' });
+  await assert.doesNotReject(fs.access(`${fixture.commandLog}.workspace-rebound`),
+    `replacement must occur at the chmod boundary: ${result.stdout}\n${result.stderr}`);
+  const workspace = path.posix.basename((await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim());
+  const workspacePath = path.join(fixture.appDir, 'rollbacks', workspace);
+  assert.equal(await fs.readFile(path.join(workspacePath, 'keep-foreign'), 'utf8'), 'foreign workspace\n');
+  assert.ok((await fs.stat(`${workspacePath}.displaced`)).isDirectory());
+  assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /workspace identity changed/u);
+  assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'), `${fixture.target.sha}\n`);
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+  assert.match(await fs.readFile(path.join(fixture.appDir, '.staging-recovery-required'), 'utf8'),
+    /manual recovery required/u);
+});
+
 test('staging rollback requires a full SHA and builds that retained exact archive before activation', async (context) => {
   const probe = runBash(['--version']);
   if (!probe) return context.skip('Git Bash is not installed');
@@ -416,6 +589,7 @@ test('staging rollback requires a full SHA and builds that retained exact archiv
     EASYBOOST_STAGING_BUILD_CONTEXT: '/untrusted/live-tree',
   });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  await assertPrivateRollbackWorkdirCleaned(fixture);
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'shared.txt'), 'utf8'), 'old\n');
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'old-only.txt'), 'utf8'), 'old-only\n');
   await assert.rejects(fs.access(path.join(fixture.appDir, 'new-only.txt')), { code: 'ENOENT' });
@@ -587,6 +761,7 @@ test('rollback readiness failure restores the previous image, code and marker', 
   context.after(() => fs.rm(fixture.root, { recursive: true, force: true }));
   const result = runRollback(fixture, fixture.target.sha, { FAKE_READINESS_FAIL: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  await assertPrivateRollbackWorkdirCleaned(fixture);
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'shared.txt'), 'utf8'), 'new\n',
     `${result.stdout}\n${result.stderr}`);
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'new-only.txt'), 'utf8'), 'new-only\n');

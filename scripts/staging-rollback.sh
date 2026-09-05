@@ -73,12 +73,6 @@ if [ "$target_sha" = "$previous_sha" ]; then
   exit 65
 fi
 
-work_dir="$(run_bounded "$COMMAND_SECONDS" \
-  mktemp -d "${TMPDIR:-/tmp}/easyboost-staging-rollback.XXXXXX")"
-previous_archive="$work_dir/previous.tar.gz"
-previous_tree="$work_dir/previous"
-frozen_archive="$work_dir/target.tar.gz"
-release_dir="$work_dir/target"
 image_build_attempted=0
 candidate_image_id=''
 stable_promotion_attempted=0
@@ -199,6 +193,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+create_release_workspace rollback || exit 67
+previous_archive="$work_dir/previous.tar.gz"
+previous_tree="$work_dir/previous"
+frozen_archive="$work_dir/target.tar.gz"
+release_dir="$work_dir/target"
+
 validate_release_store || exit 67
 verify_release_pair "$previous_sha" 'active' || exit 67
 verify_release_pair "$target_sha" 'target' || exit 65
@@ -208,9 +208,9 @@ previous_image_id="$(image_id "$STABLE_IMAGE")" || {
 }
 [ -n "$previous_image_id" ] || { echo "Active staging image cannot be restored" >&2; exit 67; }
 
-run_bounded "$COMMAND_SECONDS" cp --reflink=never -- \
+run_workspace_bounded "$COMMAND_SECONDS" cp --reflink=never -- \
   "$(release_archive_path "$previous_sha")" "$previous_archive"
-run_bounded "$COMMAND_SECONDS" chmod 400 "$previous_archive"
+run_workspace_bounded "$COMMAND_SECONDS" chmod 400 "$previous_archive"
 [ "$(sha256_file "$previous_archive")" = "$previous_sha" ] \
   || { echo "Active retained archive changed while freezing" >&2; exit 67; }
 read -r previous_expanded previous_compressed < <(archive_metrics "$previous_archive") \
@@ -230,9 +230,9 @@ verify_active_snapshot "$previous_sha" "$previous_archive" "$previous_image_id" 
   exit 67
 }
 
-run_bounded "$COMMAND_SECONDS" cp --reflink=never -- \
+run_workspace_bounded "$COMMAND_SECONDS" cp --reflink=never -- \
   "$(release_archive_path "$target_sha")" "$frozen_archive"
-run_bounded "$COMMAND_SECONDS" chmod 400 "$frozen_archive"
+run_workspace_bounded "$COMMAND_SECONDS" chmod 400 "$frozen_archive"
 [ "$(sha256_file "$frozen_archive")" = "$target_sha" ] \
   || { echo "Target retained archive changed while freezing" >&2; exit 65; }
 run_archive_inspect "$frozen_archive" || exit 65
@@ -241,11 +241,11 @@ read -r candidate_expanded candidate_compressed < <(archive_metrics "$frozen_arc
 reserve_release_space "$candidate_expanded" "$previous_expanded" \
   "$candidate_compressed" "$previous_compressed" 0 || exit 68
 consume_reservation "$temporary_reservation_file" "$previous_expanded" || exit 68
-run_bounded "$COMMAND_SECONDS" mkdir -m 700 "$previous_tree"
+run_workspace_bounded "$COMMAND_SECONDS" mkdir -m 700 "$previous_tree"
 run_archive_extract "$previous_archive" "$previous_tree" || exit 67
 run_tree_verify "$previous_archive" "$previous_tree" || exit 67
 consume_reservation "$temporary_reservation_file" "$candidate_expanded" || exit 68
-run_bounded "$COMMAND_SECONDS" mkdir -m 700 "$release_dir"
+run_workspace_bounded "$COMMAND_SECONDS" mkdir -m 700 "$release_dir"
 run_archive_extract "$frozen_archive" "$release_dir" || exit 65
 for required in .dockerignore Dockerfile compose.staging.yml; do
   [ -f "$release_dir/$required" ] || { echo "unsafe release archive: missing $required" >&2; exit 65; }
@@ -253,7 +253,7 @@ done
 validate_staging_compose_contract "$release_dir/compose.staging.yml" || exit 65
 require_local_dependency_images || exit 65
 run_tree_verify "$frozen_archive" "$release_dir" || exit 65
-run_bounded "$COMMAND_SECONDS" chmod -R a-w "$release_dir"
+run_workspace_bounded "$COMMAND_SECONDS" chmod -R a-w "$release_dir"
 verify_space_reservations || exit 68
 image_is_absent "$release_image" || {
   echo "Temporary rollback image reference is not authoritatively absent" >&2
@@ -284,7 +284,7 @@ run_tree_verify "$frozen_archive" "$release_dir"
 tree_mutated=1
 consume_reservation "$live_reservation_file" "$candidate_expanded" || exit 68
 clear_release_tree
-run_bounded "$COMMAND_SECONDS" cp -a "$release_dir"/. "$app_dir"/
+run_workspace_bounded "$COMMAND_SECONDS" cp -a "$release_dir"/. "$app_dir"/
 compose_file="$app_dir/compose.staging.yml"
 run_tree_verify "$frozen_archive" "$app_dir"
 validate_staging_compose_contract "$compose_file"

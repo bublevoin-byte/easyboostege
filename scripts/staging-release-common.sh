@@ -63,6 +63,8 @@ deadline_sequence=0
 deadline_control_active=0
 deadline_watchdog_settlement_unproven=0
 protected_runtime_identity=''
+work_dir=''
+work_dir_identity=''
 postgres_image_id=''
 postgres_runtime_authority=''
 unset EASYBOOST_STAGING_POSTGRES_IMAGE_ID
@@ -461,6 +463,39 @@ reverify_protected_runtime_identity() {
   fi
 }
 
+create_release_workspace() {
+  local operation="$1"
+  [ "$operation" = deploy ] || [ "$operation" = rollback ] || return 1
+  # rollbacks is an existing captured private runtime root, preserved by code
+  # replacement. Its release-store child and the separate backups root retain
+  # their inventories; no caller-controlled temporary directory participates.
+  reverify_protected_runtime_identity || return 1
+  work_dir="$(run_bounded "$COMMAND_SECONDS" \
+    mktemp -d "$app_dir/rollbacks/easyboost-staging-$operation.XXXXXX")" || return 1
+  reverify_protected_runtime_identity || return 1
+  verify_protected_path "$work_dir" directory 'private staging workspace' 0 700 || return 1
+  work_dir_identity="$(protected_identity_record "$work_dir")" || return 1
+  reverify_release_workspace
+}
+
+reverify_release_workspace() {
+  local current
+  reverify_protected_runtime_identity || return 1
+  if [ -z "$work_dir_identity" ] || [ "${work_dir%/*}" != "$app_dir/rollbacks" ] \
+    || ! verify_protected_path "$work_dir" directory 'private staging workspace' 0 700 \
+    || ! current="$(protected_identity_record "$work_dir")" \
+    || [ "$current" != "$work_dir_identity" ]; then
+    authority_violation=1
+    echo 'Private staging workspace identity changed or is unavailable' >&2
+    return 1
+  fi
+}
+
+run_workspace_bounded() {
+  reverify_release_workspace || return 1
+  run_bounded "$@"
+}
+
 acquire_release_lock_inode() {
   local before after runtime_root_before runtime_root_after
   if [ ! -e "$lock_file" ] && [ ! -L "$lock_file" ]; then
@@ -610,8 +645,8 @@ reserve_file() {
     echo "staging disk reservation path is not empty" >&2
     return 1
   fi
-  run_bounded "$COMMAND_SECONDS" fallocate -l "$bytes" -- "$file" || return 1
-  run_bounded "$COMMAND_SECONDS" chmod 600 "$file" || return 1
+  run_workspace_bounded "$COMMAND_SECONDS" fallocate -l "$bytes" -- "$file" || return 1
+  run_workspace_bounded "$COMMAND_SECONDS" chmod 600 "$file" || return 1
   authority="$(run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" \
     capture-reservation "$file" "$bytes")" || return 1
   set_reservation_authority "$file" "$authority"
@@ -660,7 +695,7 @@ consume_reservation() {
     echo "staging disk reservation underflow" >&2
     return 1
   fi
-  run_bounded "$COMMAND_SECONDS" truncate -s "$remaining" -- "$file" || return 1
+  run_workspace_bounded "$COMMAND_SECONDS" truncate -s "$remaining" -- "$file" || return 1
   authority="$(run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" \
     capture-reservation "$file" "$remaining")" || return 1
   set_reservation_authority "$file" "$authority"
@@ -671,6 +706,7 @@ consume_reservation() {
 
 verify_space_reservations() {
   local file authority size
+  reverify_release_workspace || return 1
   for file in "$temporary_reservation_file" "$live_reservation_file" "$store_reservation_file"; do
     [ -n "$file" ] || continue
     authority="$(reservation_authority "$file")" || return 1
@@ -691,7 +727,7 @@ release_space_reservations() {
     size="$(authority_field "$authority" size 2>/dev/null)" || size=''
     if [ -z "$authority" ] || [ -z "$size" ] \
       || ! verify_one_reservation "$file" "$size" \
-      || ! run_bounded "$COMMAND_SECONDS" rm -f -- "$file" \
+      || ! run_workspace_bounded "$COMMAND_SECONDS" rm -f -- "$file" \
       || [ -e "$file" ] || [ -L "$file" ]; then
       failed=1
     fi
@@ -750,7 +786,7 @@ admit_release_space() {
 reserve_release_space() {
   local candidate_expanded="$1" previous_expanded="$2"
   local candidate_compressed="$3" previous_compressed="$4" backup_capacity="${5:-0}" store_increment
-  reverify_protected_runtime_identity || return 1
+  reverify_release_workspace || return 1
   admit_release_space "$@" || return 1
   store_increment="$candidate_compressed"
   [ "${candidate_pair_existed:-0}" -eq 0 ] || store_increment=0
@@ -770,7 +806,7 @@ reserve_release_space() {
 }
 
 run_archive_extract() {
-  run_bounded "$ARCHIVE_EXTRACT_SECONDS" node "$archive_tool" extract "$1" "$2"
+  run_workspace_bounded "$ARCHIVE_EXTRACT_SECONDS" node "$archive_tool" extract "$1" "$2"
 }
 
 run_tree_verify() {
@@ -778,7 +814,7 @@ run_tree_verify() {
 }
 
 prepare_release_tree_for_copy() {
-  run_bounded "$ARCHIVE_INSPECT_SECONDS" node "$archive_tool" prepare-copy "$1"
+  run_workspace_bounded "$ARCHIVE_INSPECT_SECONDS" node "$archive_tool" prepare-copy "$1"
 }
 
 release_archive_path() { printf '%s/release-%s.tar.gz\n' "$release_store" "$1"; }
@@ -1119,7 +1155,7 @@ reverify_compose_authority() {
 }
 
 clear_release_tree() {
-  reverify_protected_runtime_identity || return 1
+  reverify_release_workspace || return 1
   run_bounded "$COMMAND_SECONDS" find "$app_dir" -mindepth 1 -maxdepth 1 \
     ! -name '.env.staging' ! -name 'backups' ! -name 'rollbacks' \
     ! -name '.release-sha256' ! -name '.staging-release.lock' \
@@ -1211,6 +1247,10 @@ finalize_release_boundaries() {
     failed=1
   }
 
+  if [ -n "${work_dir:-}" ] && ! reverify_release_workspace; then
+    record_finalization_failure "$workdir_step"
+    return 1
+  fi
   if [ "${image_build_attempted:-0}" -eq 1 ]; then
     if remove_owned_image_reference "$release_image" "${candidate_image_id:-}"; then
       image_build_attempted=0
@@ -1222,10 +1262,11 @@ finalize_release_boundaries() {
     record_finalization_failure "$reservation_step"
   fi
   if [ -n "${work_dir:-}" ]; then
-    if run_bounded "$COMMAND_SECONDS" chmod -R u+w -- "$work_dir" \
-      && run_bounded "$COMMAND_SECONDS" rm -rf -- "$work_dir" \
+    if run_workspace_bounded "$COMMAND_SECONDS" chmod -R u+w -- "$work_dir" \
+      && run_workspace_bounded "$COMMAND_SECONDS" rm -rf -- "$work_dir" \
       && [ ! -e "$work_dir" ] && [ ! -L "$work_dir" ]; then
       work_dir=''
+      work_dir_identity=''
     else
       record_finalization_failure "$workdir_step"
     fi
@@ -1253,6 +1294,8 @@ finalize_release_boundaries() {
 
 recover_previous_release() {
   local restored_marker
+  recovery_step='verify private staging workspace before recovery'
+  reverify_release_workspace || return 1
   recovery_step='verify retained PostgreSQL authority before recovery'
   verify_running_postgres_authority || return 1
   recovery_step='retag previous image'
@@ -1262,7 +1305,7 @@ recover_previous_release() {
   recovery_step='restore previous code tree'
   consume_reservation "$live_reservation_file" "$previous_expanded" || return 1
   clear_release_tree || return 1
-  run_bounded "$COMMAND_SECONDS" cp -a "$previous_tree"/. "$app_dir"/ || return 1
+  run_workspace_bounded "$COMMAND_SECONDS" cp -a "$previous_tree"/. "$app_dir"/ || return 1
   run_bounded "$COMMAND_SECONDS" chmod 700 "$app_dir" || return 1
   run_tree_verify "$previous_archive" "$app_dir" || return 1
   recovery_step='restart previous application'
@@ -1286,6 +1329,8 @@ recover_previous_release() {
 
 recover_empty_release() {
   local recovery_compose=''
+  recovery_step='verify private staging workspace before first-deploy recovery'
+  reverify_release_workspace || return 1
   recovery_step='remove failed first Compose project'
   if [ -f "$app_dir/compose.staging.yml" ]; then
     recovery_compose="$app_dir/compose.staging.yml"

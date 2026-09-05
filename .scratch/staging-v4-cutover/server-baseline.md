@@ -70,3 +70,8 @@ This is a separate host-storage prerequisite for the real UI deploy, not a reaso
 capacity check or delete arbitrary files. Recompute for the exact new release. A disk-backed private
 workspace (or an explicitly approved host-storage configuration change) must be addressed before
 attempting deployment. No script, mount, `/tmp` configuration or live file was changed for this finding.
+
+At 2026-09-05 00:21:47 UTC, a further read-only probe confirmed app root, `rollbacks/` and `backups/`
+all have device `64769`, owner/group `root:root` and mode `0700`. Both persistent directories reside
+on `/dev/vda1` with 4490 MiB available. Issue09 therefore selects a private workspace under the
+existing captured `rollbacks/` parent, sibling of `releases/`, without changing a host mount.

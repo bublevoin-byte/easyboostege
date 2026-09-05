@@ -40,3 +40,36 @@ not the application release. Do not install until the repair commits and Linux C
   line endings do not alter the candidate. The following fixture-only repair does not change these files.
 - The previous `944b9b8-323d5cb` helper bootstrap is historical and does not contain this repair.
   The legacy bridge archive documented above is unchanged.
+
+## Disk-workspace helper candidate — provisional, do not install
+
+`easyboost-staging-helper-bootstrap-89b506d5.tar.gz` includes the frozen issue09 workspace change.
+It supersedes the aa670f75 candidate for future installation, but it is not yet cleared: the new
+common gate, commit/source-blob comparison and actual Linux CI remain outstanding.
+
+- Helper bundle SHA-256: `89b506d5b5e74ecce8ce65d29a7e0fe9c2a9b6c4380de9dc515d4c469d465e4e`.
+- Archive SHA-256: `9d6fc415dacf7b3887e8818e11ede65b29ea26cf4b34f04edcd187396d9ea24e`.
+- Archive/expanded bytes: `172803` / `904783`; files: `18`.
+- Producer: Node22.23.2, zlib1.3.1-e00f703. Canonical inspection and exact source-tree verification passed.
+- Inputs are 15 exact LF Git blobs from b2b0b0f and the three exact frozen issue09 helper files.
+  No package, installer, UI, credential or deployment-state content was inferred or copied from VPS.
+  After the implementation commit, compare all 18 packaged files to its Git blobs before use.
+- Issue10 changes only the test fixture and does not change this helper digest.
+
+This89b506d5 package is now superseded: the reviewed issue09 operation-allowlist follow-up changes
+the common helper's bytes. Retain it as historical evidence, never install it as the final candidate.
+
+## Integrated workspace helper candidate — provisional, do not install
+
+`easyboost-staging-helper-bootstrap-7ab70170.tar.gz` contains the exact integrated issue09 helpers.
+Final common gates, commit/source-blob comparison and actual Linux CI are still required.
+
+- Helper bundle SHA256: `7ab70170bd696eed3be82a067e04faa379ff7d2c2398f7262a9cb10d86732701`.
+- Archive SHA256: `b7194b5492277c42e4ee8b79c28121a26d06f44166c9368c1c087691deb16f68`.
+- Archive/expanded bytes: `172800` / `904791`; files: `18`.
+- Producer: Node22.23.2, zlib1.3.1-e00f703. Canonical inspection and exact tree verification passed.
+- Inputs:15 exact b2b0b0f Git blobs plus3 exact integrated working helpers, all18 byte-compared.
+  Temporary source directory is retained at
+  `C:/Users/Ригер/AppData/Local/Temp/easyboost-helper-package-20260905-7ab70170/source`
+  for exact post-commit Git-blob comparison. No upload/install/live action has been performed.
+- Issue10 and11 are test-only and do not alter this helper digest.

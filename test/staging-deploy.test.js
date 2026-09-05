@@ -287,9 +287,27 @@ async function writeFakeCommands(root) {
     `DRIFTED_POSTGRES_CONTAINER_ID=${DRIFTED_POSTGRES_CONTAINER_ID}`,
     `POSTGRES_VOLUME_SOURCE=${POSTGRES_VOLUME_SOURCE}`,
     'flock() { if [ "${FAKE_LOCK_BUSY:-0}" = "1" ]; then return 1; fi; return 0; }',
+    'rebind_workspace_parent() {',
+    '  parent="$STAGING_APP_DIR/rollbacks"',
+    '  /usr/bin/mv -- "$parent" "$parent.displaced" || return',
+    '  /usr/bin/mkdir -m 700 -- "$parent" || return',
+    '  /usr/bin/cp -a -- "$parent.displaced/releases" "$parent/releases" || return',
+    '  printf "foreign parent\\n" > "$parent/keep-foreign"',
+    '  : > "$COMMAND_LOG.workspace-parent-rebound"',
+    '}',
+    'rebind_workspace() {',
+    '  local workspace',
+    '  workspace="$(cat "$COMMAND_LOG.workdir")" || return',
+    '  /usr/bin/mv -- "$workspace" "$workspace.displaced" || return',
+    '  /usr/bin/mkdir -m 700 -- "$workspace" || return',
+    '  printf "foreign workspace\\n" > "$workspace/keep-foreign"',
+    '  : > "$COMMAND_LOG.workspace-rebound"',
+    '}',
     'timeout() {',
     '  while [ "$#" -gt 0 ]; do case "$1" in --signal=*|--kill-after=*) shift ;; *s) shift; break ;; *) break ;; esac; done',
+    '  if [ "${FAKE_WORKSPACE_PARENT_REBOUND_BEFORE_CREATE:-0}" = "1" ] && [[ " $* " == *"staging-runtime-authority.js capture-optional-file $STAGING_APP_DIR/.staging-recovery-required "* ]] && [ ! -f "$COMMAND_LOG.workspace-parent-rebound" ]; then "$@" || return; rebind_workspace_parent; return; fi',
     '  if [ "${FAKE_BOUNDED_COMPOSE_TIMEOUT:-0}" = "1" ] && [[ " $* " == *" config --format json "* ]]; then return 124; fi',
+    '  if [ "${FAKE_WORKSPACE_REBOUND_BEFORE_PREVIOUS_FREEZE:-0}" = "1" ] && [[ " $* " == *"staging-runtime-authority.js read-sha $STAGING_APP_DIR/.release-sha256 "* ]] && [ ! -f "$COMMAND_LOG.workspace-rebound" ]; then "$@" || return; rebind_workspace; return; fi',
     '  if [ "${FAKE_BACKUP_WRITE_TIMEOUT:-0}" = "1" ] && [[ " $* " == *staging-bounded-stream.js* ]] && [[ " $* " == *"/database-backup.dump "* ]]; then return 124; fi',
     '  if [ "${FAKE_BACKUP_FILE_SYNC_FAIL:-0}" = "1" ] && [[ " $* " == *"staging-bounded-stream.js fsync-file "* ]] && [[ " $* " == *"/backups/"* ]]; then return 124; fi',
     '  if [ "${FAKE_BACKUP_PARENT_SYNC_FAIL:-0}" = "1" ] && [[ " $* " == *"staging-bounded-stream.js fsync-parent "* ]] && [[ " $* " == *"/backups/"* ]]; then return 124; fi',
@@ -301,6 +319,7 @@ async function writeFakeCommands(root) {
     '  target="${@: -1}"',
     '  if [[ "$target" == *"/.staging-space-reservation-upload" ]] || [[ "$target" == *easyboost-staging-deploy.*"/release.tar.gz" ]]; then printf "%s\n" "$*" >> "$COMMAND_LOG.upload-reservations"; fi',
     '  if [[ "$target" == *"/.staging-space-reservation-upload" ]]; then',
+    '    if [ "${FAKE_WORKSPACE_REBOUND_DURING_UPLOAD:-0}" = "1" ]; then workspace="${target%/*}"; /usr/bin/mv -- "$workspace" "$workspace.displaced" || return; /usr/bin/mkdir -m 700 -- "$workspace" || return; printf "foreign workspace\\n" > "$workspace/keep-foreign"; return 28; fi',
     '    if [ "${FAKE_UPLOAD_SWAP_DURING_RESERVATION:-0}" = "1" ] && [ ! -f "$COMMAND_LOG.upload-swapped" ]; then /usr/bin/mv -- "$FAKE_UPLOAD_REPLACEMENT" "$FAKE_UPLOAD_SOURCE"; : > "$COMMAND_LOG.upload-swapped"; fi',
     '    if [ "${FAKE_UPLOAD_SYMLINK_DURING_RESERVATION:-0}" = "1" ] && [ ! -f "$COMMAND_LOG.upload-symlinked" ]; then /usr/bin/mv -- "$FAKE_UPLOAD_SOURCE" "$FAKE_UPLOAD_SOURCE.displaced" || return; /usr/bin/ln -s -- "$FAKE_UPLOAD_REPLACEMENT" "$FAKE_UPLOAD_SOURCE" || return; [ -L "$FAKE_UPLOAD_SOURCE" ] || return 30; : > "$COMMAND_LOG.upload-symlinked"; fi',
     '    if [ "${FAKE_UPLOAD_CAPACITY_SIDE_EFFECT_FAIL:-0}" = "1" ]; then /usr/bin/truncate -s "$2" "$4"; return 28; fi',
@@ -311,12 +330,20 @@ async function writeFakeCommands(root) {
     '}',
     'mktemp() {',
     '  if [ -n "${FAKE_TRUSTED_TMP_ROOT:-}" ] && [[ " $* " == *" /tmp/easyboost-staging-deploy.XXXXXX "* ]]; then result="$(/usr/bin/mktemp -d "$FAKE_TRUSTED_TMP_ROOT/easyboost-staging-deploy.XXXXXX")" || return; printf "%s\n" "$result" > "$COMMAND_LOG.workdir"; printf "%s\n" "$result"; return 0; fi',
+    '  if [ "${1:-}" = -d ] && [[ "${@: -1}" == "$STAGING_APP_DIR/rollbacks/easyboost-staging-deploy."* ]]; then',
+    '    result="$(/usr/bin/mktemp "$@")" || return',
+    '    printf "%s\\n" "$result" > "$COMMAND_LOG.workdir"',
+    '    /usr/bin/stat -c "%d:%i:%f:%u:%g:%a" -- "$result" > "$COMMAND_LOG.workdir-identity"',
+    '    if [ "${FAKE_WORKSPACE_PARENT_REBOUND_DURING_CREATE:-0}" = "1" ]; then rebind_workspace_parent || return; /usr/bin/mkdir -m 700 -- "$result" || return; printf "foreign workspace\\n" > "$result/keep-foreign"; fi',
+    '    printf "%s\\n" "$result"; return 0',
+    '  fi',
     '  /usr/bin/mktemp "$@"',
     '}',
     'stat() { if [ "$1" = "-c" ] && [ "$2" = "%b" ] && [[ "${@: -1}" == *".staging-space-reservation"* ]]; then if [ "${FAKE_SPARSE_RESERVATION:-0}" = "1" ]; then printf "0\\n"; else size="$(/usr/bin/stat -c "%s" -- "${@: -1}")"; printf "%s\\n" "$(((size + 511) / 512))"; fi; return 0; fi; /usr/bin/stat "$@"; }',
     'df() {',
     '  target="${@: -1}"',
-    '  if [ "${FAKE_LOW_APP_DISK:-0}" = "1" ] && [[ "$target" == "$STAGING_APP_DIR"* ]]; then printf "Filesystem 1024-blocks Used Available Capacity Mounted on\\nfake 100 99 1 99%% %s\\n" "$STAGING_APP_DIR"; return 0; fi',
+    // 128 MiB admits the upload plus headroom, but not the combined live/store/temp peak.
+    '  if [ "${FAKE_LOW_APP_DISK:-0}" = "1" ] && [[ "$target" == "$STAGING_APP_DIR"* ]]; then printf "Avail\\n134217728\\n"; return 0; fi',
     '  /usr/bin/df "$@"',
     '}',
     'sha256sum() {',
@@ -355,6 +382,7 @@ async function writeFakeCommands(root) {
     '  /usr/bin/find "$@"',
     '}',
     'rm() {',
+    '  if [ "${1:-}" = -rf ] && [[ "${@: -1}" == "$STAGING_APP_DIR/rollbacks/easyboost-staging-deploy."* ]]; then /usr/bin/stat -c "%d:%i:%f:%u:%g:%a" -- "${@: -1}" > "$COMMAND_LOG.workdir-cleanup-identity"; fi',
     '  if [ "${FAKE_TRANSACTION_MARKER_RM_FAIL:-0}" = "1" ] && [[ "$*" == *".staging-recovery-required"* ]]; then return 21; fi',
     '  if [ "${FAKE_RESERVATION_RM_FAIL:-0}" = "1" ] && [[ "$*" == *".staging-space-reservation"* ]] && [ "$(cat "$STAGING_APP_DIR/.release-sha256" 2>/dev/null || :)" = "$CANDIDATE_RELEASE_SHA" ]; then return 26; fi',
     '  if [ "${FAKE_WORKDIR_RM_FAIL:-0}" = "1" ] && [ "${1:-}" = "-rf" ] && [[ "$*" == *"easyboost-staging-deploy."* ]]; then return 27; fi',
@@ -543,6 +571,8 @@ async function createFixture() {
   ]);
   return {
     appDir,
+    backupIdentity: await fs.stat(path.join(appDir, 'backups', 'keep.dump')),
+    workspaceParentIdentity: await fs.stat(path.join(appDir, 'rollbacks')),
     bashEnv: await writeFakeCommands(root),
     candidate,
     commandLog: path.join(root, 'commands.log'),
@@ -953,15 +983,152 @@ function assertComposeUsesCapturedPostgresAuthority(log, requiredCommands = []) 
   }
 }
 
-async function assertPrivateUploadWorkdirCleaned(fixture, ignoredCallerTmp) {
+async function assertPrivateUploadWorkdirCleaned(fixture, ignoredCallerTmp = fixture.trustedTmp) {
   const workdir = (await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim();
-  assert.ok(workdir.startsWith(`${posixPath(fixture.trustedTmp)}/easyboost-staging-deploy.`),
-    `fixed trusted /tmp request must not use caller TMPDIR: ${workdir}`);
+  assert.ok(workdir.startsWith(`${posixPath(fixture.appDir)}/rollbacks/easyboost-staging-deploy.`),
+    `private workspace must use the protected staging disk: ${workdir}`);
+  assert.deepEqual((await fs.readdir(path.join(fixture.appDir, 'rollbacks'))).sort(),
+    ['keep.tar.gz', 'releases'], 'cleanup must remove only the owned private workspace');
   assert.deepEqual(await fs.readdir(fixture.trustedTmp), [],
-    'the exact trusted private work directory must be removed');
+    'large workspaces must leave the global temporary device unused');
   assert.deepEqual(await fs.readdir(ignoredCallerTmp), [],
     'caller-controlled TMPDIR must remain unused');
+  assert.equal(await fs.readFile(`${fixture.commandLog}.workdir-cleanup-identity`, 'utf8'),
+    await fs.readFile(`${fixture.commandLog}.workdir-identity`, 'utf8'),
+    'cleanup must act on the exact private directory captured at creation');
+  for (const [file, before] of [
+    [path.join(fixture.appDir, 'backups', 'keep.dump'), fixture.backupIdentity],
+    [path.join(fixture.appDir, 'rollbacks'), fixture.workspaceParentIdentity],
+  ]) {
+    const after = await fs.stat(file);
+    for (const field of ['dev', 'ino', 'uid', 'gid', 'mode']) assert.equal(after[field], before[field]);
+  }
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'rollbacks', 'keep.tar.gz'), 'utf8'),
+    'legacy artifact\n');
 }
+
+test('deploy refuses a rebound workspace parent before creation and before sensitive files', async (context) => {
+  for (const phase of ['BEFORE_CREATE', 'DURING_CREATE']) {
+    const fixture = await createFixture();
+    context.after(() => removeFixture(fixture.root));
+    const store = path.join(fixture.appDir, 'rollbacks', 'releases');
+    const inventory = (await fs.readdir(store)).sort();
+    const flags = { [`FAKE_WORKSPACE_PARENT_REBOUND_${phase}`]: '1' };
+    const result = runDeploy(fixture, flags);
+    assert.notEqual(result.status, 0, `${phase}: ${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /protected staging runtime authority changed/iu);
+    assert.doesNotMatch(result.stderr, /unbound variable/u,
+      'creation refusal must settle through the initialized cleanup trap');
+    await assert.rejects(fs.access(path.join(fixture.root, 'host-operation.lock')), { code: 'ENOENT' });
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'rollbacks', 'keep-foreign'), 'utf8'),
+      'foreign parent\n');
+    assert.deepEqual((await fs.readdir(store)).sort(), inventory);
+    assert.deepEqual((await fs.readdir(path.join(fixture.appDir, 'rollbacks.displaced', 'releases'))).sort(),
+      inventory, 'the captured parent and its retained releases must survive refusal');
+    assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+    if (phase === 'BEFORE_CREATE') {
+      await assert.rejects(fs.access(`${fixture.commandLog}.workdir`), { code: 'ENOENT' },
+        'rebound parent must be rejected before creating a workspace');
+    } else {
+      const workspace = path.posix.basename((await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim());
+      assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks', workspace)), ['keep-foreign'],
+        'no archive or reservation may be written under the replacement parent');
+      assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks.displaced', workspace)), [],
+        'the captured empty workspace must remain untouched when its parent is displaced');
+    }
+    assert.equal(await fs.readFile(fixture.commandLog, 'utf8').catch(() => ''), '',
+      'parent authority failure must precede Docker');
+  }
+});
+
+test('deploy refuses an unsafe workspace parent before creation', async (context) => {
+  if (process.platform === 'win32') return context.skip('POSIX private mode enforcement requires Linux');
+  const fixture = await createFixture();
+  context.after(() => removeFixture(fixture.root));
+  await fs.chmod(path.join(fixture.appDir, 'rollbacks'), 0o777);
+  const flags = {};
+  const result = runDeploy(fixture, flags);
+  assert.equal(result.status, 67, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /insecure write permissions/u);
+  await assert.rejects(fs.access(`${fixture.commandLog}.workdir`), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+});
+
+test('deploy refuses a symlink workspace parent before creation', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => removeFixture(fixture.root));
+  const parent = path.join(fixture.appDir, 'rollbacks');
+  await fs.rename(parent, `${parent}.displaced`);
+  try {
+    await fs.symlink(`${parent}.displaced`, parent, process.platform === 'win32' ? 'junction' : 'dir');
+  } catch (error) {
+    if (error.code === 'EPERM') return context.skip('Host cannot create a directory symlink');
+    throw error;
+  }
+  const flags = {};
+  const result = runDeploy(fixture, flags);
+  assert.equal(result.status, 67, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /symlink|real directory/u);
+  await assert.rejects(fs.access(`${fixture.commandLog}.workdir`), { code: 'ENOENT' });
+  assert.ok((await fs.lstat(parent)).isSymbolicLink(), 'foreign parent link must not be removed');
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+});
+
+test('deploy uses the protected staging disk for its private workspace before upload failure', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => removeFixture(fixture.root));
+  const callerTmp = path.join(fixture.root, 'caller-tmp');
+  await fs.mkdir(callerTmp);
+  const backup = path.join(fixture.appDir, 'backups', 'keep.dump');
+  const before = await fs.stat(backup);
+  const result = runDeploy(fixture, {
+    FAKE_UPLOAD_CAPACITY_FAIL: '1', TMPDIR: posixPath(callerTmp),
+  });
+  assert.equal(result.status, 68, `${result.stdout}\n${result.stderr}`);
+  await assertPrivateUploadWorkdirCleaned(fixture, callerTmp);
+  assert.equal(await fs.readFile(backup, 'utf8'), 'backup\n');
+  const after = await fs.stat(backup);
+  for (const field of ['dev', 'ino', 'uid', 'gid', 'mode']) assert.equal(after[field], before[field]);
+});
+
+test('deploy refuses to freeze archives into a workspace replaced after external verification', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => removeFixture(fixture.root));
+  const store = path.join(fixture.appDir, 'rollbacks', 'releases');
+  const inventory = (await fs.readdir(store)).sort();
+  const before = await Promise.all(inventory.map((name) => fs.readFile(path.join(store, name))));
+  const result = runDeploy(fixture, { FAKE_WORKSPACE_REBOUND_BEFORE_PREVIOUS_FREEZE: '1' });
+  await assert.doesNotReject(fs.access(`${fixture.commandLog}.workspace-rebound`),
+    `workspace substitution must execute: ${result.stdout}\n${result.stderr}`);
+  const workspace = path.posix.basename((await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim());
+  assert.deepEqual(await fs.readdir(path.join(fixture.appDir, 'rollbacks', workspace)), ['keep-foreign'],
+    'no archive or other transaction file may be written into the replacement workspace');
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'rollbacks', workspace, 'keep-foreign'), 'utf8'),
+    'foreign workspace\n');
+  assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /workspace identity changed/u);
+  assert.deepEqual((await fs.readdir(store)).sort(), inventory);
+  assert.deepEqual(await Promise.all(inventory.map((name) => fs.readFile(path.join(store, name)))), before);
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+  assert.doesNotMatch(await fs.readFile(fixture.commandLog, 'utf8').catch(() => ''), /docker\|build /u);
+});
+
+test('deploy preserves a replacement private workspace and its captured displaced directory on failure', async (context) => {
+  const fixture = await createFixture();
+  context.after(() => removeFixture(fixture.root));
+  const result = runDeploy(fixture, { FAKE_WORKSPACE_REBOUND_DURING_UPLOAD: '1' });
+  const workspace = (await fs.readFile(`${fixture.commandLog}.workdir`, 'utf8')).trim();
+  const workspacePath = path.join(fixture.appDir, 'rollbacks', path.posix.basename(workspace));
+  assert.equal(await fs.readFile(path.join(workspacePath, 'keep-foreign'), 'utf8'), 'foreign workspace\n');
+  assert.ok((await fs.stat(`${workspacePath}.displaced`)).isDirectory());
+  assert.equal(result.status, 70, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /workspace.*identity|workspace.*changed/iu);
+  assert.equal(await fs.readFile(path.join(fixture.appDir, 'backups', 'keep.dump'), 'utf8'), 'backup\n');
+  assert.equal(await fs.readFile(path.join(fixture.appDir, '.release-sha256'), 'utf8'), `${fixture.previous.sha}\n`);
+  assert.match(await fs.readFile(path.join(fixture.appDir, '.staging-recovery-required'), 'utf8'),
+    /manual recovery required/u);
+});
 
 test('staging deploy builds the verified archive before activation and retains exact releases', async (context) => {
   const probe = runBash(['--version']);
@@ -972,6 +1139,7 @@ test('staging deploy builds the verified archive before activation and retains e
 
   const result = runDeploy(fixture, { EASYBOOST_STAGING_BUILD_CONTEXT: '/untrusted/live-tree' });
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  await assertPrivateUploadWorkdirCleaned(fixture);
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'shared.txt'), 'utf8'), 'new\n');
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'new-only.txt'), 'utf8'), 'new-only\n');
   await assert.rejects(fs.access(path.join(fixture.appDir, 'old-only.txt')), { code: 'ENOENT' });
@@ -1021,6 +1189,7 @@ test('a failed staging image build preserves the active tree and proves no relea
 
   const result = runDeploy(fixture, { FAKE_BUILD_FAIL: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  await assertPrivateUploadWorkdirCleaned(fixture);
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'shared.txt'), 'utf8'), 'old\n');
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'old-only.txt'), 'utf8'), 'old-only\n');
   await assert.rejects(fs.access(path.join(fixture.appDir, 'new-only.txt')), { code: 'ENOENT' });
@@ -1101,6 +1270,7 @@ test('readiness failure restores the previous stable image, code tree and marker
 
   const result = runDeploy(fixture, { FAKE_READINESS_FAIL: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  await assertPrivateUploadWorkdirCleaned(fixture);
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'shared.txt'), 'utf8'), 'old\n');
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'old-only.txt'), 'utf8'), 'old-only\n');
   await assert.rejects(fs.access(path.join(fixture.appDir, 'new-only.txt')), { code: 'ENOENT' });
@@ -1411,6 +1581,7 @@ test('first deployment success and post-promotion failure leave a bootstrappable
   await makeFirstDeploymentFixture(success);
   const first = runDeploy(success, { FAKE_NO_PREVIOUS_IMAGE: '1' });
   assert.equal(first.status, 0, `${first.stdout}\n${first.stderr}`);
+  await assertPrivateUploadWorkdirCleaned(success);
   assert.equal(await fs.readFile(path.join(success.appDir, 'shared.txt'), 'utf8'), 'new\n');
   assert.equal(await fs.readFile(path.join(success.appDir, '.release-sha256'), 'utf8'),
     `${success.candidate.sha}\n`);
@@ -1422,6 +1593,7 @@ test('first deployment success and post-promotion failure leave a bootstrappable
     FAKE_NO_PREVIOUS_IMAGE: '1', FAKE_READINESS_FAIL: '1',
   });
   assert.equal(failed.status, 1, `${failed.stdout}\n${failed.stderr}`);
+  await assertPrivateUploadWorkdirCleaned(failure);
   for (const absent of [
     'compose.staging.yml', 'Dockerfile', 'shared.txt', 'new-only.txt', '.release-sha256',
     '.staging-recovery-required',
@@ -1728,6 +1900,9 @@ test('deploy admits live/store/temp peak capacity before Docker or active-tree m
   const result = runDeploy(fixture, { FAKE_LOW_APP_DISK: '1' });
   assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stderr, /disk|space|headroom|capacity/iu);
+  assert.equal(result.status, 68, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stderr, /^Insufficient staging disk capacity before release mutation$/mu,
+    'the upload must pass preflight before combined live/store/temp capacity is rejected');
   const log = await fs.readFile(fixture.commandLog, 'utf8');
   assert.doesNotMatch(log, /docker\|build /u);
   assert.equal(await fs.readFile(path.join(fixture.appDir, 'old-only.txt'), 'utf8'), 'old-only\n');
