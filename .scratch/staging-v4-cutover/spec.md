@@ -996,3 +996,57 @@ reviews, existing full-gate evidence, authorized prototype publication and nativ
 No correction of the newly revealed proof or production timing in this slice; first report the
 observed cause. No assertion weakening, production/default-test/workflow edits, deadline increase,
 dependency download, VPS mutation, release packaging, deployment or readiness declaration.
+
+## Make the hermetic Docker reference probe truthful
+
+### Problem Statement
+
+Native9 first rejects temporary-release-absence after all earlier restoration proofs pass.
+The real helper probes exact image references using image-ls, while the shared hermetic Docker
+factory lacks that command and returns empty success by default. A root-run23ms Linux repro
+builds a candidate, successfully inspects its exact ID, then receives empty image-ls output.
+This contradicts the state just created and makes production cleanup treat the owned tag as absent.
+It is a proven fixture protocol defect, not yet evidence that the original120s timing is fixed.
+
+### Solution and User Stories
+
+Make the existing hermetic image lifecycle answer the production reference probe consistently,
+then prove an owned reference is actually removed instead of bypassing the final absence proof.
+
+1. As the owner, I want a failed recovery check to reflect the app/helper rather than a lying fixture.
+2. As the maintainer, I want a built exact reference visible to both inspect and list.
+3. As the maintainer, I want an absent reference represented by successful empty list output.
+4. As the owner, I want cleanup to remove only the owned temporary reference.
+5. As the maintainer, I want removal observable by the same listing and the backing state.
+6. As the owner, I want stable image/container state preserved when a temporary tag is removed.
+7. As the maintainer, I want both current and candidate synthetic releases covered.
+8. As the owner, I want all original concurrency, timing and restoration assertions retained.
+
+### Implementation Decisions
+
+Repair the shared hermetic Docker factory, not production helpers or only a diagnostic wrapper.
+Reuse the current synthetic lifecycle model and implement the exact fixed image-ls query used
+by the real reference probe, with truthful present/absent semantics and bounded explicit matching.
+Preserve existing command behavior unless a minimal consistency correction is demonstrably
+required for this lifecycle. Do not add a general Docker emulator or permissive success for
+malformed listing requests. Do not remove the independent temporary-release-absence assertion.
+No timing, readiness-attempt, authority, cleanup ownership or canonical test relaxation.
+
+### Testing Decisions
+
+Add short default-suite contracts alongside the factory that invoke its real generated Bash.
+First run RED before changing the factory: build/inspect/list disagree. Then cover both releases,
+empty-before-build, present-after-build, absent-after-owned-removal, stable/container retention
+and malformed/unsupported list shape failure. Reuse the existing finite lifecycle test style.
+If feasible, invoke the unchanged real remove-owned-reference function with a finite direct
+command adapter to demonstrate its probe/remove/reprobe sequence; this is not supervisor proof.
+Keep every old test/assertion unchanged. Run focused Windows and cached offline Linux contracts,
+plus both existing reduced diagnostic contract suites. Do not retry actual local Linux flock
+in the known incompatible environment. Root owns full canonical native feedback, independent
+reviews and authorized branch publication; no deployment clearance until genuine gates pass.
+
+### Out of Scope
+
+Production changes, performance optimization, broader test-architecture refactor, relaxed old
+assertions or increased120s deadline, workflow changes, dependencies, VPS mutation, packaging
+and deployment. If a new proof fails, report it rather than widening this slice.

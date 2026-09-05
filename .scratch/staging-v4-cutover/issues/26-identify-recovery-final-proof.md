@@ -1,6 +1,6 @@
 # 26 — Identify the exact rejected recovery final proof
 
-Status: in-progress
+Status: done
 Blocked by: None — ticket25 diagnostic is published as ea00224; original timing repair remains open.
 Spec: .scratch/staging-v4-cutover/spec.md#identify-the-exact-rejected-recovery-final-proof
 
@@ -35,8 +35,8 @@ the genuine0400/0600 model correction. Its120017ms original timeout must remain 
 - [x] All31 prior contracts preserved; new representative early/late and Docker failure tests pass.
 - [x] Unclosed auxiliary124 and report-failure priority remain unchanged; reports remain bounded.
 - [x] Focused pinned Windows/cached offline Linux, syntax and targeted ESLint pass; exact LF hashes.
-- [ ] Root reviews, existing full-gate outcomes, authorized publication and native result recorded.
-- [ ] One scoped commit, without claiming a production timing fix or deployment readiness.
+- [x] Root reviews, existing full-gate outcomes, authorized publication and native result recorded.
+- [x] One scoped commit, without claiming a production timing fix or deployment readiness.
 
 ## Comments
 
@@ -183,3 +183,16 @@ existing full local evidence. CanonicalCI131 failed only original rollback120009
 still running. Neither is relabelled green. Root publication includes only the two diagnostic
 sources, this issue, ticket25 terminal evidence, the appended spec and staging PROGRESS rows.
 Local checkpoints, artifact inventories, source TARs and unrelated dirty files stay excluded.
+
+### Published native outcome
+
+Committed/pushed8b1b69d1509921714a640a644fc53423c2ce6707 only authorized prototype branch;
+postcommit history396 passed. Native9run33978692148/job101339854723 failed4m14s.
+All38 native contracts pass,0skip/fail/cancel28661.381949ms on Ubuntu24.04.4/Node22.23.2.
+Original120002ms timeout remains a failure (up-complete/upCount1). Barrier173817ms,
+expected helper exited+closed1 at208624ms, no signal, stdout3B/stderr75. First rejected proof
+is exactly temporary-release-absence; auxiliarynull, finalState not-proven, result1.
+All earlier file/archive/backup assertions passed; later proofs were not executed.
+This completes precise observability, not restoration or timing repair. CanonicalCI132 also
+failed solely at original recovery120017ms after rollbacktree103269ms passed; PG51/51,
+unit3258/3192pass/1fail/65skip. Next fixture correction is independently scoped in ticket27.

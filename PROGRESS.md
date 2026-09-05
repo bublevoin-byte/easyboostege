@@ -283,15 +283,18 @@ Premium; внутренний Base может сохраниться тольк�
 | 23 | Выполнять три измеренных блока проверок с меньшим числом запусков | published4e3b02c; Windows3286/3163pass/122skip/1permission failure, affected33/33 outside restriction; isolated native rollback111.7s passes then recovery120s fails; canonicalCI1303192pass/1original rollback120s failure, PG51/51; stable acceptance outstanding |
 | 24 | Отдельно воспроизводить задержку аварийного восстановления | publishedcb29558; native contracts28/28; exact timeout120020ms, late recovery199258ms/helperclosed1 at238706ms with expected diagnostic, independent final proof not-proven; permission-model defect under ticket25, no production fix |
 | 25 | Сверить права файлов в диагностике с реальным восстановлением | publishedea00224; real077 RED/GREEN, Linux31/31, Windows18pass/13POSIXskip, Spec0/Standards0; native8 helperclosed1 at242164ms but final proof still not-proven; exact120017ms timeout retained, no production change |
-| 26 | Узнать точную проверку, отклоняющую результат восстановления | local38/38Linux,20pass/18POSIXskipWindows; realfile/Docker RED→GREEN; Spec0/Standards0, lint/check pass; diagnostic-only first-proof stage, publication/native pending |
+| 26 | Узнать точную проверку, отклоняющую результат восстановления | published8b1b69d;38/38Linux,20pass/18POSIXskipWindows; realfile/Docker RED→GREEN; Spec0/Standards0; native9 exact first rejection temporary-release-absence, helperclosed1 at208624ms; original120002ms timeout retained |
+| 27 | Исправить ложный пустой список образов в тестовом окружении | locally verified; original RED23ms→GREEN23ms; Windows39pass/21skip, Linux59/59; actual owned cleanup list/list/rm/list; Spec0/Standards0; publication/native pending, production unchanged |
 
-Последний полный итог: CI131 завершился за36m55s,3258tests/3192pass/1fail/65skip; PostgreSQL51/51.
-Единственный отказ — исходное ожидание rollback/tree120009ms. В native8 отдельный откат прошёл
-tree116001ms/helperclosed0at185393ms. Отдельное recovery снова опоздало:120017ms timeout,
-поздний barrier203093ms и helperclosed1с ожидаемым сообщением at242164ms; независимая итоговая
-проверка всё ещё not-proven. Ticket25 исправил подтверждённую ошибку прав0400/0600; ticket26
-уточняет точный первый отказ итоговой проверки. Устойчивый проход общего CI и допуск к деплою
-не получены. CI132 наea00224 ещё выполняется; production после4e3b02c не менялся.
+Последний полный итог: CI132 завершился за38m20s,3258tests/3192pass/1fail/65skip; PostgreSQL51/51.
+Откат прошёл: tree103269ms/helperclosed0at163162ms. Единственный отказ теперь — исходное
+ожидание recovery120017ms на строке833, config-json-complete/upCountmissing. Native9 recovery
+на8b1b69d опоздало:120002ms up-complete/upCount1; поздний barrier173817ms и helperclosed1
+с ожидаемым сообщением at208624ms. Первый независимый отказ точно temporary-release-absence;
+все предшествующие проверки файлов/архивов/backup прошли, последующие ещё не доказаны.
+Ticket25 исправил подтверждённую ошибку прав0400/0600; ticket26 локализовал следующий отказ.
+Устойчивый проход общего CI и допуск к деплою не получены. CI133 выполняется;
+production после4e3b02c не менялся.
 
 Актуальный локальный gate ticket21: lint/check и полный Windows-прогон зелёные, 3262tests,
 3153passed,109platform skips,0failed/cancelled,4360073.7294ms; frozen inputs unchanged.

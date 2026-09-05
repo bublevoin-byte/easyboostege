@@ -95,6 +95,21 @@ if [ "\${1:-}" = build ]; then
   record_phase build-complete
   exit 0
 fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = ls ]; then
+  [ "$#" -eq 6 ] && [ "$3" = --quiet ] && [ "$4" = --no-trunc ] && [ "$5" = --filter ] || exit 1
+  case "$6" in
+    reference=easyboost-staging-app:release-${current.sha}) expected=${previousImageId} ;;
+    reference=easyboost-staging-app:release-${candidate.sha}) expected=${candidateImageId} ;;
+    reference=easyboost-staging-app:local) cat "$IMAGE_STATE"; exit 0 ;;
+    *) exit 1 ;;
+  esac
+  # The fixture holds one temporary release at a time; its ID identifies the exact tag.
+  [ -f "$RELEASE_STATE" ] || exit 0
+  observed="$(cat "$RELEASE_STATE")"
+  case "$observed" in ${previousImageId}|${candidateImageId}) : ;; *) exit 1 ;; esac
+  if [ "$observed" = "$expected" ]; then printf '%s\\n' "$observed"; fi
+  exit 0
+fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   target="\${@: -1}"
   case "$target" in easyboost-staging-app:release-*) [ -f "$RELEASE_STATE" ] || exit 1; cat "$RELEASE_STATE" ;; easyboost-staging-app:local) cat "$IMAGE_STATE" ;; postgres:17-alpine) echo ${postgresImageId} ;; *) exit 1 ;; esac
@@ -531,6 +546,157 @@ test('lock fixture emits a deterministic nonempty synthetic backup for the appro
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+async function withLockImageFixture(action) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-lock-image-reference-'));
+  const current = { sha: 'a'.repeat(64) };
+  const candidate = { sha: 'c'.repeat(64) };
+  const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  const environment = { ...process.env, BARRIER_DIR: '.', BLOCK_AT: '',
+    IMAGE_STATE: 'image-state', CONTAINER_STATE: 'container-state', RELEASE_STATE: 'release-state' };
+  const options = { cwd: root, env: environment, encoding: 'utf8', timeout: 5_000 };
+  try {
+    await fs.writeFile(path.join(root, 'docker'), lockFixtureDockerScript(current, candidate));
+    await fs.writeFile(path.join(root, 'image-state'), `${previousImageId}\n`);
+    await fs.writeFile(path.join(root, 'container-state'), `${previousImageId}\n`);
+    const run = (args) => spawnSync(bash, ['docker', ...args], {
+      ...options, input: 'synthetic build stream\n',
+    });
+    return await action({ root, current, candidate, bash, options, run });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+}
+
+test('lock fixture image reference listing agrees with build and inspect', async () => {
+  await withLockImageFixture(async ({ candidate, run }) => {
+    const reference = `easyboost-staging-app:release-${candidate.sha}`;
+    const built = run(['build', '--file', 'Dockerfile', '--tag', reference, '-']);
+    assert.equal(built.status, 0, built.stderr);
+    const inspected = run(['image', 'inspect', '--format', '{{.Id}}', reference]);
+    assert.equal(inspected.status, 0, inspected.stderr);
+    assert.equal(inspected.stdout, `${candidateImageId}\n`);
+    const listed = run(['image', 'ls', '--quiet', '--no-trunc', '--filter', `reference=${reference}`]);
+    assert.equal(listed.status, 0, listed.stderr);
+    assert.equal(listed.stdout, `${candidateImageId}\n`, 'built reference must not be reported absent');
+  });
+});
+
+for (const releaseName of ['current', 'candidate']) {
+  test(`lock fixture image reference tracks absent, built and removed ${releaseName} without changing retained state`, async () => {
+    await withLockImageFixture(async ({ root, current, candidate, run }) => {
+      const release = releaseName === 'current' ? current : candidate;
+      const other = releaseName === 'current' ? candidate : current;
+      const expected = releaseName === 'current' ? previousImageId : candidateImageId;
+      const reference = `easyboost-staging-app:release-${release.sha}`;
+      const listing = (target) => {
+        const result = run(['image', 'ls', '--quiet', '--no-trunc', '--filter', `reference=${target}`]);
+        assert.equal(result.status, 0, result.stderr);
+        return result.stdout;
+      };
+      assert.equal(listing(reference), '', 'unbuilt exact tag must be absent');
+      assert.equal(run(['image', 'inspect', '--format', '{{.Id}}', reference]).status, 1);
+      const built = run(['build', '--file', 'Dockerfile', '--tag', reference, '-']);
+      assert.equal(built.status, 0, built.stderr);
+      const inspected = run(['image', 'inspect', '--format', '{{.Id}}', reference]);
+      assert.equal(inspected.status, 0, inspected.stderr);
+      assert.equal(inspected.stdout, `${expected}\n`);
+      assert.equal(listing(reference), `${expected}\n`);
+      assert.equal(listing(`easyboost-staging-app:release-${other.sha}`), '',
+        'the other known release must not alias the built tag');
+      const removed = run(['image', 'rm', '-f', reference]);
+      assert.equal(removed.status, 0, removed.stderr);
+      assert.equal(listing(reference), '', 'removed exact tag must be absent');
+      assert.equal(run(['image', 'inspect', '--format', '{{.Id}}', reference]).status, 1);
+      await assert.rejects(fs.access(path.join(root, 'release-state')), { code: 'ENOENT' });
+      assert.equal(listing('easyboost-staging-app:local'), `${previousImageId}\n`);
+      for (const args of [
+        ['image', 'inspect', '--format', '{{.Id}}', 'easyboost-staging-app:local'],
+        ['inspect', '--format', '{{.Image}}', 'fake-container'],
+      ]) {
+        const retained = run(args);
+        assert.equal(retained.status, 0, retained.stderr);
+        assert.equal(retained.stdout, `${previousImageId}\n`);
+      }
+      for (const state of ['image-state', 'container-state']) {
+        assert.equal(await fs.readFile(path.join(root, state), 'utf8'), `${previousImageId}\n`);
+      }
+    });
+  });
+}
+
+test('lock fixture image reference listing rejects malformed and unsupported query shapes', async () => {
+  await withLockImageFixture(async ({ candidate, run }) => {
+    const reference = `reference=easyboost-staging-app:release-${candidate.sha}`;
+    const prefix = ['image', 'ls', '--quiet', '--no-trunc', '--filter'];
+    for (const args of [
+      ['image', 'ls'],
+      ['image', 'ls', '--quiet', '--filter', reference],
+      ['image', 'ls', '--no-trunc', '--quiet', '--filter', reference],
+      ['image', 'ls', '--quiet', '--no-trunc', '--format', reference],
+      prefix,
+      [...prefix, reference, 'extra'],
+      [...prefix, 'reference=easyboost-staging-app:release-*'],
+      [...prefix, `${reference}-other`],
+      [...prefix, reference.slice(0, -1)],
+      [...prefix, 'label=easyboost-staging-app:local'],
+    ]) {
+      const result = run(args);
+      assert.equal(result.status, 1, `unsupported listing must fail: ${args.join(' ')}\n${result.stderr}`);
+      assert.equal(result.stdout, '', 'rejected listing must not publish an image identity');
+    }
+  });
+});
+
+test('lock fixture image reference lets real owned cleanup prove removal and reject a different owner', async () => {
+  await withLockImageFixture(async ({ root, current, candidate, bash, options, run }) => {
+    // Source the real helper unchanged apart from LF normalization, then replace only
+    // its external command runner. This finite command contract is not supervisor proof.
+    const common = await fs.readFile(path.resolve('scripts/staging-release-common.sh'), 'utf8');
+    await fs.writeFile(path.join(root, 'common.sh'), common.replaceAll('\r\n', '\n'));
+    await fs.writeFile(path.join(root, 'remove-owned.sh'), `#!/bin/bash
+set -eu
+source "$PWD/common.sh"
+run_bounded() {
+  [ "$1" = "$COMMAND_SECONDS" ] && [ "$2" = docker ] || return 64
+  shift 2
+  printf '%s\\n' "$*" >> command-log
+  bash "$PWD/docker" "$@"
+}
+remove_owned_image_reference "$1" "$2"
+`);
+    for (const [release, expected, wrongOwner] of [
+      [current, previousImageId, candidateImageId],
+      [candidate, candidateImageId, previousImageId],
+    ]) {
+      const reference = `easyboost-staging-app:release-${release.sha}`;
+      const built = run(['build', '--file', 'Dockerfile', '--tag', reference, '-']);
+      assert.equal(built.status, 0, built.stderr);
+      const remove = (owner) => spawnSync(bash, ['remove-owned.sh', reference, owner], {
+        ...options, env: { ...options.env,
+          PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH}` },
+      });
+      const rejected = remove(wrongOwner);
+      assert.equal(rejected.status, 1, rejected.stderr);
+      assert.match(rejected.stderr, /is not owned by this transaction/u);
+      assert.equal(await fs.readFile(path.join(root, 'release-state'), 'utf8'), `${expected}\n`);
+      await fs.writeFile(path.join(root, 'command-log'), '');
+      const removed = remove(expected);
+      assert.equal(removed.status, 0, removed.stderr);
+      const listCommand = `image ls --quiet --no-trunc --filter reference=${reference}`;
+      assert.deepEqual((await fs.readFile(path.join(root, 'command-log'), 'utf8')).trim().split('\n'), [
+        listCommand, listCommand, `image rm -f ${reference}`, listCommand,
+      ]);
+      await assert.rejects(fs.access(path.join(root, 'release-state')), { code: 'ENOENT' });
+      const absent = run(['image', 'ls', '--quiet', '--no-trunc', '--filter', `reference=${reference}`]);
+      assert.equal(absent.status, 0, absent.stderr);
+      assert.equal(absent.stdout, '');
+      for (const state of ['image-state', 'container-state']) {
+        assert.equal(await fs.readFile(path.join(root, state), 'utf8'), `${previousImageId}\n`);
+      }
+    }
+  });
 });
 
 test('lock barrier timeout preserves failure and cleanup with bounded lifecycle evidence', async () => {
