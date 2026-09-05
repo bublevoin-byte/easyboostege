@@ -280,7 +280,14 @@ Premium; внутренний Base может сохраниться тольк�
 | 20 | Найти источник накладных расходов запуска служебных команд | done; real chain285–301ms, six pre-tree pair checks/42commands from source; reviews0/0, no production fix yet |
 | 21 | Объединить проверку архива и контрольной суммы без ослабления защиты | done; local3262/3153pass/109skip/0fail; published528f508; native5 faster but original120s timeout remains; CI129 sole original failure |
 | 22 | Измерить оставшуюся стоимость повторных проверок защищённого состояния | done; Compose1.02s/workspace0.70s/reservations2.73s; focused12/9pass/3skip; reviews0/0; production528 unchanged; local-only diagnostic commit |
-| 23 | Выполнять три измеренных блока проверок с меньшим числом запусков | implemented; component0.337/0.347/0.680s, reviews0/0; full Windows3286/3163pass/122skip/1permission failure; unchanged affected file33/33 outside restriction; candidate publication/native120s pending |
+| 23 | Выполнять три измеренных блока проверок с меньшим числом запусков | published4e3b02c; Windows3286/3163pass/122skip/1permission failure, affected33/33 outside restriction; isolated native rollback111.7s passes then recovery120s fails; canonicalCI1303192pass/1original rollback120s failure, PG51/51; stable acceptance outstanding |
+| 24 | Отдельно воспроизводить задержку аварийного восстановления | in progress; corrected focused Linux28/28 and Windows18pass/10skip, Spec0/Standards0; additive6min native job reviewed, publication next; original120s unchanged, no production fix |
+
+Последний итог: CI130 завершился за36m39s,3258tests/3192pass/1fail/65skip; PostgreSQL51/51.
+Единственный отказ — исходное ожидание rollback/tree120004ms. В двух отдельных native6
+прогонах этот этап прошёл, а полный из них затем упёрся в recovery120010ms. Поэтому
+ускорение подтверждено отдельными измерениями, но устойчивый проход общего CI ещё не получен.
+Сейчас ticket24 сужает наблюдение recovery; это не production-исправление и не допуск к деплою.
 
 Актуальный локальный gate ticket21: lint/check и полный Windows-прогон зелёные, 3262tests,
 3153passed,109platform skips,0failed/cancelled,4360073.7294ms; frozen inputs unchanged.

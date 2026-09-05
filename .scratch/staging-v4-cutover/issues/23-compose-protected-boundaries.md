@@ -263,3 +263,50 @@ passed or explicitly skipped; the four Linux compatibility failures reproduced o
 old baseline remain disclosed above. Original native120s and canonical CI on this candidate
 are still mandatory. No unchanged full-suite restart is justified by the isolated permission
 restriction. Root retains native feedback and final issue-status responsibility.
+
+## Published native6 outcome — former barrier passes; next recovery barrier fails
+
+Exact six-file commit4e3b02c88f2c02cd2c4f7b1bdf9c6ffbf2910e23 was normally pushed with the
+preceding diagnostic15906c9 to the authorized prototype branch only. Remote HEAD confirmed.
+Fresh candidate secrets and393-commit history scans passed. No archive or installation.
+
+Native run33970687905 reduced job101318538174 succeeds:11/11contracts,23704.766619ms;
+verified fixture installer562ms/equivalence3051ms; original120000ms tree barrier reached at
+104352ms, upCount1. The actual helper exited and closed0 at166440ms,138stdout bytes/0stderr,
+clean settlement. All11phase rows retained, no omissions. Full23308-character raw log read.
+
+The full original job101318538073 fails at a newly reached later operation, not the old rollback
+tree barrier. Node22.23.2; component5/5,10099.359513ms; observer12/12,1070.655877ms. Real chain
+component358.10/358.54ms remains measured startup, not a CPU profile. Original successful deploy
+build72871ms/exit210601ms; rollback tree111700ms/exit177817ms. It then waits for recovery and
+times out120010ms at test line833: phaseconfig-json-complete,upCountmissing,treepresent,three
+synthetic stdout bytes30-newline,empty stderr. The tree marker remains from the earlier rollback;
+it does not prove this recovery advanced. Original511228.614408ms/TAP511302.784909ms,0pass/1fail.
+Observer511334ms/509samples/8omissions/0truncations/18824metadata reads/exit1. Full53861-character
+raw log read. No cleanup failure masked the primary timeout. Both jobs are final.
+
+Thus ticket23's measured composition clears the former barrier in both native paths, but does
+not clear the full recovery test or deployment. CanonicalCI130run33970687937/job101318538312
+still runs; PostgreSQL/preflight steps pass, final totals pending. Ticket24 constructs narrower
+feedback for the newly reached recovery deadline without changing production or old tests.
+
+## Canonical CI130 final — rollback clearance is not yet stable
+
+Run33970687937/job101318538312 on the same exact4e3b02c completed with failure in36m39s.
+Root read all1375166characters/20371lines of the raw log for failures and totals. PostgreSQL
+passed51/51,0fail/skip,15231.983182ms. Lint/check passed; canonical unit3258tests/3192pass/
+1fail/65skip/0cancelled,2138426.789157ms. All subsequent release/artifact/browser/performance
+and quality steps were not reached. The high-severity production audit threshold passed,
+but its three moderate advisories remain; this is not an all-severity clean audit.
+
+The sole failure2760 is still the ORIGINAL rollback tree barrier, line815, not recovery:
+scenario353712.808127ms; wait120004ms,phaseconfig-json-complete,upCountmissing,treeabsent,
+both streams empty. Successful preceding deploy build79972ms/exit231195ms. No rollback-tree,
+rollback-exit or recovery milestone in this canonical run. No new failure was hidden by cleanup.
+
+This qualifies the preceding native6 conclusion: the reduced and isolated full native paths
+passed the former barrier on their own runners, but canonical CI has not. The repair reduced
+measured overhead, but stable original-test acceptance and deployment clearance are unproved.
+Do not mark this issue done or relabel CI130 green. Ticket24 remains useful diagnostic-only
+feedback for the later recovery failure already observed in isolated native6; it does not
+supersede or dismiss the outstanding canonical rollback deadline. No unchanged rerun was made.

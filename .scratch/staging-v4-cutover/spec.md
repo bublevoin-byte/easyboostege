@@ -793,3 +793,93 @@ feedback. Failed native feedback remains a failure regardless of faster local co
 No new supervisor/daemon, authority cache/removal, deadline increase, changed original test or
 workflow, dependency/network download, shared GNU record-format migration, unrelated archive
 refactor, source-generation bypass, VPS mutation, archive packaging or deployment readiness claim.
+
+## Minimize the newly reached recovery deadline feedback
+
+### Problem Statement
+
+Native6 on the published protected-boundary repair passes the formerly failing rollback tree
+barrier at111700ms and completes that rollback. The unchanged original test then reaches its
+next operation and fails waiting for recovery at120010ms. Repeating successful deployment and
+rollback before every recovery observation costs several minutes. The owner needs a narrower
+feedback loop before another production change, not a relaxed deadline or an assumed cause.
+
+Subsequent canonicalCI130 on the same4e3b02c still fails the earlier rollback/tree barrier at
+120004ms (phaseconfig-json-complete), despite both isolated native6 paths passing it. Stable
+rollback acceptance is therefore still outstanding. This recovery diagnostic addresses an
+observed later failure without dismissing the earlier canonical failure or claiming repair.
+
+### Solution and User Stories
+
+Create a diagnostic-only recovery attempt using independently verified post-rollback fixture
+state and the real installed deploy helper, with original failed-readiness/recovery semantics.
+
+1. As the owner, I want the next failure observed without redoing two already successful operations.
+2. As the maintainer, I want the prepared state proven against the original fixture and archives.
+3. As the maintainer, I want the recovery marker, not the stale tree marker, to determine progress.
+4. As the owner, I want the original120s failure preserved even if recovery succeeds later.
+5. As the maintainer, I want expected recovered helper exit1 distinguished from arbitrary failure.
+6. As the owner, I want uncertainty and late processes reported without erasing active evidence.
+7. As the maintainer, I want a bounded native diagnostic alongside unchanged original tests.
+8. As the owner, I want measured feedback before any additional production repair.
+
+### Implementation Decisions
+
+This is Phase1 feedback construction only. The existing exact native command is red-capable and
+agent-run, but takes511s; its120s time-based symptom cannot honestly become a seconds-long exact
+local loop. Local Docker Desktop already refuses real flock ownership with PID0 before this bug.
+Do not retry that known environment or pretend a finite contract fixture is the real reproduction.
+Build and verify a shorter native path, and record that native execution remains required before
+hypothesis testing or a production fix. The full original test remains authoritative.
+
+Use the established fixture factories and installed-generation verification. Prefer reuse of
+existing exported diagnostic preparation utilities without changing them. Start from a fresh
+private fixture only, with real current/candidate archives and two retained verified pairs.
+Reconstruct the state immediately after successful rollback: current source/marker/stable image/
+running container, the prior synthetic backup history, protected file/directory metadata and
+no active transaction, recovery-required state, reservations or host-operation lock. Account for
+the original removal of up-count/curl-count and its retained tree/release-tree markers. A stale
+tree marker is expressly not proof that this recovery operation advanced. Verify byte/mode/
+identity/store inventories against real archive verification before starting the timed operation.
+Expose a concise equivalence report and disclose any deliberately omitted inert fixture history.
+
+Invoke only the real installed deploy helper with the fixed candidate tuple and the original
+failed-readiness/recovery fixture behavior. No caller-supplied command, arbitrary path, script or
+environment input is allowed through the CLI. Fixture setup is outside the unchanged120000ms
+recovery-barrier observation. Report the fixed allowlisted phase and bounded byte counts, not
+raw process arguments, environment, file identities, PIDs or child streams. Use a bounded phase
+timeline (at least500ms spacing, at most16rows) only to locate progress, never as a CPU profile.
+
+When the recovery barrier appears, release its exact owned fixture barrier so the actual helper
+can settle. The intentional failed release normally exits1 after verified prior-state recovery.
+Diagnostic success requires on-time recovery barrier, child closed with expected status1 and
+the expected verified-prior-state diagnostic plus independent final source/marker/image/container
+proof. Unexpected status0 must fail; other nonzero statuses and signals must remain distinguishable.
+A late barrier or later expected exit1 cannot turn an initial120s timeout green. Missing/invalid
+evidence cannot mask an original failure. Report-write failure must not mask a known nonzero result.
+
+Bound later observation/settlement separately and retain a hard outer watchdog. Keep the entire
+native job within six minutes including fixture setup and focused contracts. If settlement is
+unproved, preserve the fixture and report124/uncertainty; do not delete active state or signal
+unproved numeric process identities. Disposal belongs to the private diagnostic environment.
+The new job may be added to the existing prototype-only diagnostic workflow after review, but
+the two existing jobs, their deadlines, commands and the canonical workflow stay unchanged.
+
+### Testing Decisions
+
+Use real temporary files/archive verification for prepared-state and final-state proof, and real
+finite children for the observation/result seam. Test current-state reconstruction, missing or
+contradictory metadata, stale-tree-only non-success, on-time expected exit1, late expected exit1,
+unexpected exit0/23, signals, launcher exit with inherited pipes, bounded unsettled children and
+report-write failure. Exercise the actual CLI result seam rather than only a detached mapper.
+Pin local Node22.23.2; Linux focused contracts may use the established offline cached fixture.
+Do not execute the actual Linux recovery on the known incompatible local flock environment.
+Root owns fresh independent reviews, exact-source provenance, focused gates, publication to the
+authorized branch and actual native feedback. No green production or deployment claim follows
+from diagnostic contracts. Existing production/default-test bytes remain unchanged.
+
+### Out of Scope
+
+No production helper changes, original-test edits, raised limits, weakened cleanup or identity
+guards, new daemon/cache, dependency download, unrelated local environment repair, VPS access,
+artifact packaging, paid provider action, workflow rerun/cancellation or installation.
