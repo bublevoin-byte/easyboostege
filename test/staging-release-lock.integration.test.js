@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,12 @@ const candidateImageId = `sha256:${'2'.repeat(64)}`;
 const postgresImageId = `sha256:${'3'.repeat(64)}`;
 const postgresContainerId = 'b'.repeat(64);
 const postgresVolumeSource = '/var/lib/docker/volumes/easyboost-staging_postgres-data/_data';
+const lockFixturePhases = new Set([
+  'child-started', 'config-json-enter', 'config-json-complete',
+  'config-quiet-enter', 'config-quiet-complete',
+  'build-enter', 'build-input-drained', 'build-barrier', 'build-complete',
+  'up-enter', 'up-state-written', 'up-barrier', 'up-complete',
+]);
 const postgresContainerInspection = {
   Id: postgresContainerId,
   Image: postgresImageId,
@@ -51,6 +58,11 @@ const postgresVolumeInspection = {
 function lockFixtureDockerScript(current, candidate) {
   return `#!/bin/bash
 set -eu
+record_phase() {
+  case "\${BLOCK_AT:-}" in
+    build|tree|recovery) { printf '%s\\n' "$1" > "$BARRIER_DIR/phase-$BLOCK_AT"; } 2>/dev/null || : ;;
+  esac
+}
 if [ "\${1:-}" = ps ] \\
   && [[ " $* " == *"label=com.docker.compose.project=easyboost-staging"* ]] \\
   && [[ " $* " == *"label=com.docker.compose.service=postgres"* ]] \\
@@ -64,11 +76,14 @@ if [ "\${1:-}" = volume ] && [ "\${2:-}" = inspect ]; then
   exit 0
 fi
 if [ "\${1:-}" = build ]; then
+  record_phase build-enter
   cat >/dev/null
+  record_phase build-input-drained
   if [ "\${BLOCK_AT:-}" = build ]; then
     echo $$ > "$BARRIER_DIR/build-pid"
     [ ! -e /proc/$$/fd/9 ] || touch "$BARRIER_DIR/inherited-lock-fd"
     trap '' TERM
+    record_phase build-barrier
     touch "$BARRIER_DIR/build"
     while [ ! -e "$BARRIER_DIR/release-build" ]; do /bin/sleep 0.02; done
   fi
@@ -77,6 +92,7 @@ if [ "\${1:-}" = build ]; then
     *" --tag easyboost-staging-app:release-${candidate.sha} "*) echo ${candidateImageId} > "$RELEASE_STATE" ;;
     *) exit 1 ;;
   esac
+  record_phase build-complete
   exit 0
 fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
@@ -104,8 +120,8 @@ fi
 if [ "\${1:-}" = compose ]; then
   printf '%s\n' "$*" >> "$BARRIER_DIR/compose-invocations"
   case " $* " in
-    *" config --format json "*) printf '%s' "$RESOLVED_COMPOSE_JSON" ;;
-    *" config --quiet "*) : ;;
+    *" config --format json "*) record_phase config-json-enter; printf '%s' "$RESOLVED_COMPOSE_JSON"; record_phase config-json-complete ;;
+    *" config --quiet "*) record_phase config-quiet-enter; :; record_phase config-quiet-complete ;;
     *" ps -q app "*) echo fake-container ;;
     *" ps --status running postgres --quiet "*) : ;;
     *" exec -T postgres pg_dump -U easyboost_staging -d easyboost_staging --format=custom --no-owner --no-privileges ")
@@ -113,11 +129,15 @@ if [ "\${1:-}" = compose ]; then
       printf '%s\\n' 'synthetic-lock-fixture-backup'
       ;;
     *" up --pull never -d --no-build --no-deps app "*)
+      record_phase up-enter
       count=0; [ ! -f "$BARRIER_DIR/up-count" ] || count="$(cat "$BARRIER_DIR/up-count")"; count=$((count+1)); echo "$count" > "$BARRIER_DIR/up-count"
       cat "$IMAGE_STATE" > "$CONTAINER_STATE"
+      record_phase up-state-written
       if { [ "\${BLOCK_AT:-}" = tree ] && [ "$count" -eq 1 ]; } || { [ "\${BLOCK_AT:-}" = recovery ] && [ "$count" -eq 2 ]; }; then
+        record_phase up-barrier
         touch "$BARRIER_DIR/$BLOCK_AT"; while [ ! -e "$BARRIER_DIR/release-$BLOCK_AT" ]; do /bin/sleep 0.02; done
       fi
+      record_phase up-complete
       ;;
   esac
   exit 0
@@ -209,15 +229,48 @@ async function waitForFile(file, handle, timeoutMs = 120_000) {
       assert.fail([
         `Process exited before ${path.basename(file)} barrier`,
         `status=${result.status} signal=${result.signal ?? 'none'}`,
-        result.stderr,
+        await lockLifecycleEvidence(file, handle),
       ].join('\n'));
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error([
     `Timed out waiting for ${file}`,
-    handle.output.stderr.slice(-4_096),
+    await lockLifecycleEvidence(file, handle),
   ].join('\n'));
+}
+
+async function lockLifecycleEvidence(file, handle) {
+  // Diagnostic reads are bounded, and their failure must never replace the barrier failure.
+  async function readValue(name, accepts) {
+    let opened;
+    try {
+      opened = await fs.open(path.join(path.dirname(file), name), 'r');
+      const bytes = Buffer.alloc(128);
+      const { bytesRead } = await opened.read(bytes, 0, bytes.length, 0);
+      const value = bytes.subarray(0, bytesRead).toString('utf8').trim();
+      return bytesRead < bytes.length && accepts(value) ? value : 'unavailable';
+    } catch (error) {
+      return error.code === 'ENOENT' ? 'missing' : 'unavailable';
+    } finally {
+      await opened?.close().catch(() => {});
+    }
+  }
+  function outputTail(value) {
+    let tail = value.slice(-1_024);
+    while (Buffer.byteLength(tail) > 1_024) tail = tail.slice(1);
+    return tail;
+  }
+  const [lastPhase, upCount, tree] = await Promise.all([
+    handle.phaseFile ? readValue(path.basename(handle.phaseFile), (value) => lockFixturePhases.has(value)) : 'unavailable',
+    readValue('up-count', (value) => /^\d{1,6}$/u.test(value)),
+    fs.access(path.join(path.dirname(file), 'tree')).then(() => 'present',
+      (error) => error.code === 'ENOENT' ? 'absent' : 'unavailable'),
+  ]);
+  return `[DEBUG-ci123-lock] ${JSON.stringify({
+    elapsedMs: Math.round(performance.now() - handle.startedAt), lastPhase, upCount, tree,
+    stdout: outputTail(handle.output.stdout), stderr: outputTail(handle.output.stderr),
+  })}`;
 }
 
 async function waitForProcessExit(pid, timeoutMs = 5_000) {
@@ -235,6 +288,15 @@ async function waitForProcessExit(pid, timeoutMs = 5_000) {
 }
 
 function start(command, args, environment) {
+  let phaseFile = null;
+  if (environment.BARRIER_DIR && ['build', 'tree', 'recovery'].includes(environment.BLOCK_AT)) {
+    try {
+      const candidate = path.join(environment.BARRIER_DIR, `phase-${environment.BLOCK_AT}`);
+      writeFileSync(candidate, 'child-started\n');
+      phaseFile = candidate;
+    } catch { /* Unavailable diagnostics must not prevent starting the original scenario. */ }
+  }
+  const startedAt = performance.now();
   const child = spawn(command, args, { env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
   const output = { stderr: '', stdout: '' };
   child.stdout.setEncoding('utf8');
@@ -245,7 +307,7 @@ function start(command, args, environment) {
     child.once('error', reject);
     child.once('close', (status, signal) => resolve({ signal, status, ...output }));
   });
-  return { child, done, output };
+  return { child, done, output, phaseFile, startedAt };
 }
 
 function childIsLive(child) {
@@ -471,9 +533,160 @@ test('lock fixture emits a deterministic nonempty synthetic backup for the appro
   }
 });
 
+test('lock barrier timeout preserves failure and cleanup with bounded lifecycle evidence', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-lock-evidence-'));
+  const barriers = path.join(root, 'barriers');
+  let handle;
+  let failure;
+  let cleanupErrors;
+  try {
+    await fs.mkdir(barriers);
+    const docker = path.join(root, 'docker');
+    await fs.writeFile(docker, lockFixtureDockerScript(
+      { sha: 'a'.repeat(64) }, { sha: 'c'.repeat(64) },
+    ));
+    const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    handle = start(process.execPath, ['--input-type=module', '-e', `
+      import { spawnSync } from 'node:child_process';
+      import fs from 'node:fs';
+      import path from 'node:path';
+      const configured = spawnSync(${JSON.stringify(bash)}, [${JSON.stringify(docker.replaceAll('\\', '/'))},
+        'compose', '-f', '/fixture/compose.staging.yml', '--env-file', '/fixture/.env.staging',
+        'config', '--quiet'], { env: process.env, encoding: 'utf8', timeout: 3000 });
+      if (configured.status !== 0) process.exit(2);
+      process.stdout.write('o'.repeat(12000) + 'stdout-tail');
+      process.stderr.write('e'.repeat(12000) + 'stderr-tail');
+      fs.writeFileSync(path.join(process.env.BARRIER_DIR, 'ready'), 'ready');
+      setTimeout(() => {}, 4000);
+    `], { ...process.env, BARRIER_DIR: barriers.replaceAll('\\', '/'), BLOCK_AT: 'tree' });
+    await waitForFile(path.join(barriers, 'ready'), handle, 3_000);
+    try {
+      await waitForFile(path.join(barriers, 'tree'), handle, 50);
+    } catch (error) {
+      failure = error;
+    }
+    assert.match(failure?.message ?? '', /Timed out waiting for .*tree/u);
+    const evidenceLine = failure.message.split('\n').find((line) => line.startsWith('[DEBUG-ci123-lock] '));
+    assert.ok(evidenceLine, 'a stalled child must expose lifecycle evidence before cleanup');
+    const evidence = JSON.parse(evidenceLine.slice('[DEBUG-ci123-lock] '.length));
+    assert.equal(evidence.lastPhase, 'config-quiet-complete');
+    assert.ok(evidence.elapsedMs >= 50 && evidence.elapsedMs < 4_000);
+    assert.equal(evidence.upCount, 'missing');
+    assert.equal(evidence.tree, 'absent');
+    assert.ok(evidence.stdout.endsWith('stdout-tail'));
+    assert.ok(evidence.stderr.endsWith('stderr-tail'));
+    assert.ok(Buffer.byteLength(evidence.stdout) <= 1_024);
+    assert.ok(Buffer.byteLength(evidence.stderr) <= 1_024);
+    assert.ok(failure.message.length < 4_000, 'captured output must stay bounded');
+    assert.equal(childIsLive(handle.child), true, 'diagnostics must precede child cleanup');
+  } finally {
+    cleanupErrors = await cleanupLockIntegrationResources({ barriers, handles: { activating: handle }, root });
+  }
+  assert.deepEqual(cleanupErrors, []);
+  assert.equal(childIsLive(handle.child), false);
+  await assert.rejects(fs.access(root), { code: 'ENOENT' });
+  assert.equal(combineCleanupFailures(failure, cleanupErrors), failure,
+    'cleanup must retain the original barrier failure');
+});
+
+test('lock fixture lifecycle evidence follows normal config, build and tree activation', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-lock-lifecycle-'));
+  const current = { sha: 'a'.repeat(64) };
+  const candidate = { sha: 'c'.repeat(64) };
+  const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  const docker = path.join(root, 'docker').replaceAll('\\', '/');
+  const environment = { ...process.env, BARRIER_DIR: root.replaceAll('\\', '/'), BLOCK_AT: 'tree',
+    IMAGE_STATE: 'image-state', CONTAINER_STATE: 'container-state', RELEASE_STATE: 'release-state',
+    RESOLVED_COMPOSE_JSON: '{"name":"synthetic-compose"}' };
+  const compose = ['compose', '-f', '/fixture/compose.staging.yml', '--env-file', '/fixture/.env.staging'];
+  let activating;
+  try {
+    await fs.writeFile(docker, lockFixtureDockerScript(current, candidate));
+    await fs.writeFile(path.join(root, 'image-state'), `${previousImageId}\n`);
+    function run(args, input) {
+      const result = spawnSync(bash, [docker, ...args], {
+        cwd: root, env: environment, input, encoding: 'utf8', timeout: 3_000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return result;
+    }
+    assert.equal(run([...compose, 'config', '--format', 'json']).stdout, '{"name":"synthetic-compose"}');
+    assert.equal(await fs.readFile(path.join(root, 'phase-tree'), 'utf8'), 'config-json-complete\n');
+    assert.equal(run([...compose, 'config', '--quiet']).stdout, '');
+    assert.equal(await fs.readFile(path.join(root, 'phase-tree'), 'utf8'), 'config-quiet-complete\n');
+    run(['build', '--file', 'Dockerfile', '--tag', `easyboost-staging-app:release-${current.sha}`, '-'],
+      'synthetic build stream\n');
+    assert.equal(await fs.readFile(path.join(root, 'phase-tree'), 'utf8'), 'build-complete\n');
+    assert.equal(await fs.readFile(path.join(root, 'release-state'), 'utf8'), `${previousImageId}\n`);
+    activating = start(bash, [docker, ...compose, 'up', '--pull', 'never', '-d', '--no-build', '--no-deps', 'app'],
+      { ...environment, IMAGE_STATE: path.join(root, 'image-state').replaceAll('\\', '/'),
+        CONTAINER_STATE: path.join(root, 'container-state').replaceAll('\\', '/') });
+    await waitForFile(path.join(root, 'tree'), activating, 3_000);
+    const evidence = JSON.parse((await lockLifecycleEvidence(path.join(root, 'tree'), activating))
+      .slice('[DEBUG-ci123-lock] '.length));
+    assert.equal(evidence.lastPhase, 'up-barrier');
+    assert.equal(evidence.upCount, '1');
+    assert.equal(evidence.tree, 'present');
+    assert.equal(childIsLive(activating.child), true);
+    assert.equal(await fs.readFile(path.join(root, 'container-state'), 'utf8'), `${previousImageId}\n`);
+    await fs.writeFile(path.join(root, 'release-tree'), 'go\n');
+    assert.equal((await activating.done).status, 0);
+    assert.equal(await fs.readFile(path.join(root, 'phase-tree'), 'utf8'), 'up-complete\n');
+    // Unreadable diagnostic destination must not alter the approved command's verdict/output.
+    await fs.rm(path.join(root, 'phase-tree'));
+    await fs.mkdir(path.join(root, 'phase-tree'));
+    assert.equal(run([...compose, 'config', '--quiet']).stdout, '');
+  } finally {
+    assert.deepEqual(await cleanupLockIntegrationResources({ barriers: root,
+      handles: { activating }, root }), []);
+  }
+});
+
+test('lock barrier failure reports missing or invalid evidence without masking exit and cleanup', async () => {
+  for (const condition of ['missing', 'unreadable', 'invalid']) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-lock-missing-evidence-'));
+    let handle;
+    let failure;
+    let cleanupErrors;
+    try {
+      // Starting with an unreadable destination must also ignore stale evidence.
+      if (condition === 'unreadable') await fs.mkdir(path.join(root, 'phase-tree'));
+      handle = start(process.execPath, ['-e', 'process.exitCode = 7;'], {
+        ...process.env, BARRIER_DIR: root, BLOCK_AT: 'tree',
+      });
+      if (condition === 'missing') await fs.rm(path.join(root, 'phase-tree'));
+      if (condition === 'invalid') {
+        await fs.writeFile(path.join(root, 'phase-tree'), 'not-an-allowlisted-phase');
+        await fs.writeFile(path.join(root, 'up-count'), 'not-an-activation-count');
+      }
+      await handle.done;
+      try {
+        await waitForFile(path.join(root, 'tree'), handle, 100);
+      } catch (error) {
+        failure = error;
+      }
+      assert.match(failure?.message ?? '', /Process exited before tree barrier\nstatus=7 signal=none/u);
+      const evidenceLine = failure.message.split('\n').find((line) => line.startsWith('[DEBUG-ci123-lock] '));
+      assert.ok(evidenceLine);
+      const evidence = JSON.parse(evidenceLine.slice('[DEBUG-ci123-lock] '.length));
+      assert.equal(evidence.lastPhase, condition === 'missing' ? 'missing' : 'unavailable');
+      assert.equal(evidence.upCount, condition === 'invalid' ? 'unavailable' : 'missing');
+      assert.equal(evidence.tree, 'absent');
+      assert.ok(evidence.elapsedMs >= 0);
+      assert.doesNotMatch(failure.message, /not-an-allowlisted-phase|not-an-activation-count/u);
+    } finally {
+      cleanupErrors = await cleanupLockIntegrationResources({ barriers: root, handles: { activating: handle }, root });
+    }
+    assert.deepEqual(cleanupErrors, []);
+    assert.equal(childIsLive(handle.child), false);
+    await assert.rejects(fs.access(root), { code: 'ENOENT' });
+    assert.equal(combineCleanupFailures(failure, cleanupErrors), failure);
+  }
+});
+
 test('real Linux flock excludes deploy and rollback through build, tree activation and recovery', {
   skip: process.platform !== 'linux' ? 'requires Linux /usr/bin/flock semantics' : false,
-}, async () => {
+}, async (t) => {
   let root = null;
   let barriers = null;
   let building = null;
@@ -579,7 +792,9 @@ exit 0
       'immutable-archive-v4', bundleDigest];
 
     building = start('bash', deployArgs, { ...environment, BLOCK_AT: 'build' });
+    t.diagnostic('[DEBUG-ci123-lock] deploy-start elapsed_ms=0');
     await waitForFile(path.join(barriers, 'build'), building);
+    t.diagnostic(`[DEBUG-ci123-lock] deploy-build-barrier elapsed_ms=${Math.round(performance.now() - building.startedAt)}`);
     const blockedRollback = spawnSync('bash', [installedRollback, current.sha,
       'immutable-archive-v4', bundleDigest], {
       env: environment, encoding: 'utf8', timeout: 10_000,
@@ -587,6 +802,7 @@ exit 0
     assert.equal(blockedRollback.status, 75, blockedRollback.stderr);
     await fs.writeFile(path.join(barriers, 'release-build'), 'go\n');
     const built = await building.done;
+    t.diagnostic(`[DEBUG-ci123-lock] deploy-exit elapsed_ms=${Math.round(performance.now() - building.startedAt)}`);
     assert.equal(built.status, 0, built.stderr);
     assert.equal(await fs.readFile(containerState, 'utf8'), `${candidateImageId}\n`);
 
@@ -595,13 +811,16 @@ exit 0
       'immutable-archive-v4', bundleDigest], {
       ...environment, BLOCK_AT: 'tree',
     });
+    t.diagnostic('[DEBUG-ci123-lock] rollback-start elapsed_ms=0');
     await waitForFile(path.join(barriers, 'tree'), activating);
+    t.diagnostic(`[DEBUG-ci123-lock] rollback-tree-barrier elapsed_ms=${Math.round(performance.now() - activating.startedAt)}`);
     const blockedDeploy = spawnSync('bash', deployArgs, {
       env: environment, encoding: 'utf8', timeout: 10_000,
     });
     assert.equal(blockedDeploy.status, 75, blockedDeploy.stderr);
     await fs.writeFile(path.join(barriers, 'release-tree'), 'go\n');
     const activated = await activating.done;
+    t.diagnostic(`[DEBUG-ci123-lock] rollback-exit elapsed_ms=${Math.round(performance.now() - activating.startedAt)}`);
     assert.equal(activated.status, 0, activated.stderr);
     assert.equal(await fs.readFile(containerState, 'utf8'), `${previousImageId}\n`);
 
@@ -610,7 +829,9 @@ exit 0
     recovering = start('bash', deployArgs, {
       ...environment, BLOCK_AT: 'recovery', FAIL_CANDIDATE_READY: '1',
     });
+    t.diagnostic('[DEBUG-ci123-lock] recovery-start elapsed_ms=0');
     await waitForFile(path.join(barriers, 'recovery'), recovering);
+    t.diagnostic(`[DEBUG-ci123-lock] recovery-barrier elapsed_ms=${Math.round(performance.now() - recovering.startedAt)}`);
     const blockedDuringRecovery = spawnSync('bash', [installedRollback, candidate.sha,
       'immutable-archive-v4', bundleDigest], {
       env: environment, encoding: 'utf8', timeout: 10_000,
@@ -618,6 +839,7 @@ exit 0
     assert.equal(blockedDuringRecovery.status, 75, blockedDuringRecovery.stderr);
     await fs.writeFile(path.join(barriers, 'release-recovery'), 'go\n');
     const recovered = await recovering.done;
+    t.diagnostic(`[DEBUG-ci123-lock] recovery-exit elapsed_ms=${Math.round(performance.now() - recovering.startedAt)}`);
     assert.equal(recovered.status, 1, recovered.stderr);
     assert.match(recovered.stderr, /verified prior state restored/u);
     assert.equal(await fs.readFile(containerState, 'utf8'), `${previousImageId}\n`);
@@ -625,11 +847,14 @@ exit 0
     await fs.rm(path.join(barriers, 'build'), { force: true });
     await fs.rm(path.join(barriers, 'release-build'), { force: true });
     killed = start('bash', deployArgs, { ...environment, BLOCK_AT: 'build' });
+    t.diagnostic('[DEBUG-ci123-lock] killed-build-start elapsed_ms=0');
     await waitForFile(path.join(barriers, 'build'), killed);
+    t.diagnostic(`[DEBUG-ci123-lock] killed-build-barrier elapsed_ms=${Math.round(performance.now() - killed.startedAt)}`);
     const blockedBuildPid = Number(await fs.readFile(path.join(barriers, 'build-pid'), 'utf8'));
     await assert.rejects(fs.access(path.join(barriers, 'inherited-lock-fd')), { code: 'ENOENT' });
     killed.child.kill('SIGKILL');
     const killedResult = await killed.done;
+    t.diagnostic(`[DEBUG-ci123-lock] killed-build-exit elapsed_ms=${Math.round(performance.now() - killed.startedAt)}`);
     assert.equal(killedResult.signal, 'SIGKILL');
     await waitForProcessExit(blockedBuildPid);
     let afterKill;

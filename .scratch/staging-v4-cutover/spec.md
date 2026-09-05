@@ -128,3 +128,117 @@ or change production scripts. Use existing process-lifecycle seams where suitabl
 process framework. During the active frozen 09/10 gate, work only in a separately named diagnostic
 copy that is outside the npm unit-test glob. Integrate into the real test file only after root releases
 the source freeze. A final full gate remains required for the integrated version.
+
+## Observable Linux lock lifecycle — CI123 diagnostic loop
+
+### Problem Statement
+
+The owner still cannot install the verified release: CI123 now gets past its first successful
+deploy but times out before the rollback tree barrier. Its432379ms failure contains empty stderr,
+so it does not distinguish slow installed preflight, build, activation or test dispatch. The
+generated-fixture sequence passes locally; Docker Desktop also reports PID0 for an exited flock
+recorder even in the host PID namespace under an unprivileged probe. Neither is an exact red loop.
+
+### Solution
+
+Make this existing integration scenario report a small, bounded, test-owned phase/timing snapshot
+when a barrier fails, and emit a few lifecycle milestones during the actual scenario. This builds
+the missing diagnostic feedback loop. It is not a claimed fix for the rollback timeout.
+
+### User Stories
+
+1. As the owner, I want the failed test to name the last completed phase so that repair is based
+   on evidence instead of another guessed production change.
+2. As the maintainer, I want elapsed time from the actual child start so that slowness can be
+   separated from dispatch failure without increasing the barrier deadline.
+3. As the maintainer, I want bounded captured output and fixture state before cleanup so that
+   teardown does not erase the only evidence.
+4. As the owner, I want the same safety assertions and resource cleanup to run so that diagnostic
+   work does not make a failing deployment appear successful.
+5. As the owner, I want no live server access or secret values in diagnostics.
+
+### Implementation Decisions
+
+- Change only the existing real-flock integration test and its test-local helpers/fast regressions.
+  Reuse its generated fake Docker and existing barrier directory; no production abstraction,
+  workflow change, package/dependency change, configurable diagnostic service or new operator mode.
+- Record a fixed allowlist of synthetic phase names around existing build/config/up operations;
+  no arbitrary command arguments, environment values, database output or secret-bearing text.
+- Capture existing stdout/stderr only under a strict small output limit on failure, as the current
+  test already captures stderr. Include monotonic child elapsed time, last observed phase and
+  existing activation-count/tree-barrier state before the common cleanup. Keep errors honest if
+  diagnostics cannot be read; never mask the original failure or skip cleanup.
+- Preserve every original assertion, default120000ms barrier deadline, operation ordering,
+  command tuple, image/container/lock authority and process-settlement behavior. Milestones
+  must not wait for consumer input or alter the fixture's activation/recovery gates.
+
+### Testing Decisions
+
+Use the existing generated-fixture lifecycle and barrier-wait seams. New fast tests must first
+show that a stalled finite test-owned child lacks the required diagnostic, then prove that the
+failure includes bounded phase/timing/state evidence without changing the failure verdict. Cover
+normal dispatch, missing diagnostic data and retained cleanup behavior. The full actual Linux
+scenario still must run in CI; local fixtures are not proof of its cause or success.
+
+### Out of Scope
+
+No guessed production fix, timeout increase, guard bypass, public API/UI change, PID0 workaround,
+VPS instrumentation, install/recover/cutover/deploy, new CI pipeline or issue05 redesign.
+
+### Further Notes
+
+This is a bounded continuation under the owner's autopilot request, not a declaration that the
+remaining failure is only cosmetic or that more changes will be necessary. Root owns review,
+common gates, authorized branch publication and the actual CI observation. Once the exact stalled
+phase is known, choose only the repair justified by it and remove temporary instrumentation.
+
+## Observable host-lock settlement — CI123 diagnostic loop
+
+### Problem Statement
+
+Two additional CI123 failures stop the same release: the unchanged successful-release and typed
+retention scenarios report100ms timeouts. Sixty focused repetitions on WindowsNode22.23.2 and
+sixty on localLinuxNode22.23.1 all pass. Injecting125ms of durable-I/O latency into the actual
+unchanged test cases reproduces both exact timeout messages; this demonstrates sensitivity but
+does not establish that the actual GitHub runner had this latency.
+
+### Solution
+
+Report whether the timed-out operation had settled successfully, together with its elapsed time
+and a safe classification of any underlying error. Keep the existing failure and every deadline.
+This supplies discriminating evidence in the next actual CI run instead of guessing a repair.
+
+### User Stories
+
+1. As the owner, I want to distinguish a slow successful operation from a failed lock mutation.
+2. As the maintainer, I want evidence captured at the existing call before fixture cleanup.
+3. As the maintainer, I want the original exception and timeout behavior preserved exactly.
+4. As the owner, I want no database, live server, secret or production behavior change.
+
+### Implementation Decisions
+
+- Restrict changes to the two failing host-lock integration test call sites and a small test-local
+  evidence seam. Record a fixed action label, monotonic elapsed time, existing settled/succeeded
+  boolean flags and allowlisted cause classification. No arbitrary paths, arguments or environment.
+- Diagnostic failures must not mask or replace the original operation error. Pass the same error
+  object through. Do not retry the mutation, swallow errors, adjust100ms/5ms deadlines or alter
+  any original assertion/order/ownership/inode/link/retention/cleanup requirement.
+- Do not change the production lock module, test runner, workflow or unrelated scenarios.
+
+### Testing Decisions
+
+Use the real exported bounded release/retain operations and existing test-local callback seam.
+First prove missing evidence with a finite deliberately slow action; then assert exact rethrow,
+settlement flags and bounded classification after instrumentation. Cover success, underlying
+failure and diagnostic failure. Preserve the existing intentional5ms deadline test unchanged.
+Focused tests, independent reviews and one integrated root gate precede a scoped commit.
+
+### Out of Scope
+
+No claimed repair of unobserved CI I/O, deadline increase, fake clock bypass, production change,
+generic tracing framework, retry loop, live server instrumentation or deployment.
+
+### Further Notes
+
+Ticket13 is disjoint from ticket12. Both are diagnostic preparation for the same next CI; neither
+clears0898f55 for installation. The tagged scratch latency probe remains diagnostic-only.
