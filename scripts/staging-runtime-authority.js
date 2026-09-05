@@ -1039,6 +1039,52 @@ export function verifyProtectedRuntime({ appDirectory, authority }) {
   return current;
 }
 
+export function verifyComposeAuthority({
+  appDirectory, recoveryMarker, runtimeAuthority, activeMarkerAuthority, transactionMarkerAuthority,
+}) {
+  // Parse each capture at its proof, so a later malformed record cannot mask an earlier failure.
+  verifyProtectedRuntime({
+    appDirectory, authority: parseJson(runtimeAuthority, 'runtime authority'),
+  });
+  verifyOptionalPrivateFile({
+    file: path.join(appDirectory, '.release-sha256'), role: 'active release marker',
+    expectedMode: 0o600, maximumBytes: 65,
+    authority: parseJson(activeMarkerAuthority, 'optional private file authority'),
+  });
+  verifyOptionalPrivateFile({
+    file: recoveryMarker, role: 'staging transaction marker',
+    expectedMode: 0o600, maximumBytes: 4096,
+    authority: parseJson(transactionMarkerAuthority, 'optional private file authority'),
+  });
+}
+
+export function verifyReleaseWorkspace({
+  appDirectory, runtimeAuthority, workDirectory, workspaceIdentity,
+}) {
+  verifyProtectedRuntime({
+    appDirectory, authority: parseJson(runtimeAuthority, 'runtime authority'),
+  });
+  if (process.platform !== 'linux') {
+    throw new Error('GNU workspace identity interpretation requires Linux');
+  }
+  const failure = 'Private staging workspace identity changed or is unavailable';
+  if (typeof workspaceIdentity !== 'string' || workspaceIdentity.length === 0
+      || typeof workDirectory !== 'string' || path.normalize(workDirectory) !== workDirectory
+      || path.dirname(workDirectory) !== `${appDirectory}/rollbacks`) {
+    throw new Error(failure);
+  }
+  let stat;
+  try { stat = fs.lstatSync(workDirectory, { bigint: true }); } catch { throw new Error(failure); }
+  if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== BigInt(process.getuid())
+      || (stat.mode & 0o7777n) !== 0o700n) {
+    throw new Error(failure);
+  }
+  // GNU stat -c '%d:%i:%f:%u:%g:%a': keep device/inode exact and include special mode bits.
+  const current = [stat.dev, stat.ino, stat.mode.toString(16), stat.uid, stat.gid,
+    (stat.mode & 0o7777n).toString(8)].join(':');
+  if (current !== workspaceIdentity) throw new Error(failure);
+}
+
 function statStablePrivateFile(file, {
   role, expectedMode = 0o600, maximumBytes = Number.MAX_SAFE_INTEGER, operations = fs,
   platform = process.platform,
@@ -1107,6 +1153,27 @@ export function verifyReservation({
   return current;
 }
 
+export function verifySpaceReservations({
+  temporaryFile = '', temporaryAuthority = '', liveFile = '', liveAuthority = '',
+  storeFile = '', storeAuthority = '',
+}) {
+  const slots = [[temporaryFile, temporaryAuthority], [liveFile, liveAuthority],
+    [storeFile, storeAuthority]];
+  for (const [file] of slots) {
+    if (file === '') continue;
+    // The shell's reservation_authority case selects the first matching slot,
+    // including when two or three reservation paths are identical.
+    const authority = parseJson(slots.find(([candidate]) => candidate === file)[1],
+      'reservation authority');
+    const size = authority?.size;
+    if (typeof size !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(size)
+        || !Number.isSafeInteger(Number(size)) || Number(size) < 64 * 1024 * 1024) {
+      throw new Error('staging disk reservation lost required headroom or has invalid capacity');
+    }
+    verifyReservation({ file, minimumBytes: Number(size), authority });
+  }
+}
+
 function parseJson(value, label) {
   try { return JSON.parse(value); } catch { throw new Error(`${label} is invalid`); }
 }
@@ -1134,6 +1201,36 @@ async function readBoundedStdin(label, maximumBytes = DOCKER_INSPECTION_MAX_BYTE
 
 async function runCli() {
   const [command, ...args] = process.argv.slice(2);
+  if (command === 'verify-space-reservations') {
+    if (args.length !== 6) {
+      throw new Error('Usage: staging-runtime-authority.js verify-space-reservations TEMP TEMP_JSON LIVE LIVE_JSON STORE STORE_JSON');
+    }
+    verifySpaceReservations({
+      temporaryFile: args[0], temporaryAuthority: args[1], liveFile: args[2],
+      liveAuthority: args[3], storeFile: args[4], storeAuthority: args[5],
+    });
+    return;
+  }
+  if (command === 'verify-release-workspace') {
+    if (args.length !== 4) {
+      throw new Error('Usage: staging-runtime-authority.js verify-release-workspace APP RUNTIME_JSON WORKSPACE GNU_RECORD');
+    }
+    verifyReleaseWorkspace({
+      appDirectory: args[0], runtimeAuthority: args[1],
+      workDirectory: args[2], workspaceIdentity: args[3],
+    });
+    return;
+  }
+  if (command === 'verify-compose-authority') {
+    if (args.length !== 5) {
+      throw new Error('Usage: staging-runtime-authority.js verify-compose-authority APP RECOVERY RUNTIME_JSON ACTIVE_JSON TRANSACTION_JSON');
+    }
+    verifyComposeAuthority({
+      appDirectory: args[0], recoveryMarker: args[1], runtimeAuthority: args[2],
+      activeMarkerAuthority: args[3], transactionMarkerAuthority: args[4],
+    });
+    return;
+  }
   if (command === 'verify-release-pair') {
     if (args.length !== 3) {
       throw new Error('Usage: staging-runtime-authority.js verify-release-pair ARCHIVE SHA ROLE');

@@ -705,3 +705,91 @@ Original native feedback must still be rerun after any future production fix, no
 No production edit, caching/removal of authority proofs, new batching daemon, deadline increase,
 existing test deletion/weakening, existing diagnostic/workflow edit, package download, VPS action,
 new release archive, unchanged full-suite repeat, or claim that the original bug is resolved.
+
+## Compose the measured protected-state boundaries
+
+### Problem Statement
+
+The retained-pair repair reduced native work but did not satisfy the unchanged120s rollback
+barrier. Canonical CI129 also fails only that barrier. Ticket22 measured approximately1.02s
+for Compose reproof,0.70s for workspace reproof and2.73s for three-reservation verification.
+Their successful reduced pre-tree path contains100 selected guarded starts. The owner needs
+less repeated process startup without losing any filesystem or recovery protection.
+
+### Solution and User Stories
+
+1. As the owner, I want the existing protected checks executed with fewer process launches,
+   so deployment preparation can progress faster without changing its safety conditions.
+2. As the maintainer, I want three named operations, not a generic caller-controlled batch.
+3. As the owner, I want every transaction boundary rechecked freshly, never cached.
+4. As the maintainer, I want missing authority, drift and supervisor failure to retain their
+   current fail-closed ordering and authority_violation/recovery behavior.
+5. As the maintainer, I want existing GNU identity records and non-Linux behavior preserved.
+6. As the owner, I want measured local improvement followed by unchanged native feedback,
+   not a promised120s result extrapolated from static counts.
+
+### Implementation Decisions
+
+One coherent repair covers the three measured read-only boundaries in the existing runtime
+argument/CLI and shell caller seams. Keep all call sites and mutation placement unchanged.
+Each composed invocation uses the existing inherited-chain run_bounded60s guard; replacing
+several separate60s calls with one60s operation tightens the aggregate bound, never raises it.
+No new stateful service, cache, generic operation array or subprocess command interface.
+
+Compose reproof: reuse protected-runtime, optional active-marker and optional transaction-marker
+primitives in exactly that order with their current path bindings, sizes, metadata and JSON
+identity comparisons. The normal populated-authority case should require one guarded start.
+An empty authority currently returns1 without setting authority_violation, whereas a failed
+proof sets it to1. Preserve ordering for combined failures; retaining the unchanged sequential
+fallback when any capture is empty is acceptable. Do not prevalidate later captures ahead of
+an earlier proof when that changes causal behavior.
+
+Workspace reproof: preserve initial capture and the GNU stat device/inode/fullmode/uid/gid/
+permissions record; do not change the shared identity helper or cutover consumers. For Linux,
+a named operation may verify protected runtime then a direct private workspace child of the
+captured rollback root and compare the exact existing record from native BigInt lstat fields.
+Prove equivalence against actual GNU stat, including full mode and special permission bits;
+exact0700/current owner, no-follow directory type, device/inode/group and existing record
+comparison all remain mandatory. Do not use lossy Number conversion for device/inode. Existing
+non-Linux shell behavior remains the fallback because Node/GNU stat Windows metadata differs.
+The runtime verifier itself must reject non-Linux use of this Linux record interpretation.
+Missing capture/invalid-parent cases must retain earlier runtime-proof/failure-flag ordering;
+the existing path may remain as a fallback. Do not recapture an identity to forgive drift.
+
+Reservation reproof: retain preceding workspace reproof. Replace only the subsequent bounded
+JSON size parsing and verification of the three known temporary/live/store slots with one
+fixed-purpose operation. Preserve slot order, empty-path skips, first-match record association
+when paths repeat, safe integer/minimum64MiB headroom validation, exact captured JSON comparison,
+owner0600/no-follow/single-link/stable descriptor proof and actual size/allocated blocks proof.
+No allocation, truncation or removal moves into this verifier. A reservation-only failure still
+returns1 without newly setting authority_violation; a preceding workspace failure retains its
+existing flag. Do not expose arbitrary command lists or accept unsafe numeric coercions.
+
+For the populated Linux success path this can reduce selected starts from100 to39: Compose
+30to10, workspace52to26, reservation-only18to3. These are source-derived counts and a hypothesis,
+not native measurements or a guarantee that the approximately20s barrier gap disappears.
+
+### Testing Decisions
+
+Use TDD at real module/CLI and actual shell boundary seams, as in the retained-pair ticket.
+Prefer real protected files/directories/reservation metadata mutations. Cover valid populated
+and optional-absent cases, missing and malformed captures, identity/bytes/owner/mode/link/type
+and parent changes, special mode bits, record equality, invalid/underflow/nonnumeric capacity,
+empty/duplicate reservation slots, and ordering/authority_violation behavior for finite guard
+statuses1/23/124/125/137. Check GNU stat equality on actual Linux without changing old tests.
+Only new tests are added; all existing production tests and workflows stay byte-identical.
+
+After production freeze, run the unchanged ticket22 finite guarded diagnostic on the same cached
+Linux22.23.1/container fixture for three observations per boundary. Compare to the recorded
+pre-change ticket22 baseline and disclose that these are separate runs, not interleaved timing
+or native CPU measurements. Verify exact source/bundle/runtime provenance; no Docker Desktop
+actual rollback retry because of its known PID0 refusal. The probe itself must not be modified
+to accommodate the repair. Root owns focused gates, independent two-axis reviews, one complete
+fresh pinned local lint/check/test gate, authorized-branch publication and original native/CI
+feedback. Failed native feedback remains a failure regardless of faster local components.
+
+### Out of Scope
+
+No new supervisor/daemon, authority cache/removal, deadline increase, changed original test or
+workflow, dependency/network download, shared GNU record-format migration, unrelated archive
+refactor, source-generation bypass, VPS mutation, archive packaging or deployment readiness claim.

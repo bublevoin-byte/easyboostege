@@ -480,6 +480,17 @@ create_release_workspace() {
 
 reverify_release_workspace() {
   local current
+  if [[ "${OSTYPE:-}" == linux* ]] && [ -n "$protected_runtime_identity" ] \
+    && [ -n "$work_dir_identity" ] && [ "${work_dir%/*}" = "$app_dir/rollbacks" ]; then
+    if ! run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" verify-release-workspace \
+      "$app_dir" "$protected_runtime_identity" "$work_dir" "$work_dir_identity"; then
+      authority_violation=1
+      return 1
+    fi
+    return 0
+  fi
+  # GNU records differ from Node metadata on non-Linux systems. Keep the original
+  # path there and when missing captures/invalid parents need its failure ordering.
   reverify_protected_runtime_identity || return 1
   if [ -z "$work_dir_identity" ] || [ "${work_dir%/*}" != "$app_dir/rollbacks" ] \
     || ! verify_protected_path "$work_dir" directory 'private staging workspace' 0 700 \
@@ -705,18 +716,17 @@ consume_reservation() {
 }
 
 verify_space_reservations() {
-  local file authority size
   reverify_release_workspace || return 1
-  for file in "$temporary_reservation_file" "$live_reservation_file" "$store_reservation_file"; do
-    [ -n "$file" ] || continue
-    authority="$(reservation_authority "$file")" || return 1
-    size="$(authority_field "$authority" size)" || return 1
-    [ "$size" -ge "$MINIMUM_DISK_HEADROOM_BYTES" ] || {
-      echo "staging disk reservation lost required headroom" >&2
-      return 1
-    }
-    verify_one_reservation "$file" "$size" || return 1
-  done
+  if [ -z "$temporary_reservation_file" ] && [ -z "$live_reservation_file" ] \
+    && [ -z "$store_reservation_file" ]; then
+    return 0
+  fi
+  if ! run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" verify-space-reservations \
+    "$temporary_reservation_file" "$temporary_reservation_authority" \
+    "$live_reservation_file" "$live_reservation_authority" \
+    "$store_reservation_file" "$store_reservation_authority"; then
+    return 1
+  fi
 }
 
 release_space_reservations() {
@@ -1133,6 +1143,17 @@ verify_running_image() {
 }
 
 reverify_compose_authority() {
+  if [ -n "$protected_runtime_identity" ] && [ -n "$active_marker_authority" ] \
+    && [ -n "$transaction_marker_authority" ]; then
+    if ! run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" verify-compose-authority \
+      "$app_dir" "$recovery_marker" "$protected_runtime_identity" \
+      "$active_marker_authority" "$transaction_marker_authority"; then
+      authority_violation=1
+      return 1
+    fi
+    return 0
+  fi
+  # Empty captures retain the original first-failure and authority-violation semantics.
   reverify_protected_runtime_identity || return 1
   reverify_active_marker_identity || return 1
   reverify_transaction_marker_identity || return 1
