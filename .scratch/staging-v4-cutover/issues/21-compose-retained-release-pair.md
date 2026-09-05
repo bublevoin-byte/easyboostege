@@ -1,6 +1,6 @@
 # 21 — Compose retained release-pair verification
 
-Status: in-progress
+Status: done
 Blocked by: 20 — bounded-command overhead attribution
 Spec: .scratch/staging-v4-cutover/spec.md#verify-each-retained-release-pair-in-one-bounded-operation
 
@@ -39,7 +39,7 @@ assertion. This is a bounded measured production optimization, not guaranteed CI
 - [x] Finite real before/after cost evidence and memory/lifetime limits recorded honestly.
 - [x] Worker focused gates and fixed changed-file hashes recorded; original tests untouched.
 - [x] Root independent reviews, fresh full local lint/check/test and scoped scans.
-- [ ] One ticket commit and authorized branch publication; native original gates reported exactly.
+- [x] One ticket commit and authorized branch publication; native original gates reported exactly.
 
 ## Baseline / review cautions
 
@@ -191,3 +191,35 @@ not a controlled paired performance measurement. The Windows deploy fixture subs
 fixed fake-command/timeout harness for `run_bounded`; it is not the real inherited-chain timing
 probe. The root did not change source or weaken tests in response to this timing observation.
 The local component improvement is not evidence of a faster whole suite or native timeout fix.
+
+## Publication and native outcome — scoped optimization complete, timeout unresolved
+
+Committed as `528f50889385775f27e53540cd22167e7c738f0d`, exact eight ticket files, five
+frozen code/test blobs verified byte-for-byte against Git. Fresh final scoped scan passed;
+post-commit secret history scan passed for 391 commits. Normal push published ticket20 and
+ticket21 only to `prototype/aisy-today-visual-v1`; remote read-back matched exact528f508.
+
+Native diagnostic5 run33963867027 on that commit:
+
+- Reduced job101300367138: 11/11 contracts passed in23955.250871ms; installer554ms and
+  prepared-state equivalence1109ms. Original signature still fails at120006ms: phase
+  config-json-complete, missing tree/upCount, empty streams, child still alive. The tree was
+  observed at140046ms and helper exit0 with pipes closed at217413ms. Diagnostic correctly
+  returns1 because the original120s assertion failed. Job failed in4m12s, final11:42:27UTC.
+- Full job101300366935: component5/5 in10354.78502ms and observer12/12 in1068.711653ms
+  passed. Unchanged real flock scenario failed at the same tree assertion120015ms, same phase
+  and empty streams, total378334.633317ms (TAP378400.571288ms). Successful first deploy
+  reached build93822ms and exited256072ms. Job failed in6m50s, final11:45:05UTC.
+- Full raw logs were read:22965 and46968characters. Sampled process categories are overlapping
+  residency observations, not CPU time, exact invocation counts or permission to remove guards.
+
+Compared with native4, reduced late-tree time144073→140046ms and helper settlement234109→
+217413ms improved, but the required120s bound still fails. Full scenario448710.305124→
+378334.633317ms is shorter, not green. This ticket's bounded composition/evidence work is done;
+the overall CI/deployment repair is not. Canonical CI129 run33963867029/job101300366921
+finished failed in42m44s, final2026-09-05T12:21:00UTC. Complete raw1365992characters read:
+3234tests/3170pass/1fail/63skip/0cancel,2499579.318014ms; PostgreSQL51/51,15608.395644ms.
+The sole failed original flock scenario took416253.665204ms: tree timeout120025ms,
+lastPhase build-complete (phase differs from native5), absent tree/upCount, empty streams.
+First deploy build108995ms/exit293517ms. Later artifact/browser/performance/quality gates
+were not reached. No additional unchanged run, new release package or VPS mutation occurred.

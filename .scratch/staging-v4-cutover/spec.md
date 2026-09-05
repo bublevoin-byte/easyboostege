@@ -639,3 +639,69 @@ No unchanged diagnostic-only full-suite repeats. Native improvement is not prove
 No supervisor/runtime-authority hash removal or cache, broader batching/refactor, new process
 control, new workflow, dependency change/download, raised120s or other deadline, deleted/weakened
 existing test, VPS upload/install/recovery/cutover/deploy, archive overwrite, or readiness claim.
+
+## Measure remaining protected-boundary startup cost
+
+### Problem Statement
+
+After the measured retained-pair optimization, native diagnostic5 still observes the original
+120s empty-output rollback timeout. Its reduced tree arrives at140046ms and clean settlement
+at217413ms. The full original scenario is shorter at378334.633317ms but still fails the same
+assertion. The owner needs the next change chosen from evidence, not another speculative patch.
+
+### Solution and User Stories
+
+1. As the owner, I want the remaining delay attributed to a small repeated operation before
+   another production change and hour-long local gate.
+2. As the maintainer, I want real guarded component timings and clearly labelled source-derived
+   call counts, so neither sampled residency nor static call counts masquerade as native CPU time.
+3. As the owner, I want every protected-runtime, marker, workspace and reservation check retained.
+4. As the maintainer, I want finite reproducible diagnostic output with failure status preserved.
+5. As the owner, I want the ongoing canonical CI result preserved and no live-server experiment.
+
+### Implementation Decisions
+
+This is diagnosis only: do not edit production helpers or existing tests/workflows. Reuse the
+installed hermetic helper and real inherited authority chain in a small private local fixture.
+Measure three narrowly selected existing boundaries: compose-authority reproof, workspace
+reproof, and reservation verification. The fixed probe may expose only these known operations,
+never a caller-provided command, path, environment or process selector. Three repetitions per
+operation are sufficient; setup/capture/cleanup must be separate from operation timing.
+
+Ranked falsifiable hypotheses:
+
+1. Repeated protected-boundary process starts dominate useful filesystem work. Prediction:
+   the real guarded boundary is much slower than executing its same read-only primitives in
+   one process, with no omitted validation. First establish its actual unmodified baseline.
+2. Reservation JSON-field reads and repeated workspace checks contribute disproportionate
+   startup. Prediction: the verified source call tree and corresponding real component show
+   materially more command boundaries than the small amount of state being checked.
+3. Loading the archive module slows unrelated authority operations. Prediction: a finite
+   equivalent unrelated operation with exact pre-ticket21 versus current source differs
+   consistently; isolate this only if it can be done without changing repository files or
+   executing an unverified mixed helper generation. Otherwise explicitly leave it unmeasured.
+
+Count the successful reduced pre-tree call path from exact current source, including nested
+calls and fixed two-archive/three-reservation fixture conditions. Label static counts as static,
+include call-site provenance, and state uncertain branches. Do not present sample residency as
+CPU time or extrapolate a guaranteed native completion time. Identify the smallest supported
+next purpose-specific composition and its invariants; root will separately specify any fix.
+
+Use only cached offline Linux runtime/fixture resources already recorded. Failed or uncertain
+fixtures are preserved for disposable-container retirement; cleanup requires exact ownership
+and identity. Fixed output bounds and child deadlines remain real. No signals to unproven PIDs.
+
+### Testing Decisions
+
+Use the actual installed helper and existing exported primitives, not successful fake validators.
+Diagnostic contract tests must cover finite child nonzero status, bounded reporting and refusal
+of arbitrary input. Record exact commands, hashes/runtime and measurements. Original120s feedback
+cannot run in seconds by definition, and Docker Desktop has a separately proven PID0 refusal;
+therefore use seconds-scale components for attribution, explicitly not as an exact-bug regression.
+Original native feedback must still be rerun after any future production fix, not repeated now.
+
+### Out of Scope
+
+No production edit, caching/removal of authority proofs, new batching daemon, deadline increase,
+existing test deletion/weakening, existing diagnostic/workflow edit, package download, VPS action,
+new release archive, unchanged full-suite repeat, or claim that the original bug is resolved.
