@@ -269,8 +269,10 @@ Premium; внутренний Base может сохраниться тольк�
 | 09 | Приватные временные файлы релиза на диске staging вместо RAM | local gates passed; Linux CI pending |
 | 10 | Непустой backup stream в Linux lock fixture | backup gate passed; CI123 rollback/tree timeout under diagnosis |
 | 11 | Завершение локальной тестовой оболочки при тайм-ауте | done; local gates passed |
-| 12 | Короткий журнал этапов проблемного Linux lock scenario | implemented; reviews0/0 and common gate passed, actual CI pending |
-| 13 | Причина отказа и завершённость операции при host-lock timeout | implemented; reviews0/0 and common gate passed, actual CI pending |
+| 12 | Короткий журнал этапов проблемного Linux lock scenario | done; CI124 diagnostics passed and localized rollback timeout |
+| 13 | Причина отказа и завершённость операции при host-lock timeout | done; CI124 original 100ms cases passed unchanged |
+| 14 | Измерить медленный установленный helper перед откатом | measured; real inherited-chain profile passed twice, CI cause unproved |
+| 15 | Наблюдать проблемный Linux-сценарий отдельно от полного CI | implemented; reviews0/0 and focused gates passed, native run pending |
 
 Локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
 secret/history scans зелёные. Отдельно на Linux: recovery/standalone 224/224, cutover 3/3,

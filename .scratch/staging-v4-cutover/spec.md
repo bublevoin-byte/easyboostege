@@ -242,3 +242,91 @@ generic tracing framework, retry loop, live server instrumentation or deployment
 
 Ticket13 is disjoint from ticket12. Both are diagnostic preparation for the same next CI; neither
 clears0898f55 for installation. The tagged scratch latency probe remains diagnostic-only.
+
+## Installed preflight timing — CI124 diagnosis
+
+### Problem Statement
+
+CI124 repeats the exact rollback barrier timeout while the two100ms host-lock cases pass. The
+new evidence shows successful first deploy build barrier107453ms and completion329976ms; rollback
+times out120007ms after its start, last phase config-json-complete, no activation count, no output.
+Configuration checks may repeat, so the single last phase does not identify the entire earlier path.
+
+### Solution and User Stories
+
+1. As the owner, I want the cost of the actual installed helper preflight measured, so the next
+   repair addresses observed behavior instead of increasing a deadline by guesswork.
+2. As the maintainer, I want a fast reproducible command at an existing verifier/operator seam,
+   so each proposed cause can be falsified without another blind full-CI cycle.
+3. As the owner, I want lock, identity, archive, runtime and cleanup protections preserved.
+4. As the owner, I want no server instrumentation, paid service or source mutation for diagnosis.
+
+### Implementation and Testing Decisions
+
+- Diagnosis only. Reuse actual installed-helper generation/runtime verification and the existing
+  integration fixture or its narrow exported seams. Prefer small fixed local inputs and existing
+  cached runtimes. Keep throwaway probes explicitly tagged under a local debug directory.
+- First produce an executed fast red-capable timing/phase loop on the relevant actual path;
+  distinguish observed bottleneck from an exact reproduction of the whole CI failure. State
+  limitations if the local Linux PID0 behavior prevents faithful installed execution.
+- Compare one variable at a time and record exact invocations, durations and evidence. Do not
+  select a production repair or rank speculative causes without a usable feedback loop.
+- Do not bypass process identity/real-flock guards, fabricate PID evidence, raise deadlines,
+  remove assertions or duplicate a whole production module just to make a probe run.
+
+### Out of Scope
+
+No implementation fix, production/test/workflow edits, new dependency or runtime installation,
+network/VPS actions, commit or push from the diagnosis worker. Root owns any later justified
+repair specification, fresh implementation ticket, review and common gates.
+
+## Native Linux diagnostic feedback — CI124
+
+### Problem Statement
+
+The sole CI124 failure is a real-flock rollback tree-barrier timeout. Local bounded descriptor
+and inherited-chain profiling is now available and passes, but Docker Desktop reports a different
+flock owner identity and cannot faithfully execute the whole scenario. Waiting for the entire
+canonical suite before seeing each diagnostic result makes this repair unnecessarily slow.
+
+### Solution and User Stories
+
+1. As the owner, I want the exact failing Linux scenario observed early on the same native runner
+   class as CI, so the repair is based on actual runtime evidence.
+2. As the maintainer, I want a short separate diagnostic job without changing the required release
+   gate, so diagnostic success can never be mistaken for release clearance.
+3. As the owner, I want no deployment, server access, credentials, dependency changes or weakening
+   of any lock, identity, archive, deadline or original test assertion.
+4. As the maintainer, I want a small bounded read-only profile of owned child-process stages,
+   so a repeated timeout identifies where time was spent without printing arguments or environment.
+5. As the maintainer, I want measurement limitations stated, so sampled residency is not presented
+   as CPU time or proof of a root cause.
+
+### Implementation Decisions
+
+- Add a separate native-Linux diagnostic workflow, restricted to pushes on the already-authorized
+  prototype branch and relevant diagnostic/lock changes. Keep the canonical workflow byte-for-byte
+  unchanged. Read-only repository token; no secrets, SSH, deploy steps or global settings.
+- Use the existing pinned Node version and existing exact integration test with all assertions
+  and its original120000ms barrier deadlines unchanged. No patched copy of production code.
+- A diagnostic-only runner may spawn only that fixed test invocation and sample its proven owned
+  descendants through Linux process metadata. Do not read process environments; never emit full
+  argv, paths, user content or command output beyond the original test's own output.
+- Emit only fixed allowlisted helper/tool categories and bounded counts/timing summaries. Unknown
+  or disappearing processes are omitted or classified as unknown; never infer authority from a PID
+  alone. Sampling must not signal children or replace the original test's exit status.
+- Bound the diagnostic job independently. State that snapshots measure sampled process residency,
+  include nested/overlapping processes, and do not establish the CI124 cause by themselves.
+
+### Testing Decisions
+
+Keep all existing tests intact. Test the runner's narrow observation/aggregation boundary using
+finite synthetic processes and classification/identity-change/missing-process cases. Demonstrate
+that test failures retain their exit status, raw arguments are never serialized, output stays
+bounded, and sampling does not leak a timer after the child exits. Existing full local gates remain
+historical evidence; required integration checks and independent reviews precede publication.
+
+### Out of Scope
+
+No production fix, timeout increase, PID0 acceptance, generic profiler framework, extra packages,
+VPS work, deployment, changes to main/production-hardening or publication of local recovery data.
