@@ -1,0 +1,36 @@
+name: Staging lock diagnostic
+
+on:
+  push:
+    branches: [prototype/aisy-today-visual-v1]
+    paths:
+      - '.github/workflows/staging-lock-diagnostic.yml'
+      - '.scratch/staging-v4-cutover/diagnostics/**'
+      - 'test/staging-release-lock.integration.test.js'
+      - 'scripts/staging-*.js'
+      - 'scripts/staging-*.sh'
+      - 'scripts/posix-session-supervisor.js'
+      - 'scripts/verify-staging-compose.js'
+      - 'scripts/install-staging-release-helpers.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  native-lock-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.2
+      # This fixed fixture and its helper import closure use Node builtins/local modules.
+      # The fixture provides fake Docker/curl; no Docker service or npm install is needed.
+      - name: Check finite-child observer contracts
+        run: node --test .scratch/staging-v4-cutover/diagnostics/native-lock-profile.test.mjs
+      - name: Observe the unchanged real Linux flock scenario
+        # This is early diagnostic feedback; the canonical CI release gate is still required.
+        run: node .scratch/staging-v4-cutover/diagnostics/native-lock-profile.mjs
