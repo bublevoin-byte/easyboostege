@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { movePosixEntryNoReplace } from './posix-session-supervisor.js';
+import { validateReleaseArchive } from './staging-release-archive.js';
 
 const ENVIRONMENT_MAX_BYTES = 4 * 1024 * 1024;
 const DOCKER_INSPECTION_MAX_BYTES = 4 * 1024 * 1024;
@@ -810,6 +811,30 @@ export function readCanonicalShaFile({ file, role }) {
   return source.slice(0, 64);
 }
 
+export async function verifyRetainedReleasePair({ archivePath, expectedSha256, role }) {
+  if (!SHA_PATTERN.test(expectedSha256 ?? '')) {
+    throw new Error(`${role} retained release expected SHA-256 is noncanonical`);
+  }
+  const archive = {
+    file: archivePath, role: `${role} retained release archive`,
+    expectedMode: 0o600, maximumBytes: 536870912,
+  };
+  const sidecar = {
+    file: `${archivePath}.sha256`, role: `${role} retained checksum sidecar`,
+    expectedMode: 0o600, maximumBytes: SHA_BYTES,
+  };
+  // Only small metadata/digest records are retained across phases, never an archive buffer.
+  const archiveAuthority = capturePrivateFile(archive);
+  const sidecarAuthority = capturePrivateFile(sidecar);
+  const declared = readCanonicalShaFile(sidecar);
+  if (declared !== expectedSha256 || archiveAuthority.sha256 !== expectedSha256) {
+    throw new Error(`${role} retained release archive verification failed`);
+  }
+  await validateReleaseArchive({ archivePath });
+  verifyPrivateFile({ ...archive, authority: archiveAuthority });
+  verifyPrivateFile({ ...sidecar, authority: sidecarAuthority });
+}
+
 export function readCutoverJournal({
   file, bridgeSha256, legacyMarkerSha256, legacyComposeSha256, legacyAppMode,
   legacyMarkerMode, legacyComposeMode, legacyAuthoritySha256, bundleSha256,
@@ -1109,6 +1134,13 @@ async function readBoundedStdin(label, maximumBytes = DOCKER_INSPECTION_MAX_BYTE
 
 async function runCli() {
   const [command, ...args] = process.argv.slice(2);
+  if (command === 'verify-release-pair') {
+    if (args.length !== 3) {
+      throw new Error('Usage: staging-runtime-authority.js verify-release-pair ARCHIVE SHA ROLE');
+    }
+    await verifyRetainedReleasePair({ archivePath: args[0], expectedSha256: args[1], role: args[2] });
+    return;
+  }
   if (command === 'capture-postgres-container' && args.length === 2) {
     console.log(JSON.stringify(capturePostgresContainerAuthority({
       inspection: await readBoundedStdin('PostgreSQL container inspection'),

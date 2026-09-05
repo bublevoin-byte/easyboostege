@@ -559,3 +559,83 @@ fix proposal in ticket20. No production edits in this ticket, raised deadline, w
 dependency/network installation, arbitrary environment dump, full Docker Desktop rollback retry,
 VPS actions, publication by the worker or claim of readiness. Root retains scope/review/publication
 and original native validation. Do not repeat unchanged full suites or unchanged failed attempts.
+
+## Verify each retained release pair in one bounded operation
+
+### Problem Statement
+
+Ticket19's real reduced rollback reaches its tree barrier only at144073ms against the unchanged
+120000ms assertion and completes at234109ms. Ticket20 measures a real recurring inherited-chain
+near-empty command at285–301ms; seven separate supervised commands currently implement one
+retained archive/sidecar verification. This repeats six times before the reduced fixture's tree
+copy. These source-derived counts and local timings justify a composed-operation experiment,
+not a promise that this change alone clears the native timeout.
+
+### Solution and User Stories
+
+1. As the owner, I want release verification to avoid repeated command startup while retaining
+   every archive, checksum, ownership and identity check.
+2. As the maintainer, I want one purpose-specific read-only operation, not a general batch-command
+   framework, daemon or authority cache.
+3. As the owner, I want malformed, replaced, linked or changed files to fail closed before any
+   image or live-tree action exactly as the existing release callers require.
+4. As the maintainer, I want all original tests and120second assertions retained, with new tests
+   covering the composed operation and a real finite comparison before native validation.
+5. As the owner, I want local validation and branch publication distinguished from live deploy;
+   this work does not authorize an agent to install or deploy on the VPS.
+
+### Implementation Decisions
+
+- Add one retained-release-pair verification interface to the existing runtime-authority module:
+  archive path, expected canonical SHA and role. The sidecar path is derived from the archive.
+  The fixed CLI accepts only these arguments; no user-selectable command list, stages, limits,
+  callback, cache, filesystem bypass or environment switch.
+- Reuse the existing private-file capture, canonical SHA reader, archive validator, and final
+  private-file verification implementations. Preserve this order: archive capture (mode0600,
+  maximum512MiB), sidecar capture (mode0600, maximum65bytes), canonical sidecar read, compare both
+  declared and initially captured digest to expected SHA, full canonical archive inspection,
+  final archive identity/bytes verification, final sidecar identity/bytes verification. An invalid
+  expected SHA also fails closed. No captured authority is reused across separate invocations.
+- Keep shell path/existence/symlink prechecks, every existing caller and its relative transaction
+  ordering, but replace that seven-process body with one supervised call. No archive/tree/store/
+  snapshot check elsewhere is removed or skipped.
+- Use one existing60second command bound for the whole operation; both current command and archive
+  inspection bounds are60seconds. This intentionally tightens seven separately bounded commands
+  into one60second total budget, never lengthens a deadline. The archive validator retains its
+  own existing bounds. Do not add a second nested supervisor or a subcommand launcher.
+- Normal verification errors return1 and success returns0 with no authority payload on stdout.
+  The shell returns the real supervised operation status on timeout/infrastructure failure.
+  This changes the old internal distinction where the first six stages normalized failures to1
+  while the last returned raw status. Existing release callers already map any nonzero result to
+  their established fail-closed transaction outcome; prove that mapping remains unchanged. Do not
+  claim stage-by-stage raw status equivalence. No timeout/cancellation becomes success.
+- Keep existing buffer/file/archive limits. Retain only small capture records across phases, not
+  a second long-lived full-archive buffer. Assess peak-memory implications of composing formerly
+  separate processes; no maximum-archive-size or resource-ceiling increase is permitted.
+
+### Testing Decisions
+
+Use the new operation through its actual module/CLI and the actual shell caller seam. Existing
+files and tests remain present and unweakened (repository contract overrides any skill suggestion
+to delete old shallow tests). Prefer real small canonical archives and real filesystem mutations
+over mocked successful validators. Show RED before implementation, then GREEN for valid pair,
+noncanonical/mismatched SHA, malformed/oversized input, mode/link/owner/identity refusal where the
+platform supports it, and archive/sidecar drift between capture and final reproof. Test shell
+composition uses one bounded command and retains nonzero status/caller fail-closed mapping without
+waiting60seconds. Keep any test seam internal; no production fault-injection CLI or env flag.
+
+Run a finite real before/after pair-verification comparison using the already available cached
+Linux helper fixture and inherited chain, preserving guard code and recording exact source,
+runtime, whole-operation timing and measurement limits. No Docker Desktop actual rollback retry
+because its known flock/PID0 limitation is unrelated. Do not rely on a timing threshold assertion
+in routine unit tests or present local milliseconds as a native projection.
+
+Root owns fresh focused gates, independent reviews, full local lint/check/test after production
+freeze, safe authorized-branch publication, and unchanged native reduced/full CI evidence.
+No unchanged diagnostic-only full-suite repeats. Native improvement is not proven until observed.
+
+### Out of Scope
+
+No supervisor/runtime-authority hash removal or cache, broader batching/refactor, new process
+control, new workflow, dependency change/download, raised120s or other deadline, deleted/weakened
+existing test, VPS upload/install/recovery/cutover/deploy, archive overwrite, or readiness claim.

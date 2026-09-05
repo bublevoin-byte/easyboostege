@@ -820,32 +820,16 @@ prepare_release_tree_for_copy() {
 release_archive_path() { printf '%s/release-%s.tar.gz\n' "$release_store" "$1"; }
 
 verify_release_pair() {
-  local sha="$1" role="$2" stored declared actual archive_authority sidecar_authority
+  local sha="$1" role="$2" stored
   stored="$(release_archive_path "$sha")"
   if [ -L "$stored" ] || [ -L "$stored.sha256" ] \
     || [ ! -f "$stored" ] || [ ! -f "$stored.sha256" ]; then
     echo "$role release has no verified retained release archive" >&2
     return 1
   fi
-  archive_authority="$(run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" \
-    capture-file "$stored" "$role retained release archive" 384 536870912)" || return 1
-  sidecar_authority="$(run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" \
-    capture-file "$stored.sha256" "$role retained checksum sidecar" 384 65)" || return 1
-  declared="$(read_exact_sha_marker "$stored.sha256" "$role retained checksum sidecar")" \
-    || return 1
-  actual="$(authority_field "$archive_authority" sha256)" || return 1
-  if [ "$declared" != "$sha" ] || [ "$actual" != "$sha" ]; then
-    echo "$role retained release archive verification failed" >&2
-    return 1
-  fi
-  run_archive_inspect "$stored" || {
-    echo "$role retained release archive validation failed" >&2
-    return 1
-  }
-  run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" verify-file \
-    "$stored" "$role retained release archive" 384 536870912 "$archive_authority" || return 1
-  run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" verify-file \
-    "$stored.sha256" "$role retained checksum sidecar" 384 65 "$sidecar_authority"
+  # One aggregate command bound; callers keep their existing nonzero failure mapping.
+  run_bounded "$COMMAND_SECONDS" node "$runtime_authority_tool" verify-release-pair \
+    "$stored" "$sha" "$role"
 }
 
 validate_release_store() {

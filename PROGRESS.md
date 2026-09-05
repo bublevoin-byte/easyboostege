@@ -278,8 +278,15 @@ Premium; внутренний Base может сохраниться тольк�
 | 18 | Проверить сокращённый откат на обычном Linux в GitHub | done; native contracts6/6, rollback120s timeout after build (not exact original signature), no settled result by150s; cause unproved |
 | 19 | Записать движение отката по этапам после исходного тайм-аута | done; native exact120s timeout, late tree144s and clean helper234s; diagnostic correctly exit1; no deploy clearance |
 | 20 | Найти источник накладных расходов запуска служебных команд | done; real chain285–301ms, six pre-tree pair checks/42commands from source; reviews0/0, no production fix yet |
+| 21 | Объединить проверку архива и контрольной суммы без ослабления защиты | implemented; reviews0/0, full Windows3262tests/3153pass/109skip/0fail; native gates pending |
 
-Локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
+Актуальный локальный gate ticket21: lint/check и полный Windows-прогон зелёные, 3262tests,
+3153passed,109platform skips,0failed/cancelled,4360073.7294ms; frozen inputs unchanged.
+Node22.23.2 для parent/Bashchild, concurrency2. Один composed verifier сохраняет все проверки
+и исходные deadlines. Новый helper187556db ещё не упакован и не установлен; отдельная
+публикация и неизменённые native/full CI обязательны. Ускорение всего сценария не доказано.
+
+Ранний локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
 secret/history scans зелёные. Отдельно на Linux: recovery/standalone 224/224, cutover 3/3,
 host-lock/installer 17/17 без пропусков. Независимые Standards/Spec review — 0/0 findings.
 CI в GitHub ещё обязателен. Read-only preflight подтвердил healthy staging без изменений;
