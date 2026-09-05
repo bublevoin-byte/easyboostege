@@ -387,6 +387,7 @@ async function writeFakeCommands(root) {
     '  if [ "$1" = "volume" ] && [ "$2" = "ls" ]; then [ ! -f "$COMMAND_LOG.volume-state" ] || printf "easyboost-staging_postgres-data\\n"; return 0; fi',
     '  if [ "$1" = "network" ] && [ "$2" = "ls" ]; then [ ! -f "$COMMAND_LOG.network-state" ] || printf "easyboost-staging_backend\\n"; return 0; fi',
     '  if [[ " $* " == *" config --format json "* ]]; then',
+    '    if [ "$1" = "compose" ] && [[ " $* " == *" -f - "* ]]; then /usr/bin/cat > /dev/null || return; fi',
     '    if [ "${FAKE_POSTGRES_RETAG_AFTER_CAPTURE:-0}" = "1" ] && [ ! -f "$COMMAND_LOG.postgres-retagged" ]; then : > "$COMMAND_LOG.postgres-retagged"; fi',
     '    if [ -n "${FAKE_RESOLVED_COMPOSE_CANDIDATE_JSON:-}" ] && [[ "$*" == *"/candidate/compose.staging.yml"* ]]; then printf "%s" "$FAKE_RESOLVED_COMPOSE_CANDIDATE_JSON"; else printf "%s" "$FAKE_RESOLVED_COMPOSE_JSON"; fi',
     '    return 0',
@@ -851,7 +852,7 @@ test('legacy cutover proves bridge and running-service preconditions before meta
       ['wrong postgres image', { FAKE_DRIFTED_RUNNING_POSTGRES: '1' }, 67, {}],
       ['unready app', { FAKE_PRECUTOVER_READINESS_FAIL: '1' }, 67, {}],
       ['invalid bridge Compose', null, 65, {}],
-      ['wrong approved mode tuple', {}, 67, { legacyAppMode: '755' }],
+      ['wrong approved mode tuple', {}, 67, { legacyMarkerMode: '600' }],
     ];
     for (const [label, environment, expectedStatus, cutoverOptions] of cases) {
       const fixture = await createFixture();

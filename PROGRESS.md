@@ -264,7 +264,7 @@ Premium; внутренний Base может сохраниться тольк�
 | Тикет | Результат | Статус |
 |---|---|---|
 | 06 | Сохранение данных для завершения прерванного восстановления | implemented; local gates passed, Linux CI pending |
-| 07 | Исправление ошибки nonce первого перехода staging | in progress |
+| 07 | Исправление ошибки nonce первого перехода staging | implemented; local gates passed, Linux CI pending |
 | 08 | Исправление шести тестовых fixtures/contracts Linux CI | in progress |
 
 ## Полный пробный ЕГЭ-2026

@@ -377,8 +377,8 @@ derive_cutover_journal_nonce() {
       process.exit(2);
     }
     process.stdout.write(crypto.createHash("sha256")
-      .update(["easyboost-staging-cutover-v1", ...fields].join("\\0"))
-      .digest("hex") + "\\n");
+      .update(["easyboost-staging-cutover-v1", ...fields].join("\0"))
+      .digest("hex") + "\n");
   ' "$bridge_sha" "$legacy_marker_sha" "$legacy_compose_sha" \
     "$expected_legacy_app_mode" "$expected_legacy_marker_mode" \
     "$expected_legacy_compose_mode" "$legacy_authority_sha" "$expected_bundle_digest"
