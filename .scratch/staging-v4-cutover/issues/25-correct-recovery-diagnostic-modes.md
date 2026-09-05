@@ -1,6 +1,6 @@
 # 25 — Match recovery diagnostic permissions to the actual helper
 
-Status: in-progress
+Status: done
 Blocked by: None — published ticket24 diagnostic is available; its native proof defect is this slice.
 Spec: .scratch/staging-v4-cutover/spec.md#match-recovery-diagnostic-metadata-to-the-real-helper-umask
 
@@ -48,8 +48,8 @@ The public archive producer encodes0644; extraction correctly respects the inher
 - [x] Added regressions reject broad0444 prepared and0644 recovered current-file modes.
 - [x] Existing28 behavioral contracts and added cases pass focused Linux; Windows explicitPOSIXskips only.
 - [x] Syntax/targeted ESLint pass; tested LF hashes and precise runtime/results recorded.
-- [ ] Root independent Spec/Standards review, authorized publication and native feedback recorded.
-- [ ] One scoped commit; no production/deployment readiness claim.
+- [x] Root independent Spec/Standards review, authorized publication and native feedback recorded.
+- [x] One scoped commit; no production/deployment readiness claim.
 
 ## Comments
 
@@ -187,3 +187,22 @@ Root will commit only these two diagnostic files, this issue, ticket24's termina
 evidence, the appended spec and staging PROGRESS rows. Local checkpoints/artifact notes,
 manifests, baseline source TARs and unrelated files remain out. Publication is only to the
 authorized prototype branch for corrected native feedback, not a deployment or release archive.
+
+### Publication and native8 outcome
+
+Published ea00224014a5a756a41c97faf974224230d8592d only to authorized prototype branch,
+normal fast-forward from cb29558; exact remote HEAD verified. Postcommit history scan395commits
+passes. No production/default-test/workflow changes, release packaging or VPS mutation.
+
+Native8 run33976709565/job101334574483, exact ea00224, Ubuntu24.04.4/Node22.23.2:
+all31 contracts pass with0skip/fail/cancel,26588.372842ms. Full raw32567chars/421lines read.
+Installer1119ms and equivalence1944ms pass. Original exact timeout occurs120017ms with phase
+config-json-complete/upCountmissing/recoveryabsent/staletreepresent/stdout3B/stderr0.
+Recovery barrier arrives late203093ms; helper exits and closes1, no signal, expected diagnostic
+present at242164ms, stdout3B/stderr75B. Final independent proof remains not-proven, auxiliary null;
+diagnostic correctly returns1. Job fails4m42s, attempt4m4s, not an outer timeout/unclosed helper.
+
+This ticket's evidenced mode correction is complete, not a timing or full-final-proof repair.
+Ticket26 now reports the exact rejected remaining proof; do not accept broader modes or guess
+another fix. CanonicalCI131 on cb295 also failed only original rollback/tree120009ms;
+3258tests/3192pass/1fail/65skip, PostgreSQL51/51. CI132 on ea00224 remains pending at this record.

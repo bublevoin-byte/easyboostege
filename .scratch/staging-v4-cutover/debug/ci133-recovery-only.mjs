@@ -15,11 +15,30 @@ const currentFiles = ['.dockerignore', 'Dockerfile', 'compose.staging.yml', 'cur
 const directories = ['', 'backups', 'rollbacks', 'rollbacks/releases'];
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const captures = new WeakMap();
+const proofFailures = new WeakMap();
+const proofStages = new Set([
+  'fixture-root-identity', 'retained-metadata-capture', 'current-release-tree',
+  'current-file-metadata', 'current-inventory', 'release-marker-metadata',
+  'release-marker-content', 'environment-content', 'release-lock-content', 'retained-metadata',
+  'current-archive-digest', 'current-archive-marker', 'current-archive-tree',
+  'candidate-archive-digest', 'candidate-archive-marker', 'candidate-archive-tree',
+  'archive-store-inventory', 'rollback-inventory', 'backup-count', 'backup-name',
+  'backup-metadata', 'backup-content', 'temporary-release-absence', 'host-operation-residue',
+  'image-state-metadata', 'container-state-metadata', 'image-state-content', 'container-state-content',
+  'docker-local-image', 'docker-container-image', 'docker-current-release-tag', 'docker-candidate-release-tag',
+]);
 const nodeIdentity = (stat) => [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid,
   stat.isDirectory() ? '' : stat.nlink].join(':');
 const recoveryBoundMs = 120_000;
 const expectedDiagnostic = 'Primary staging deploy failed with status 1; verified prior state restored';
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function recordProofFailure(error, stage) {
+  // Keep the original exception/auxiliary result private and unchanged; only fixed labels escape.
+  if (error !== null && (typeof error === 'object' || typeof error === 'function')) {
+    proofFailures.set(error, proofStages.has(stage) ? stage : 'unknown');
+  }
+}
 
 function report(row) {
   const line = JSON.stringify(row);
@@ -91,47 +110,80 @@ exit 0
 }
 
 async function verifyCurrent(fixture, { recovered = false } = {}) {
-  const { app, current, candidate, factories, root, imageState, containerState, releaseState } = fixture;
-  assert.equal(nodeIdentity(await fs.lstat(root)), nodeIdentity(fixture.identity));
-  const retained = captures.get(fixture)?.retained;
-  assert.ok(retained, 'fixture must have independently captured retained metadata');
-  await verifyReleaseTree({ archivePath: current.archive, directory: app });
-  for (const name of currentFiles) await entry(path.join(app, name), false, recovered ? 0o600 : 0o400);
-  assert.deepEqual((await fs.readdir(app)).sort(), [...currentFiles, '.env.staging', '.release-sha256',
-    '.staging-release.lock', 'backups', 'rollbacks'].sort());
-  await entry(path.join(app, '.release-sha256'), false, 0o600);
-  assert.equal(await fs.readFile(path.join(app, '.release-sha256'), 'utf8'), `${current.sha}\n`);
-  assert.equal(await fs.readFile(path.join(app, '.env.staging'), 'utf8'), 'APP_PORT=3001\n');
-  assert.equal(await fs.readFile(path.join(app, '.staging-release.lock'), 'utf8'), '');
-  for (const [name, identity] of retained) {
-    assert.equal(await entry(path.join(app, name), directories.includes(name), directories.includes(name) ? 0o700 : 0o600), identity);
+  let stage = 'fixture-root-identity';
+  try {
+    const { app, current, candidate, factories, root, imageState, containerState, releaseState } = fixture;
+    assert.equal(nodeIdentity(await fs.lstat(root)), nodeIdentity(fixture.identity));
+    stage = 'retained-metadata-capture';
+    const retained = captures.get(fixture)?.retained;
+    assert.ok(retained, 'fixture must have independently captured retained metadata');
+    stage = 'current-release-tree';
+    await verifyReleaseTree({ archivePath: current.archive, directory: app });
+    stage = 'current-file-metadata';
+    for (const name of currentFiles) await entry(path.join(app, name), false, recovered ? 0o600 : 0o400);
+    stage = 'current-inventory';
+    assert.deepEqual((await fs.readdir(app)).sort(), [...currentFiles, '.env.staging', '.release-sha256',
+      '.staging-release.lock', 'backups', 'rollbacks'].sort());
+    stage = 'release-marker-metadata';
+    await entry(path.join(app, '.release-sha256'), false, 0o600);
+    stage = 'release-marker-content';
+    assert.equal(await fs.readFile(path.join(app, '.release-sha256'), 'utf8'), `${current.sha}\n`);
+    stage = 'environment-content';
+    assert.equal(await fs.readFile(path.join(app, '.env.staging'), 'utf8'), 'APP_PORT=3001\n');
+    stage = 'release-lock-content';
+    assert.equal(await fs.readFile(path.join(app, '.staging-release.lock'), 'utf8'), '');
+    stage = 'retained-metadata';
+    for (const [name, identity] of retained) {
+      assert.equal(await entry(path.join(app, name), directories.includes(name), directories.includes(name) ? 0o700 : 0o600), identity);
+    }
+    const expectedStore = [];
+    for (const release of [current, candidate]) {
+      const stages = release === current
+        ? ['current-archive-digest', 'current-archive-marker', 'current-archive-tree']
+        : ['candidate-archive-digest', 'candidate-archive-marker', 'candidate-archive-tree'];
+      const name = `release-${release.sha}.tar.gz`;
+      expectedStore.push(name, `${name}.sha256`);
+      const stored = path.join(app, 'rollbacks/releases', name);
+      stage = stages[0];
+      assert.equal(digest(await fs.readFile(stored)), release.sha);
+      stage = stages[1];
+      assert.equal(await fs.readFile(`${stored}.sha256`, 'utf8'), `${release.sha}\n`);
+      stage = stages[2];
+      await verifyReleaseTree({ archivePath: stored, directory: release.source });
+    }
+    stage = 'archive-store-inventory';
+    assert.deepEqual((await fs.readdir(path.join(app, 'rollbacks/releases'))).sort(), expectedStore.sort());
+    stage = 'rollback-inventory';
+    assert.deepEqual(await fs.readdir(path.join(app, 'rollbacks')), ['releases']);
+    stage = 'backup-count';
+    const backups = await fs.readdir(path.join(app, 'backups'));
+    assert.equal(backups.length, recovered ? 2 : 1);
+    for (const name of backups) {
+      stage = 'backup-name';
+      assert.match(name, new RegExp(`^easyboost-staging-[0-9]{8}T[0-9]{6}Z-${candidate.sha.slice(0, 12)}-[0-9]+\\.dump$`, 'u'));
+      stage = 'backup-metadata';
+      await entry(path.join(app, 'backups', name), false, 0o600);
+      stage = 'backup-content';
+      assert.equal(await fs.readFile(path.join(app, 'backups', name), 'utf8'), 'synthetic-lock-fixture-backup\n');
+    }
+    stage = 'temporary-release-absence';
+    await absent(releaseState);
+    stage = 'host-operation-residue';
+    for (const name of await fs.readdir(root)) assert.ok(!name.startsWith('host-operation.lock'), 'host-operation residue');
+    stage = 'image-state-metadata';
+    await entry(imageState, false, 0o600);
+    stage = 'container-state-metadata';
+    await entry(containerState, false, 0o600);
+    stage = 'image-state-content';
+    assert.equal(await fs.readFile(imageState, 'utf8'), `${factories.previousImageId}\n`);
+    stage = 'container-state-content';
+    assert.equal(await fs.readFile(containerState, 'utf8'), `${factories.previousImageId}\n`);
+    return { activeTree: 'current', archivePairs: 2, image: 'current', container: 'current',
+      temporaryRelease: 'absent', transactionResidue: 'absent', protectedMetadata: 'verified' };
+  } catch (error) {
+    recordProofFailure(error, stage);
+    throw error;
   }
-  const expectedStore = [];
-  for (const release of [current, candidate]) {
-    const name = `release-${release.sha}.tar.gz`;
-    expectedStore.push(name, `${name}.sha256`);
-    const stored = path.join(app, 'rollbacks/releases', name);
-    assert.equal(digest(await fs.readFile(stored)), release.sha);
-    assert.equal(await fs.readFile(`${stored}.sha256`, 'utf8'), `${release.sha}\n`);
-    await verifyReleaseTree({ archivePath: stored, directory: release.source });
-  }
-  assert.deepEqual((await fs.readdir(path.join(app, 'rollbacks/releases'))).sort(), expectedStore.sort());
-  assert.deepEqual(await fs.readdir(path.join(app, 'rollbacks')), ['releases']);
-  const backups = await fs.readdir(path.join(app, 'backups'));
-  assert.equal(backups.length, recovered ? 2 : 1);
-  for (const name of backups) {
-    assert.match(name, new RegExp(`^easyboost-staging-[0-9]{8}T[0-9]{6}Z-${candidate.sha.slice(0, 12)}-[0-9]+\\.dump$`, 'u'));
-    await entry(path.join(app, 'backups', name), false, 0o600);
-    assert.equal(await fs.readFile(path.join(app, 'backups', name), 'utf8'), 'synthetic-lock-fixture-backup\n');
-  }
-  await absent(releaseState);
-  for (const name of await fs.readdir(root)) assert.ok(!name.startsWith('host-operation.lock'), 'host-operation residue');
-  await entry(imageState, false, 0o600);
-  await entry(containerState, false, 0o600);
-  assert.equal(await fs.readFile(imageState, 'utf8'), `${factories.previousImageId}\n`);
-  assert.equal(await fs.readFile(containerState, 'utf8'), `${factories.previousImageId}\n`);
-  return { activeTree: 'current', archivePairs: 2, image: 'current', container: 'current',
-    temporaryRelease: 'absent', transactionResidue: 'absent', protectedMetadata: 'verified' };
 }
 
 export async function verifyPreparedRecovery(fixture) {
@@ -267,13 +319,18 @@ export async function finishRecoveryAttempt(fixture, handle, {
   const expectedEvidence = !handle.overflow && handle.stderr.toString('utf8').split(/\r?\n/u).includes(expectedDiagnostic);
   let finalState = 'not-proven';
   let auxiliary = null;
+  let proofFailureStage = null;
   if (handle.closed && handle.status === 1 && !handle.signal && expectedEvidence) {
     try {
       await verifyCurrent(fixture, { recovered: true });
       if (process.platform === 'linux') await proveCurrentDocker(fixture, { timeoutMs: proofTimeoutMs, emit: publish });
       finalState = 'verified-current';
     }
-    catch (error) { observationFailed = true; auxiliary = error.auxiliary ?? null; }
+    catch (error) {
+      observationFailed = true;
+      auxiliary = error.auxiliary ?? null;
+      proofFailureStage = proofFailures.get(error) ?? 'unknown';
+    }
   }
   let status = !handle.closed || auxiliary?.closed === false ? 124
     : handle.signal ? 128 + (os.constants.signals[handle.signal] ?? 0)
@@ -282,7 +339,7 @@ export async function finishRecoveryAttempt(fixture, handle, {
           && !observationFailed && !handle.overflow && !handle.spawnError ? 0 : 1;
   publish({ event: 'phase-timeline', intervalMs: 500, rows, omittedCount });
   publish({ event: 'settlement', ...final, sinceRecoveryMs: final.elapsedMs,
-    elapsedMs: Math.round(performance.now() - settlementStarted), expectedEvidence, finalState, auxiliary,
+    elapsedMs: Math.round(performance.now() - settlementStarted), expectedEvidence, finalState, auxiliary, proofFailureStage,
     lateRecoveryElapsedMs: reached ? null : firstBarrierElapsedMs, barrierReleased: released,
     fixtureRetained: true, cleanup: 'disposable-environment-lifecycle',
     helperRecoveredAsExpected: handle.closed && handle.status === 1 && expectedEvidence && finalState === 'verified-current' });
@@ -361,20 +418,28 @@ export async function installRecoveryFixture(fixture, emit = report, { timeoutMs
 }
 
 export async function proveCurrentDocker(fixture, { timeoutMs = 3000, emit = report } = {}) {
-  const expected = `${fixture.factories.previousImageId}\n`;
-  for (const [args, status, stdout] of [
-    [['image', 'inspect', '--format', '{{.Id}}', 'easyboost-staging-app:local'], 0, expected],
-    [['inspect', '--format', '{{.Image}}', 'fake-container'], 0, expected],
-    ...[fixture.current, fixture.candidate].map((release) => [
-      ['image', 'inspect', '--format', '{{.Id}}', `easyboost-staging-app:release-${release.sha}`], 1, '']),
-  ]) {
-    const child = startChild('/bin/bash', [path.join(fixture.bin, 'docker'), ...args], fixture.environment);
-    await requireAuxiliarySettlement(child, 'docker-inspection', timeoutMs, emit);
-    assert.equal(child.status, status);
-    assert.equal(child.signal, null);
-    assert.equal(child.stdout.toString('utf8'), stdout);
-    assert.equal(child.stderrBytes, 0);
-    assert.equal(child.overflow, false);
+  let stage = 'unknown';
+  try {
+    const expected = `${fixture.factories.previousImageId}\n`;
+    for (const [args, status, stdout, inspectionStage] of [
+      [['image', 'inspect', '--format', '{{.Id}}', 'easyboost-staging-app:local'], 0, expected, 'docker-local-image'],
+      [['inspect', '--format', '{{.Image}}', 'fake-container'], 0, expected, 'docker-container-image'],
+      ...[fixture.current, fixture.candidate].map((release, index) => [
+        ['image', 'inspect', '--format', '{{.Id}}', `easyboost-staging-app:release-${release.sha}`], 1, '',
+        ['docker-current-release-tag', 'docker-candidate-release-tag'][index]]),
+    ]) {
+      stage = inspectionStage;
+      const child = startChild('/bin/bash', [path.join(fixture.bin, 'docker'), ...args], fixture.environment);
+      await requireAuxiliarySettlement(child, 'docker-inspection', timeoutMs, emit);
+      assert.equal(child.status, status);
+      assert.equal(child.signal, null);
+      assert.equal(child.stdout.toString('utf8'), stdout);
+      assert.equal(child.stderrBytes, 0);
+      assert.equal(child.overflow, false);
+    }
+  } catch (error) {
+    recordProofFailure(error, stage);
+    throw error;
   }
 }
 

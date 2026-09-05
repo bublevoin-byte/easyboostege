@@ -943,3 +943,56 @@ No production/default-test or workflow edits, modified archive semantics, deadli
 authority bypass, real local recovery, external downloads, VPS mutation, release packaging or
 deployment. No claim that the native final-state mismatch is exclusively this defect until a
 corrected native run proves all remaining final-state assertions.
+
+## Identify the exact rejected recovery final proof
+
+### Problem Statement
+
+Native8 on ea00224 still fails the unchanged120s recovery observation at120017ms. The real
+helper later closes with expected status1 and restoration evidence at242164ms, but independent
+finalState remains not-proven with auxiliary null. Correct0400/0600 diagnostic permissions
+were necessary but insufficient. The current catch discards which proof failed, so another
+correction would be speculation. The precise rejected proof is not yet known.
+
+### Solution and User Stories
+
+Report one static, allowlisted proof-stage identifier at the existing final result seam, without
+publishing error text, paths, file values, environment, tokens or child streams.
+
+1. As the owner, I want to know which independent check rejects restoration before another fix.
+2. As the maintainer, I want the first failing proof distinguishable from later unexecuted checks.
+3. As the owner, I want the original timeout and failure status retained, not hidden by diagnostics.
+4. As the maintainer, I want every existing metadata, identity, byte and inventory proof preserved.
+5. As the owner, I want logs to contain fixed diagnostic labels only, never private file contents.
+6. As the maintainer, I want a real finite file mismatch to prove the reporting through the CLI seam.
+7. As the owner, I want unsettled children to remain status124 even if reporting fails.
+8. As the maintainer, I want success, skipped proof and a failed proof distinguishable.
+
+### Implementation Decisions
+
+Reuse the existing finish-attempt, current-state verification and fixed Docker proof seams.
+Introduce bounded stage metadata only; do not catch-and-continue inside proof assertions.
+Keep the original order and all assertions, expected modes0400/0600, statuses, timing limits,
+auxiliary settlement precedence and output limits. A failed proof may expose its static stage,
+not its Error.message, stack, expected/actual values, dynamic filenames or command arguments.
+Use a finite source-owned vocabulary with a safe unknown fallback; success and a proof not
+attempted must not carry a failure label. Cover each distinct current-state assertion group and
+the four fixed Docker inspections closely enough to avoid a second broad uninformative label.
+Do not add callbacks permitting tests to replace the actual proof. Changes stay diagnostic-only.
+
+### Testing Decisions
+
+At the existing finish-attempt seam, first demonstrate RED for a real finite restored fixture
+whose file metadata/content/inventory is deliberately mismatched. Then assert nonzero result,
+the exact first failing static stage and absence of a private sentinel from all emitted rows.
+Cover representative early and late file proofs and Docker proof failures, with all prior31
+contracts retained. Assert success/no-attempt labeling, raw-error non-disclosure, bounded output
+and unchanged auxiliary124/report-failure priority. Run focused pinned Windows and cached offline
+Linux contracts; no real local flock/recovery in the known incompatible container. Root integrates
+reviews, existing full-gate evidence, authorized prototype publication and native feedback.
+
+### Out of Scope
+
+No correction of the newly revealed proof or production timing in this slice; first report the
+observed cause. No assertion weakening, production/default-test/workflow edits, deadline increase,
+dependency download, VPS mutation, release packaging, deployment or readiness declaration.

@@ -172,7 +172,13 @@ for (const [label, childOptions, expected] of [
       assert.equal(initial.recovery, 'absent');
       assert.equal(settled.status, 1);
       assert.equal(settled.finalState, 'verified-current');
+      assert.equal(settled.proofFailureStage, null);
       assert.ok(settled.lateRecoveryElapsedMs >= 250);
+    }
+    if (['unexpected exit0', 'unexpected exit23', 'missing expected evidence',
+      'bounded unsettled finite child', 'bounded child output overflow'].includes(label)) {
+      assert.equal(settled.finalState, 'not-proven');
+      assert.equal(settled.proofFailureStage, null);
     }
     if (label === 'stale tree only' || label === 'bounded unsettled finite child') {
       assert.equal(initial.verdict, 'other-timeout');
@@ -225,6 +231,96 @@ test('final current proof independently invokes the real Docker fixture inspecti
     barrierTimeoutMs: 2000, settlementTimeoutMs: 2000, emit: () => {},
   }), 1);
 }));
+
+test('final proof reports the first early file mismatch without exposing private error contents', async () =>
+  withFixture(async (fixture, handles) => {
+    const sentinel = 'private-proof-error-sentinel';
+    await fs.writeFile(path.join(fixture.app, '.env.staging'), `${sentinel}\n`);
+    await fs.writeFile(fixture.containerState, `${sentinel}\n`);
+    const rows = [];
+    const handle = finiteRecovery(fixture, handles);
+    assert.equal(await recovery.finishRecoveryAttempt(fixture, handle, {
+      barrierTimeoutMs: 2000, settlementTimeoutMs: 3000, emit: (row) => rows.push(row),
+    }), 1);
+    const settled = rows.find((row) => row.event === 'settlement');
+    assert.equal(settled.closed, true);
+    assert.equal(settled.status, 1);
+    assert.equal(settled.expectedEvidence, true);
+    assert.equal(settled.finalState, 'not-proven');
+    assert.equal(settled.auxiliary, null);
+    assert.equal(settled.proofFailureStage, 'environment-content');
+    const published = JSON.stringify(rows);
+    for (const privateValue of [sentinel, fixture.root, '.env.staging', 'AssertionError', 'ERR_ASSERTION']) {
+      assert.equal(published.includes(privateValue), false);
+    }
+    for (const privateKey of ['actual', 'expected', 'stack', 'message']) {
+      assert.equal(published.includes(`"${privateKey}":`), false);
+    }
+    assert.ok(rows.every((row) => Buffer.byteLength(JSON.stringify(row)) <= 2048));
+  }));
+
+test('final proof distinguishes the last file content check from earlier accepted proofs', async () =>
+  withFixture(async (fixture, handles) => {
+    const sentinel = 'private-late-proof-sentinel';
+    await fs.writeFile(fixture.containerState, `${sentinel}\n`);
+    const rows = [];
+    const handle = finiteRecovery(fixture, handles);
+    assert.equal(await recovery.finishRecoveryAttempt(fixture, handle, {
+      barrierTimeoutMs: 2000, settlementTimeoutMs: 3000, emit: (row) => rows.push(row),
+    }), 1);
+    const settled = rows.find((row) => row.event === 'settlement');
+    assert.equal(settled.closed, true);
+    assert.equal(settled.expectedEvidence, true);
+    assert.equal(settled.finalState, 'not-proven');
+    assert.equal(settled.auxiliary, null);
+    assert.equal(settled.proofFailureStage, 'container-state-content');
+    assert.equal(JSON.stringify(rows).includes(sentinel), false);
+    assert.equal(JSON.stringify(rows).includes(fixture.root), false);
+    assert.ok(rows.every((row) => Buffer.byteLength(JSON.stringify(row)) <= 2048));
+  }));
+
+for (const [stage, target, status] of [
+  ['docker-local-image', () => 'easyboost-staging-app:local', 0],
+  ['docker-container-image', () => 'fake-container', 0],
+  ['docker-current-release-tag', (fixture) => `easyboost-staging-app:release-${fixture.current.sha}`, 1],
+  ['docker-candidate-release-tag', (fixture) => `easyboost-staging-app:release-${fixture.candidate.sha}`, 1],
+]) {
+  test(`final Docker proof identifies ${stage} without publishing command error contents`, {
+    skip: process.platform !== 'linux' && 'POSIX Docker fixture command seam',
+  }, async () => withFixture(async (fixture, handles) => {
+    const sentinel = 'private-docker-proof-sentinel';
+    const docker = path.join(fixture.bin, 'docker');
+    const original = await fs.readFile(docker, 'utf8');
+    // Corrupt only the selected real command's bytes; all earlier inspections run unchanged.
+    await fs.writeFile(docker, `#!/bin/bash
+if [ "\${!#}" = '${target(fixture)}' ]; then
+  printf '%s\\n' '${sentinel}'
+  printf '%s\\n' '${sentinel}' >&2
+  exit ${status}
+fi
+${original}`);
+    const rows = [];
+    const handle = finiteRecovery(fixture, handles);
+    assert.equal(await recovery.finishRecoveryAttempt(fixture, handle, {
+      barrierTimeoutMs: 2000, settlementTimeoutMs: 3000, emit: (row) => rows.push(row),
+    }), 1);
+    const settled = rows.find((row) => row.event === 'settlement');
+    assert.equal(settled.closed, true);
+    assert.equal(settled.status, 1);
+    assert.equal(settled.expectedEvidence, true);
+    assert.equal(settled.finalState, 'not-proven');
+    assert.equal(settled.auxiliary, null);
+    assert.equal(settled.proofFailureStage, stage);
+    const published = JSON.stringify(rows);
+    for (const privateValue of [sentinel, fixture.root, target(fixture), '{{.Id}}', 'AssertionError', 'ERR_ASSERTION']) {
+      assert.equal(published.includes(privateValue), false);
+    }
+    for (const privateKey of ['actual', 'expected', 'stack', 'message']) {
+      assert.equal(published.includes(`"${privateKey}":`), false);
+    }
+    assert.ok(rows.every((row) => Buffer.byteLength(JSON.stringify(row)) <= 2048));
+  }));
+}
 
 test('allowlisted phase timeline samples repeated rewrites no faster than500ms and never exceeds16rows', async () =>
   withFixture(async (fixture, handles) => {
@@ -382,6 +478,7 @@ test('final result preserves helper1 evidence while reporting unclosed auxiliary
   assert.equal(settled.closed, true);
   assert.equal(settled.expectedEvidence, true);
   assert.equal(settled.finalState, 'not-proven');
+  assert.equal(settled.proofFailureStage, 'docker-local-image');
   assert.equal(settled.auxiliary.role, 'docker-inspection');
   assert.equal(settled.auxiliary.status, 23);
   assert.equal(settled.auxiliary.closed, false);
@@ -389,6 +486,37 @@ test('final result preserves helper1 evidence while reporting unclosed auxiliary
   assert.equal(rows.at(-1).fixtureRetained, true);
   assert.equal(await fs.readFile(path.join(fixture.root, 'recovery-stderr'), 'utf8'),
     'Primary staging deploy failed with status 1; verified prior state restored\n');
+});
+
+test('unclosed final Docker proof keeps124 and its stage when the real report writer fails', {
+  skip: process.platform !== 'linux' && 'POSIX finite inherited Docker pipes',
+}, async () => {
+  const fixture = await retainedAuxiliaryFixture();
+  await installFiniteDocker(fixture, 23);
+  const descriptor = await fs.open(path.join(fixture.app, '.env.staging'), 'r');
+  try {
+    const rows = [];
+    const handle = finiteRecovery(fixture, []);
+    assert.equal(await recovery.finishRecoveryAttempt(fixture, handle, {
+      barrierTimeoutMs: 2000, settlementTimeoutMs: 2000, proofTimeoutMs: 200,
+      emit: (row) => { rows.push(row); writeSync(descriptor.fd, `${JSON.stringify(row)}\n`); },
+    }), 124);
+    const settled = rows.find((row) => row.event === 'settlement');
+    assert.equal(settled.closed, true);
+    assert.equal(settled.status, 1);
+    assert.equal(settled.expectedEvidence, true);
+    assert.equal(settled.finalState, 'not-proven');
+    assert.equal(settled.proofFailureStage, 'docker-local-image');
+    assert.equal(settled.auxiliary.role, 'docker-inspection');
+    assert.equal(settled.auxiliary.exited, true);
+    assert.equal(settled.auxiliary.closed, false);
+    assert.equal(settled.auxiliary.status, 23);
+    assert.equal(rows.at(-1).status, 124);
+    assert.equal(rows.at(-1).outputFailed, true);
+    assert.equal(rows.at(-1).fixtureRetained, true);
+    assert.equal(JSON.stringify(rows).includes(fixture.root), false);
+    assert.ok(rows.every((row) => Buffer.byteLength(JSON.stringify(row)) <= 2048));
+  } finally { await descriptor.close(); }
 });
 
 test('installer reports124 and retains original23 when its finite descendant keeps pipes open', {
@@ -507,6 +635,7 @@ test('on-time recovery and expected helper exit1 require independently restored 
     }), 0);
     assert.equal(rows.find((row) => row.event === 'recovery-barrier').verdict, 'barrier-reached');
     assert.equal(rows.find((row) => row.event === 'settlement').finalState, 'verified-current');
+    assert.equal(rows.find((row) => row.event === 'settlement').proofFailureStage, null);
     assert.equal(rows.at(-1).status, 0);
     assert.equal(JSON.stringify(rows).includes('Primary staging'), false);
     assert.equal(await fs.readFile(path.join(fixture.root, 'recovery-stderr'), 'utf8'),
@@ -533,6 +662,7 @@ test('on-time recovered current proof rejects broad0644 from real extraction und
   assert.equal(settled.signal, null);
   assert.equal(settled.expectedEvidence, true);
   assert.equal(settled.finalState, 'not-proven');
+  assert.equal(settled.proofFailureStage, 'current-file-metadata');
   assert.equal(settled.helperRecoveredAsExpected, false);
   assert.equal(rows.at(-1).status, 1);
   for (const name of ['.dockerignore', 'Dockerfile', 'compose.staging.yml', 'current.txt']) {
