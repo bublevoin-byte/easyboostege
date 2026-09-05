@@ -67,3 +67,65 @@ The workflow runs these focused tests explicitly because they are outside the de
 Local verification is recorded in ticket15. Docker Desktop's exited-flock PID0 behavior is an
 independently observed environment difference; its finite-child tests cannot establish native
 GitHub full-scenario success. Run the unchanged complete scenario only through the native workflow.
+
+## Bounded-command component baseline — ticket16
+
+The early workflow step runs the following fixed Linux-only command and its focused contracts:
+
+```sh
+node --test .scratch/staging-v4-cutover/diagnostics/native-bounded-timing.test.mjs
+node .scratch/staging-v4-cutover/diagnostics/native-bounded-timing.mjs
+```
+
+The command accepts no arguments. Its six operations match the already executed ticket14 chain
+probe: one supervised `true`, four sequential `true` calls, one `true` under one extra supervised
+Node, one under two extra Nodes, common `verify_helper_bundle`, and common
+`validate_staging_compose_contract`. The latter two run under the real inherited Node chain.
+Each run installs one real immutable helper generation/private Node using the existing hermetic
+test fixture and its synthetic Docker/Compose data. The fixture's existing trusted command-path
+substitution is reused only inside its temporary copy; tracked production files are unchanged.
+Shell installer capability scanning and installed launcher/lock binding are outside this baseline.
+
+The actual private executable is opened as fd9 by a live owner, using its computed digest.
+Every measured command uses real `createPosixSessionControl`, `createPosixSessionInvocation`,
+`runSupervisedCommand`, the production spawned wrapper and normal settlement. The timing wrapper
+around invocation returns the original real object after checking descriptor/chain source and
+executable digest. No authority, identity, publication or settlement result is replaced.
+
+`control_ms` measures real control creation; `invocation_ms` measures complete authority capture
+and invocation creation; `elapsed_ms` on component rows measures supervision including invocation
+and settlement, excluding separately reported control creation. Operation totals also include the
+descriptor-owner startup and all nested work. Nested timings overlap; they must not be summed.
+There are twelve component rows: nine descriptor and three inherited-chain measurements. The
+helper/Compose totals include their real common-shell nested calls without instrumenting them.
+
+The added output is JSON with fixed category strings and numeric timings/status only: twenty
+lines on success, at most twenty-one lines of512 bytes (10.5KiB). Child streams are captured with
+a64KiB cap, validated, and never forwarded verbatim. No paths, identities, digests, raw arguments,
+environment or error messages appear. Runtime/version/hash provenance is recorded separately in
+the ticket. `component-only` explicitly marks scope; this is not the whole rollback reproduction,
+CPU profiling, proof of a cause, or release clearance.
+
+The six-row matrix shares one120000ms enclosing subprocess budget; each real supervised command
+retains its60000ms component limit from ticket14. These are diagnostic bounds, not changes to any
+production or original scenario deadlines. A numeric child failure is preserved; signal exits use
+128+signal and an enclosing timeout reports124. The first failure stops the matrix. Output errors
+cannot replace a child failure; an otherwise successful run with broken output returns1.
+
+All synthetic writes stay in one newly created private `/tmp/easyboost-bounded-timing-*` directory.
+Successful production settlement precedes cleanup. Cleanup verifies the root's directory identity,
+owner, parent and prefix, inspects at most4096 entries/depth12 without following links, and makes
+only owned directories writable before removal. Any failed or timed-out owner may have unproven
+descendants, so its fixture and evidence remain untouched (`fixture_removed:0`); there is no
+process-group/PID0 workaround or blind cleanup after failure. The enclosing runner/container
+lifecycle bounds any such residual work. The focused contracts cover arbitrary-argument rejection,
+real child failure23, replacement-root/link cleanup, the actual Linux matrix including cleanup,
+and the real supervisor's early parent-identity refusal143 before its invocation callback runs.
+The worker preserves a nonzero supervisor result before formatting optional timing measurements;
+an absent invocation measurement cannot replace that original failure with a diagnostic exception.
+
+This ordinary workflow step must pass before the existing observer checks and unchanged full
+scenario run. A baseline failure fails the job and skips those later steps; it is never converted
+to a green diagnostic verdict. The original sampler, full scenario, canonical CI and release gate
+are unchanged. Local Docker Desktop component success cannot establish native GitHub timings or
+full-flock success; ticket16 records local evidence, and root owns the subsequent native run.

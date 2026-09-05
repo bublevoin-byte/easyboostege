@@ -330,3 +330,45 @@ historical evidence; required integration checks and independent reviews precede
 
 No production fix, timeout increase, PID0 acceptance, generic profiler framework, extra packages,
 VPS work, deployment, changes to main/production-hardening or publication of local recovery data.
+
+## Native bounded-command timing baseline — diagnostic1
+
+### Problem Statement
+
+The exact rollback tree timeout also reproduces in the isolated native diagnostic job: successful
+deploy304610ms then rollback still absent at120021ms. Category residency cannot distinguish CPU,
+durable-publication or repeated command startup costs. Existing fast local component measurements
+exercise real descriptor/inherited authority but have not run on the same GitHub runner class.
+
+### Solution and User Stories
+
+1. As the owner, I want a short measurement of actual bounded helper commands on native Linux,
+   so we can compare the same path with the already measured local baseline before selecting a fix.
+2. As the maintainer, I want component measurements separated from the full failing scenario,
+   so a green component cannot be mistaken for deployment readiness or an exact reproduction.
+3. As the owner, I want no additional runtime installation, server access or weakened guard.
+
+### Implementation Decisions
+
+- Reuse the existing local descriptor/inherited-chain timing approach at real exported control,
+  invocation and supervision boundaries; no patched production module, fake authority or bypass.
+- A fixed Linux-only diagnostic command measures a small declared matrix of real no-op commands,
+  repeat/nesting variants and existing common helper/Compose validation. Accept no arbitrary CLI
+  command, environment dump or server input. Synthetic fixture data stays in one private temporary
+  directory; validate its scope and clean only owned artifacts with normal production settlement.
+- Run this short baseline as an early step in the existing separate diagnostic workflow before
+  the unchanged real-flock scenario. Keep canonical CI and existing product/test inputs unchanged.
+- Emit bounded fixed-category numeric timings/status only. Retain a clear component-scope disclaimer;
+  measured overhead is not a chosen cause. Existing sampling and original scenario remain intact.
+
+### Testing Decisions
+
+Run the exact component baseline on the cached local Linux runtime, then the published native job.
+Check fixed invocation, finite execution, real authority/status assertions, safe owned cleanup and
+bounded output. Reuse already tested production seams instead of adding a profiling framework.
+Independent reviews and fresh common checks precede publication; root owns full gate reuse evidence.
+
+### Out of Scope
+
+No production repair, changed deadline/assertion, dependency installation, new remote service,
+canonical workflow change, live host action, mutable recovery data or machine-wide tracing.
