@@ -41,3 +41,26 @@ Issue 02 добавляет отдельный one-time cutover entrypoint. Oper
 - Откат/down-migration PostgreSQL.
 - Удаление старого staging ради clean first-deploy.
 - Ослабление canonical archive, release-store, Compose, image или recovery проверок.
+
+## CI repair после run 33870937009
+
+Исходная точка: `944b9b8`; 11 падений Linux CI объединены в 9 причин. Цель — устранить
+подтверждённые ошибки в существующих operator seams, сохранив контракты и работающий staging.
+
+- Transaction supervisor сохраняет точную retirement authority, возвращённую POSIX `dispose()`,
+  во всех трёх путях завершения. Неполное transaction recovery возвращает status 125 и authority.
+- Standalone POSIX/deadline cleanup сохраняет прежний контракт логического завершения с retained
+  evidence; transaction cleanup/completion использует явное строгое требование reclaim, в том числе
+  при повторном retirement/publication recovery. Ранее подтверждённые отсутствующие стороны
+  сохраняют `null`, а не получают новый путь. Глобальная замена standalone контракта или ослабление
+  identity/ownership checks запрещены.
+- Cutover вычисляет корректный 64-символьный hex nonce и проходит существующие Linux
+  success/refusal/roll-forward сценарии.
+- Тестовые assertions соответствуют закреплённому Node 22.23.2 и действующему runbook. Linux
+  fixtures используют приватный безопасный Node, правильный displaced inode path и полную
+  PostgreSQL container/volume authority. Проверки отказа и защиты остаются обязательными.
+- Проверки: существующие CLI/operator и exported supervisor seams; новые регрессии только для
+  подтверждённых ошибок. Focused checks, независимый Standards/Spec review, lint/check/npm test
+  перед коммитами; Linux CI обязателен перед следующим deploy.
+
+Вне объёма: issue 05, изменение UI/БД, ручное удаление recovery evidence и запуск живого deploy.

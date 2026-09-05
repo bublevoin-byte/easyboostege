@@ -13,6 +13,8 @@ import {
   createStagingDeadlineMailbox,
 } from '../scripts/staging-deadline-control.js';
 import {
+  STAGING_QUIESCENT_MAINTENANCE_DESCRIPTOR,
+  STAGING_QUIESCENT_MAINTENANCE_PROTOCOL,
   recoverPosixSessionControl,
   resumePosixSessionRecoveryHandoff,
 } from '../scripts/posix-session-supervisor.js';
@@ -80,6 +82,28 @@ function syntheticPosixRetirementAuthority(controlDirectory, token = 'd') {
     tombstone: `${parent}${parent.endsWith(separator) ? '' : separator}`
       + `.easyboost-staging-quarantine-slot.${token.repeat(64)}.tombstone`,
   });
+}
+
+function maintenanceFixture(root) {
+  const identity = fsSync.statSync(root);
+  return {
+    authority: Object.freeze({
+      descriptor: STAGING_QUIESCENT_MAINTENANCE_DESCRIPTOR,
+      lease: 'e'.repeat(64),
+      ownerPid: process.pid,
+      ownerStartTime: '1',
+      protocol: STAGING_QUIESCENT_MAINTENANCE_PROTOCOL,
+      rootDev: String(identity.dev),
+      rootIno: String(identity.ino),
+    }),
+    reclaimRetainedEvidence(request) {
+      assert.equal(request.root, root);
+      if (request.kind === 'QUIESCENT_ABSENCE_PROOF') return true;
+      assert.equal(path.dirname(request.container), root);
+      fsSync.rmSync(request.container, { recursive: true });
+      return true;
+    },
+  };
 }
 
 function linuxPlatformPreloadSource() {
@@ -212,6 +236,38 @@ test('transaction wrapper requires READY then DISARM before successful session s
   ]);
   assert.deepEqual(state.requests, [], 'normal settlement must not request any signal');
   assert.deepEqual(state.states(), { mailboxDisposed: true, sessionDisposed: true });
+});
+
+test('transaction settlement reports exact retirement authority returned by session disposal', async () => {
+  const state = fixture();
+  const retirement = syntheticPosixRetirementAuthority('/fixture/session');
+  state.control.dispose = () => retirement;
+  const reports = [];
+  const status = await runStagingTransaction({
+    createDeadlineMailbox: () => state.mailbox,
+    createSessionInvocation(command, args, cwd, settlement, environment, control) {
+      return { args: [], command: 'fixture-wrapper', posixSessionControl: control };
+    },
+    platform: 'linux',
+    pollMilliseconds: 2,
+    posixSessionControl: state.control,
+    recoverySeconds: 600,
+    reportRecoveryRequired(authority) { reports.push(authority); },
+    script: '/fixture/staging-deploy.sh',
+    settlementMilliseconds: 20,
+    spawnProcess() { return state.child; },
+    startupMilliseconds: 20,
+    termGraceMilliseconds: 10,
+    transactionSeconds: 1_800,
+  });
+
+  assert.equal(status, 125);
+  assert.deepEqual(reports, [{
+    deadlineControlDirectory: '/fixture/deadline',
+    posixSessionControlDirectory: '/fixture/session',
+    posixSessionRetirementAuthority: retirement,
+    protocol: 'easyboost-staging-transaction-recovery-v1',
+  }]);
 });
 
 test('transaction binds quiescent maintenance to both roots and strips its launcher proof', async () => {
@@ -479,6 +535,38 @@ test('runtime session disposal preserves exact sibling-publication recovery auth
     deadlineControlDirectory: '/fixture/deadline',
     posixSessionControlDirectory: '/fixture/session',
     posixSessionPublicationAuthority: publication,
+    protocol: 'easyboost-staging-transaction-recovery-v1',
+  }]);
+});
+
+test('no-PID cleanup reports exact retirement authority returned by session disposal', async () => {
+  const state = fixture();
+  state.child.pid = undefined;
+  const retirement = syntheticPosixRetirementAuthority('/fixture/session');
+  state.control.dispose = () => retirement;
+  const reports = [];
+  const status = await runStagingTransaction({
+    createDeadlineMailbox: () => state.mailbox,
+    createSessionInvocation(command, args, cwd, settlement, environment, control) {
+      return { args: [], command: 'fixture-wrapper', posixSessionControl: control };
+    },
+    platform: 'linux',
+    posixSessionControl: state.control,
+    recoverySeconds: 600,
+    reportRecoveryRequired(authority) { reports.push(authority); },
+    script: '/fixture/staging-deploy.sh',
+    spawnProcess() {
+      queueMicrotask(() => state.child.emit('error', new Error('synthetic no-PID error')));
+      return state.child;
+    },
+    transactionSeconds: 1_800,
+  });
+
+  assert.equal(status, 125);
+  assert.deepEqual(reports, [{
+    deadlineControlDirectory: null,
+    posixSessionControlDirectory: '/fixture/session',
+    posixSessionRetirementAuthority: retirement,
     protocol: 'easyboost-staging-transaction-recovery-v1',
   }]);
 });
@@ -1250,6 +1338,252 @@ test('session completion failure keeps a parseable session handoff after deadlin
   });
 });
 
+test('transaction recovery reports exact retirement authority when session evidence is retained',
+  async () => {
+    const supervisor = await import('../scripts/posix-session-supervisor.js');
+    const sessionRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-transaction-retained-'));
+    const deadlineRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-transaction-absent-'));
+    const script = '/fixture/staging-deploy.sh';
+    const key = `${path.resolve(script)}:[]`;
+    try {
+      const control = supervisor.createPosixSessionControl({
+        controlKey: `staging-transaction:${key}`,
+        controlRoot: sessionRoot,
+      });
+      const directory = control.specification.controlDirectory;
+      const original = await fs.stat(directory, { bigint: true });
+      let retirement;
+      let recoveryAuthority;
+      assert.throws(() => recoverStagingTransaction({
+        deadlineControlRoot: deadlineRoot,
+        platform: 'linux',
+        script,
+        sessionControlRoot: sessionRoot,
+      }), (error) => {
+        assert.equal(error.exitCode, 125);
+        recoveryAuthority = error.recoveryAuthority;
+        retirement = error.recoveryAuthority?.posixSessionRetirementAuthority;
+        assert.ok(retirement, 'incomplete recovery must retain its exact retirement authority');
+        assert.deepEqual(error.recoveryAuthority, {
+          deadlineControlDirectory: null,
+          posixSessionControlDirectory: directory,
+          posixSessionRetirementAuthority: retirement,
+          protocol: 'easyboost-staging-transaction-recovery-v1',
+        });
+        assert.deepEqual(parseStagingTransactionRecoveryAuthority(
+          JSON.stringify(error.recoveryAuthority),
+        ), error.recoveryAuthority);
+        return true;
+      });
+      assert.equal(retirement.controlDirectory, directory);
+      assert.equal(retirement.sourceDev, String(original.dev));
+      assert.equal(retirement.sourceIno, String(original.ino));
+      const payload = await fs.stat(path.join(retirement.tombstone, 'payload'), { bigint: true });
+      assert.equal(payload.dev, original.dev);
+      assert.equal(payload.ino, original.ino);
+      await assert.rejects(fs.access(directory), { code: 'ENOENT' });
+      const retainedEntries = (await fs.readdir(sessionRoot)).sort();
+      assert.throws(() => recoverStagingTransaction({
+        deadlineControlRoot: deadlineRoot,
+        platform: 'linux',
+        recoveryAuthority: parseStagingTransactionRecoveryAuthority(JSON.stringify(recoveryAuthority)),
+        script,
+        sessionControlRoot: sessionRoot,
+      }), (error) => {
+        assert.equal(error.exitCode, 125);
+        assert.deepEqual(error.recoveryAuthority, recoveryAuthority);
+        return true;
+      });
+      assert.deepEqual((await fs.readdir(sessionRoot)).sort(), retainedEntries);
+      const repeatedPayload = await fs.stat(path.join(retirement.tombstone, 'payload'), { bigint: true });
+      assert.equal(repeatedPayload.dev, original.dev);
+      assert.equal(repeatedPayload.ino, original.ino);
+      await assert.rejects(fs.access(directory), { code: 'ENOENT' });
+    } finally {
+      await fs.rm(sessionRoot, { recursive: true, force: true });
+      await fs.rm(deadlineRoot, { recursive: true, force: true });
+    }
+  });
+
+test('transaction publication recovery retains the same exact authority across repeated attempts',
+  async () => {
+    const sessionRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-transaction-publication-'));
+    const deadlineRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-transaction-absent-'));
+    const script = '/fixture/staging-deploy.sh';
+    const key = `${path.resolve(script)}:[]`;
+    const directory = path.join(sessionRoot, createHash('sha256')
+      .update(`staging-transaction:${key}`, 'utf8').digest('hex'));
+    const temporary = path.join(sessionRoot,
+      `.${path.basename(directory)}.control.json.${'3'.repeat(32)}.tmp`);
+    try {
+      await fs.mkdir(directory, { mode: 0o700 });
+      await fs.writeFile(temporary, 'private publication residue', { flag: 'wx', mode: 0o600 });
+      const original = await fs.stat(temporary, { bigint: true });
+      let authority = {
+        deadlineControlDirectory: null,
+        posixSessionControlDirectory: directory,
+        posixSessionPublicationAuthority: {
+          destination: path.join(directory, 'control.json'),
+          sourceBinding: posixPublicationSourceBinding(temporary),
+          temporary,
+        },
+        protocol: 'easyboost-staging-transaction-recovery-v1',
+      };
+      let retainedEntries;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        assert.throws(() => recoverStagingTransaction({
+          deadlineControlRoot: deadlineRoot,
+          platform: 'linux',
+          recoveryAuthority: parseStagingTransactionRecoveryAuthority(JSON.stringify(authority)),
+          script,
+          sessionControlRoot: sessionRoot,
+        }), (error) => {
+          assert.equal(error.exitCode, 125);
+          assert.equal(error.recoveryAuthority.deadlineControlDirectory, null);
+          assert.equal(error.recoveryAuthority.posixSessionRetirementAuthority, undefined);
+          const publication = error.recoveryAuthority.posixSessionPublicationAuthority;
+          assert.ok(publication?.tombstone, 'retained publication needs an exact bound tombstone');
+          assert.equal(publication.destination, path.join(directory, 'control.json'));
+          assert.equal(publication.temporary, temporary);
+          assert.equal(publication.sourceBinding.dev, String(original.dev));
+          assert.equal(publication.sourceBinding.ino, String(original.ino));
+          if (attempt > 0) assert.deepEqual(error.recoveryAuthority, authority);
+          authority = error.recoveryAuthority;
+          return true;
+        });
+        const payload = path.join(authority.posixSessionPublicationAuthority.tombstone, 'payload');
+        const identity = await fs.stat(payload, { bigint: true });
+        assert.equal(identity.dev, original.dev);
+        assert.equal(identity.ino, original.ino);
+        assert.equal(identity.nlink, 2n);
+        assert.equal(await fs.readFile(payload, 'utf8'), 'private publication residue');
+        assert.equal(await fs.readFile(temporary, 'utf8'), 'private publication residue');
+        assert.deepEqual(await fs.readdir(directory), []);
+        const entries = (await fs.readdir(sessionRoot)).sort();
+        if (attempt > 0) assert.deepEqual(entries, retainedEntries);
+        retainedEntries = entries;
+      }
+    } finally {
+      await fs.rm(sessionRoot, { recursive: true, force: true });
+      await fs.rm(deadlineRoot, { recursive: true, force: true });
+    }
+  });
+
+test('transaction deadline retirement preserves exact evidence and session handoff on retry',
+  async () => {
+    const supervisor = await import('../scripts/posix-session-supervisor.js');
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-transaction-deadline-'));
+    const sessionRoot = path.join(temporaryRoot, 'session');
+    const deadlineRoot = path.join(temporaryRoot, 'deadline');
+    const script = '/fixture/staging-deploy.sh';
+    const key = `${path.resolve(script)}:[]`;
+    try {
+      const session = supervisor.createPosixSessionControl({
+        controlKey: `staging-transaction:${key}`, controlRoot: sessionRoot,
+      });
+      const mailbox = createStagingDeadlineMailbox({
+        controlKey: `staging-deadline:${key}`, controlRoot: deadlineRoot,
+      });
+      const directory = mailbox.specification.controlDirectory;
+      const original = await fs.stat(directory, { bigint: true });
+      let authority;
+      let retainedDeadlineEntries;
+      let retainedSessionEntries;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        assert.throws(() => recoverStagingTransaction({
+          deadlineControlRoot: deadlineRoot,
+          platform: 'linux',
+          ...(authority ? {
+            recoveryAuthority: parseStagingTransactionRecoveryAuthority(JSON.stringify(authority)),
+          } : {}),
+          script,
+          sessionControlRoot: sessionRoot,
+        }), (error) => {
+          assert.equal(error.exitCode, 125);
+          assert.equal(error.recoveryAuthority.deadlineControlDirectory, directory);
+          assert.equal(error.recoveryAuthority.posixSessionControlDirectory,
+            session.specification.controlDirectory);
+          assert.ok(error.recoveryAuthority.deadlineRetirementAuthority?.tombstone);
+          assert.ok(error.recoveryAuthority.posixSessionRecoveryHandoff);
+          if (attempt > 0) assert.deepEqual(error.recoveryAuthority, authority);
+          authority = error.recoveryAuthority;
+          return true;
+        });
+        const payload = path.join(authority.deadlineRetirementAuthority.tombstone, 'payload');
+        const identity = await fs.stat(payload, { bigint: true });
+        assert.equal(identity.dev, original.dev);
+        assert.equal(identity.ino, original.ino);
+        await assert.rejects(fs.access(directory), { code: 'ENOENT' });
+        const deadlineEntries = (await fs.readdir(deadlineRoot)).sort();
+        const sessionEntries = (await fs.readdir(session.specification.controlDirectory)).sort();
+        if (attempt > 0) {
+          assert.deepEqual(deadlineEntries, retainedDeadlineEntries);
+          assert.deepEqual(sessionEntries, retainedSessionEntries);
+        }
+        retainedDeadlineEntries = deadlineEntries;
+        retainedSessionEntries = sessionEntries;
+      }
+    } finally {
+      await fs.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+test('transaction deadline publication preserves its exact payload and absent session authority on retry',
+  async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'easyboost-transaction-deadline-pub-'));
+    const sessionRoot = path.join(temporaryRoot, 'session');
+    const deadlineRoot = path.join(temporaryRoot, 'deadline');
+    const script = '/fixture/staging-deploy.sh';
+    const key = `${path.resolve(script)}:[]`;
+    const directory = path.join(deadlineRoot, createHash('sha256')
+      .update(`staging-deadline:${key}`, 'utf8').digest('hex'));
+    const temporary = path.join(deadlineRoot,
+      `.${path.basename(directory)}.control.json.${'3'.repeat(32)}.tmp`);
+    try {
+      await fs.mkdir(sessionRoot, { mode: 0o700 });
+      await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+      await fs.writeFile(temporary, 'private deadline publication', { flag: 'wx', mode: 0o600 });
+      const original = await fs.stat(temporary, { bigint: true });
+      let authority = {
+        deadlineControlDirectory: directory,
+        deadlinePublicationAuthority: { destination: path.join(directory, 'control.json'), temporary },
+        posixSessionControlDirectory: null,
+        protocol: 'easyboost-staging-transaction-recovery-v1',
+      };
+      let retainedEntries;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        assert.throws(() => recoverStagingTransaction({
+          deadlineControlRoot: deadlineRoot,
+          platform: 'linux',
+          recoveryAuthority: parseStagingTransactionRecoveryAuthority(JSON.stringify(authority)),
+          script,
+          sessionControlRoot: sessionRoot,
+        }), (error) => {
+          assert.equal(error.exitCode, 125);
+          const publication = error.recoveryAuthority.deadlinePublicationAuthority;
+          assert.ok(publication?.tombstone);
+          assert.equal(publication.destination, path.join(directory, 'control.json'));
+          assert.equal(publication.temporary, temporary);
+          assert.equal(error.recoveryAuthority.posixSessionControlDirectory, null);
+          if (attempt > 0) assert.deepEqual(error.recoveryAuthority, authority);
+          authority = error.recoveryAuthority;
+          return true;
+        });
+        const payload = path.join(authority.deadlinePublicationAuthority.tombstone, 'payload');
+        const identity = await fs.stat(payload, { bigint: true });
+        assert.equal(identity.dev, original.dev);
+        assert.equal(identity.ino, original.ino);
+        assert.equal(await fs.readFile(payload, 'utf8'), 'private deadline publication');
+        assert.deepEqual(await fs.readdir(sessionRoot), []);
+        const entries = (await fs.readdir(deadlineRoot)).sort();
+        if (attempt > 0) assert.deepEqual(entries, retainedEntries);
+        retainedEntries = entries;
+      }
+    } finally {
+      await fs.rm(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
 test('root transaction recovery retires a session-only control prefix and records the absent deadline',
   async () => {
     const supervisor = await import('../scripts/posix-session-supervisor.js');
@@ -1267,6 +1601,12 @@ test('root transaction recovery retires a session-only control prefix and record
         args,
         deadlineControlRoot: deadlineRoot,
         platform: 'linux',
+        prepareMaintenance(environment) {
+          return {
+            bindings: new Map([[sessionRoot, maintenanceFixture(sessionRoot)]]),
+            environment,
+          };
+        },
         script,
         sessionControlRoot: sessionRoot,
       });
@@ -1280,6 +1620,32 @@ test('root transaction recovery retires a session-only control prefix and record
       await fs.rm(deadlineRoot, { recursive: true, force: true });
     }
   });
+
+test('startup failure preserves exact retirement authority returned by session disposal', () => {
+  const state = fixture();
+  const retirement = syntheticPosixRetirementAuthority('/fixture/session');
+  state.control.dispose = () => retirement;
+  const startupFailure = new Error('synthetic deadline creation failure');
+  startupFailure.recoveryAuthority = Object.freeze({ controlDirectory: '/fixture/deadline-partial' });
+
+  assert.throws(() => runStagingTransaction({
+    createDeadlineMailbox() { throw startupFailure; },
+    createSessionControl() { return state.control; },
+    platform: 'linux',
+    recoverySeconds: 600,
+    script: '/fixture/staging-deploy.sh',
+    transactionSeconds: 1_800,
+  }), (error) => {
+    assert.equal(error.exitCode, 125);
+    assert.deepEqual(error.recoveryAuthority, {
+      deadlineControlDirectory: '/fixture/deadline-partial',
+      posixSessionControlDirectory: '/fixture/session',
+      posixSessionRetirementAuthority: retirement,
+      protocol: 'easyboost-staging-transaction-recovery-v1',
+    });
+    return true;
+  });
+});
 
 test('startup aggregates unproven cleanup and attaches both exact partial authorities', () => {
   const startupFailure = new Error('synthetic deadline creation failure');
@@ -1505,11 +1871,11 @@ test('transaction CLI round-trips exact bound publication residue into typed rec
   const platformPreload = path.join(os.tmpdir(),
     `easyboost-transaction-cli-publication-${process.pid}.cjs`);
   let publicationTombstone;
-  let retirementTombstone;
   try {
     await fs.mkdir(sessionRoot, { recursive: true, mode: 0o700 });
     await fs.mkdir(deadlineRoot, { recursive: true, mode: 0o700 });
     await fs.mkdir(sessionDirectory, { mode: 0o700 });
+    const sessionIdentity = await fs.stat(sessionDirectory, { bigint: true });
     await fs.writeFile(temporary, 'private publication residue', { flag: 'wx', mode: 0o600 });
     const authority = JSON.stringify({
       deadlineControlDirectory: null,
@@ -1533,31 +1899,49 @@ test('transaction CLI round-trips exact bound publication residue into typed rec
     const reported = JSON.parse(lines[0].slice(
       'STAGING_TRANSACTION_RECOVERY_REQUIRED '.length,
     ));
-    retirementTombstone = reported.posixSessionRetirementAuthority?.tombstone;
+    publicationTombstone = reported.posixSessionPublicationAuthority?.tombstone;
     assert.deepEqual(reported, {
       deadlineControlDirectory: null,
       posixSessionControlDirectory: sessionDirectory,
-      posixSessionRetirementAuthority: reported.posixSessionRetirementAuthority,
+      posixSessionPublicationAuthority: {
+        destination,
+        sourceBinding: rootOwnedPosixPublicationSourceBinding(temporary),
+        temporary,
+        tombstone: publicationTombstone,
+      },
       protocol: 'easyboost-staging-transaction-recovery-v1',
     });
     assert.deepEqual(parseStagingTransactionRecoveryAuthority(JSON.stringify(reported)), reported);
     const temporaryIdentity = await fs.stat(temporary);
     assert.equal(temporaryIdentity.nlink, 2,
       'ordinary recovery must retain the authenticated source and payload links');
-    for (const name of await fs.readdir(sessionRoot)) {
-      if (!name.startsWith('.easyboost-staging-quarantine-slot.')) continue;
-      const candidate = path.join(sessionRoot, name);
-      try {
-        const payloadIdentity = await fs.stat(path.join(candidate, 'payload'));
-        if (String(payloadIdentity.dev) === String(temporaryIdentity.dev)
-            && String(payloadIdentity.ino) === String(temporaryIdentity.ino)) {
-          publicationTombstone = candidate;
-          break;
-        }
-      } catch {}
-    }
     assert.ok(publicationTombstone, 'the exact bound publication must remain replayable');
-    await fs.access(sessionDirectory);
+    const publicationIdentity = await fs.stat(path.join(publicationTombstone, 'payload'));
+    assert.equal(publicationIdentity.dev, temporaryIdentity.dev);
+    assert.equal(publicationIdentity.ino, temporaryIdentity.ino);
+    assert.equal(await fs.readFile(path.join(publicationTombstone, 'payload'), 'utf8'),
+      'private publication residue');
+    const currentSessionIdentity = await fs.stat(sessionDirectory, { bigint: true });
+    assert.equal(currentSessionIdentity.dev, sessionIdentity.dev);
+    assert.equal(currentSessionIdentity.ino, sessionIdentity.ino);
+    assert.deepEqual(await fs.readdir(sessionDirectory), []);
+    const retainedEntries = (await fs.readdir(sessionRoot)).sort();
+    const retried = spawnSync(process.execPath, [
+      '--require', platformPreload,
+      path.resolve('scripts/staging-transaction-supervisor.js'),
+      '--recover-with-authority', JSON.stringify(reported), '--', script, ...args,
+    ], { cwd: process.cwd(), encoding: 'utf8' });
+    assert.equal(retried.status, 125, retried.stderr);
+    const retriedLine = retried.stderr.trim().split(/\r?\n/u)[0];
+    assert.match(retriedLine, /^STAGING_TRANSACTION_RECOVERY_REQUIRED /u);
+    assert.deepEqual(JSON.parse(retriedLine.slice('STAGING_TRANSACTION_RECOVERY_REQUIRED '.length)),
+      reported);
+    assert.deepEqual((await fs.readdir(sessionRoot)).sort(), retainedEntries);
+    const repeatedPayload = await fs.stat(path.join(publicationTombstone, 'payload'));
+    assert.equal(repeatedPayload.dev, temporaryIdentity.dev);
+    assert.equal(repeatedPayload.ino, temporaryIdentity.ino);
+    assert.equal(await fs.readFile(path.join(publicationTombstone, 'payload'), 'utf8'),
+      'private publication residue');
     await assert.rejects(fs.access(deadlineDirectory), { code: 'ENOENT' });
   } finally {
     await fs.rm(temporary, { force: true });
@@ -1565,9 +1949,6 @@ test('transaction CLI round-trips exact bound publication residue into typed rec
     await fs.rm(deadlineDirectory, { recursive: true, force: true });
     if (publicationTombstone) {
       await fs.rm(publicationTombstone, { recursive: true, force: true });
-    }
-    if (retirementTombstone) {
-      await fs.rm(retirementTombstone, { recursive: true, force: true });
     }
     await fs.rm(platformPreload, { force: true });
   }
@@ -2000,6 +2381,15 @@ test('reserved deadline tombstone and live session baton recover without another
       args,
       deadlineControlRoot: deadlineRoot,
       platform: 'linux',
+      prepareMaintenance(environment) {
+        return {
+          bindings: new Map([
+            [sessionRoot, maintenanceFixture(sessionRoot)],
+            [deadlineRoot, maintenanceFixture(deadlineRoot)],
+          ]),
+          environment,
+        };
+      },
       recoveryAuthority: combinedAuthority,
       script,
       sessionControlRoot: sessionRoot,
@@ -2010,7 +2400,8 @@ test('reserved deadline tombstone and live session baton recover without another
     });
     assert.equal(fsSync.existsSync(deadlineDirectory), false);
     assert.equal(fsSync.existsSync(sessionDirectory), false);
-    assert.equal(fsSync.existsSync(path.join(deadlineRetirement.tombstone, 'payload')), true);
+    assert.equal(fsSync.existsSync(deadlineRetirement.tombstone), false,
+      'successful transaction recovery must reclaim the reserved deadline evidence');
   } finally {
     fsSync.rmSync(temporaryRoot, { force: true, recursive: true });
   }

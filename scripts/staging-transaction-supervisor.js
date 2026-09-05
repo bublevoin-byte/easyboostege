@@ -593,9 +593,11 @@ export function recoverStagingTransaction({
   const maintenance = prepareMaintenance(environment, [
     resolvedDeadlineRoot, resolvedSessionRoot,
   ]);
-  const deadlineMaintenance = quiescentOptions(
-    maintenance.bindings.get(resolvedDeadlineRoot),
-  );
+  const deadlineMaintenance = {
+    ...quiescentOptions(maintenance.bindings.get(resolvedDeadlineRoot)),
+    requireReclaimedPublication: true,
+    requireReclaimedRetirement: true,
+  };
   const sessionMaintenance = quiescentOptions(
     maintenance.bindings.get(resolvedSessionRoot),
   );
@@ -666,11 +668,15 @@ export function recoverStagingTransaction({
   }
   if (resolvedSessionRetirement !== undefined) {
     try {
-      cleanupSessionRetirement(resolvedSessionRetirement, sessionMaintenance);
+      cleanupSessionRetirement(resolvedSessionRetirement, {
+        ...sessionMaintenance,
+        requireReclaimedRetirement: true,
+      });
       resolvedSessionRetirement = undefined;
     } catch (cause) {
       throw transactionRecoveryFailure(cause, {
-        deadlineDirectory,
+        deadlineDirectory: recoveryAuthority?.deadlineControlDirectory === null
+          ? null : deadlineDirectory,
         deadlinePublicationAuthority: resolvedDeadlinePublication,
         deadlineRecoveryHandoff: resolvedDeadlineHandoff,
         deadlineRetirementAuthority: resolvedDeadlineRetirement,
@@ -685,11 +691,15 @@ export function recoverStagingTransaction({
   while (resolvedSessionPublications.length > 0) {
     const [currentPublication, ...remainingPublications] = resolvedSessionPublications;
     try {
-      cleanupSessionPublication(currentPublication, sessionMaintenance);
+      cleanupSessionPublication(currentPublication, {
+        ...sessionMaintenance,
+        requireReclaimedPublication: true,
+      });
       resolvedSessionPublications = Object.freeze(remainingPublications);
     } catch (cause) {
       throw transactionRecoveryFailure(cause, {
-        deadlineDirectory,
+        deadlineDirectory: recoveryAuthority?.deadlineControlDirectory === null
+          ? null : deadlineDirectory,
         deadlinePublicationAuthority: resolvedDeadlinePublication,
         deadlineRecoveryHandoff: resolvedDeadlineHandoff,
         deadlineRetirementAuthority: resolvedDeadlineRetirement,
@@ -701,13 +711,15 @@ export function recoverStagingTransaction({
       });
     }
   }
+  let sessionRecoveryStarted = false;
   const deadlineRecoveryFailure = (cause) => transactionRecoveryFailure(cause, {
     deadlineDirectory,
     deadlinePublicationAuthority: resolvedDeadlinePublication,
     deadlineRecoveryHandoff: resolvedDeadlineHandoff,
     deadlineRetirementAuthority: resolvedDeadlineRetirement,
     publicationRole: 'deadline',
-    sessionDirectory,
+    sessionDirectory: !sessionRecoveryStarted && recoveryAuthority?.posixSessionControlDirectory === null
+      ? null : sessionDirectory,
     sessionPublicationAuthorities: resolvedSessionPublications,
     sessionRecoveryHandoff: resolvedSessionHandoff,
     sessionRetirementAuthority: resolvedSessionRetirement,
@@ -782,6 +794,7 @@ export function recoverStagingTransaction({
   }
   let proven;
   try {
+    sessionRecoveryStarted = true;
     proven = resolvedSessionHandoff === undefined
       ? recoverSession({
         ...sessionOptions,
@@ -848,6 +861,7 @@ export function recoverStagingTransaction({
       controlRoot: sessionOptions.controlRoot,
       ...sessionMaintenance,
       recoveryScope: deadlineDirectory,
+      requireReclaimedRetirement: true,
     });
   } catch (cause) {
     throw transactionRecoveryFailure(cause, {
@@ -1061,12 +1075,13 @@ export function runStagingTransaction({
       child?.unref?.();
     } else {
       try {
-        posixSessionControl?.dispose({
+        sessionCleanupRetirement = exactRetirementAuthority(posixSessionControl?.dispose({
           force: true,
           recoveryScope: deadlineMailbox?.specification?.controlDirectory
             ?? (startupStage === 'deadline-mailbox'
               ? cause?.recoveryAuthority?.controlDirectory ?? null : null),
-        });
+        }), { posixSession: true });
+        sessionCleanupUnproven = sessionCleanupRetirement !== null;
       } catch (error) {
         sessionCleanupUnproven = true;
         sessionCleanupPublication = exactPublicationAuthority(error?.recoveryAuthority, {
@@ -1319,9 +1334,14 @@ export function runStagingTransaction({
         return;
       }
       try {
-        posixSessionControl.dispose({
+        sessionRetirementAuthority = exactRetirementAuthority(posixSessionControl.dispose({
           recoveryScope: deadlineMailbox.specification.controlDirectory,
-        });
+        }), { posixSession: true });
+        if (sessionRetirementAuthority !== null) {
+          recoveryNeeded = true;
+          complete(125);
+          return;
+        }
         sessionAuthorityRetained = false;
       } catch (error) {
         complete(125, { failure: error, failureRole: 'session' });
@@ -1460,11 +1480,12 @@ export function runStagingTransaction({
       if (!child?.pid) {
         primaryFailure ??= error;
         try {
-          posixSessionControl.dispose({
+          sessionRetirementAuthority = exactRetirementAuthority(posixSessionControl.dispose({
             force: true,
             recoveryScope: deadlineMailbox.specification.controlDirectory,
-          });
-          sessionAuthorityRetained = false;
+          }), { posixSession: true });
+          sessionAuthorityRetained = sessionRetirementAuthority !== null;
+          if (sessionAuthorityRetained) recoveryNeeded = true;
         } catch (cleanupError) {
           retainCleanupFailure(cleanupError, 'session');
         }

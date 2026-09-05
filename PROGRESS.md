@@ -256,6 +256,17 @@ Premium; внутренний Base может сохраниться тольк�
 
 ---
 
+## Staging CI repair — 2026-09-05
+
+Продолжение с `944b9b8` после CI run `33870937009`; live deploy ожидает исправлений и зелёного CI.
+Спека и доказательства: `.scratch/staging-v4-cutover/`.
+
+| Тикет | Результат | Статус |
+|---|---|---|
+| 06 | Сохранение данных для завершения прерванного восстановления | implemented; local gates passed, Linux CI pending |
+| 07 | Исправление ошибки nonce первого перехода staging | in progress |
+| 08 | Исправление шести тестовых fixtures/contracts Linux CI | in progress |
+
 ## Полный пробный ЕГЭ-2026
 
 Спека: `.scratch/ege-full-mock-2026/spec.md`

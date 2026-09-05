@@ -617,6 +617,7 @@ export function cleanupStagingDeadlinePublicationResidue(authority, {
   filesystem = fs,
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedPublication = false,
   synchronizeDirectory = syncDirectory,
 } = {}) {
   let retainedTombstone;
@@ -773,7 +774,7 @@ export function cleanupStagingDeadlinePublicationResidue(authority, {
     }
     assertPathAbsent(filesystem, temporary,
       'staging deadline original publication residue path');
-    maybeReclaimTerminalSlot({
+    const reclaimed = maybeReclaimTerminalSlot({
       container: tombstone,
       kind: 'PUBLICATION',
       payload: activePayload,
@@ -784,6 +785,9 @@ export function cleanupStagingDeadlinePublicationResidue(authority, {
       rootIdentity,
       synchronizeDirectory,
     });
+    if (requireReclaimedPublication && !reclaimed) {
+      throw new Error('staging deadline publication evidence remains retained');
+    }
     assertPathAbsent(filesystem, temporary,
       'staging deadline original publication residue path');
     return true;
@@ -914,6 +918,7 @@ export function cleanupStagingDeadlineRetirementTombstone(authority, {
   beforeFinalize = () => {},
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedRetirement = false,
   synchronizeDirectory = syncDirectory,
 } = {}) {
   if (!authority || JSON.stringify(Object.keys(authority).sort())
@@ -988,7 +993,7 @@ export function cleanupStagingDeadlineRetirementTombstone(authority, {
       payload, record, 'staging deadline durable retirement payload',
     );
     assertPathAbsent(fs, directory, 'staging deadline retired control directory');
-    maybeReclaimTerminalSlot({
+    const reclaimed = maybeReclaimTerminalSlot({
       container: tombstone,
       kind: 'RETIREMENT',
       payload,
@@ -999,6 +1004,9 @@ export function cleanupStagingDeadlineRetirementTombstone(authority, {
       rootIdentity,
       synchronizeDirectory,
     });
+    if (requireReclaimedRetirement && !reclaimed) {
+      throw new Error('staging deadline retirement evidence remains retained');
+    }
     assertPathAbsent(fs, directory, 'staging deadline retired control directory');
     return true;
   } catch (error) {
@@ -1541,6 +1549,8 @@ function retireDeadlineRecoveryNamespace({
   moveRetirementDirectory,
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedPublication = false,
+  requireReclaimedRetirement = false,
   recovery,
   root,
   semanticSnapshot,
@@ -1549,6 +1559,7 @@ function retireDeadlineRecoveryNamespace({
   recoverExactDeadlinePublicationResidues(root, directory, {
     quiescentMaintenanceAuthority,
     reclaimRetainedEvidence,
+    requireReclaimedPublication,
   });
   const batonNames = exactDeadlineRecoveryBatonNames(directory, recovery);
   revalidateDeadlineRecoveryNamespace(directory, semanticSnapshot, {
@@ -1585,6 +1596,7 @@ function retireDeadlineRecoveryNamespace({
     }, {
       quiescentMaintenanceAuthority,
       reclaimRetainedEvidence,
+      requireReclaimedRetirement,
       synchronizeDirectory: syncControlRoot,
     });
   } catch (error) {
@@ -1716,6 +1728,7 @@ export function resumeStagingDeadlineRecoveryHandoff(handoff, {
   linkBaton = fs.linkSync,
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedPublication = false,
   rotateRecoveryBatonEpoch,
   synchronizeDirectory = syncDirectory,
 } = {}) {
@@ -1755,6 +1768,7 @@ export function resumeStagingDeadlineRecoveryHandoff(handoff, {
     recoverExactDeadlinePublicationResidues(root, directory, {
       quiescentMaintenanceAuthority,
       reclaimRetainedEvidence,
+      requireReclaimedPublication,
     });
   } catch (error) {
     throw attachDeadlineRecoveryHandoff(error, handoff);
@@ -1920,6 +1934,8 @@ export function completeStagingDeadlineRecovery(proof, {
   controlRoot,
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedPublication = false,
+  requireReclaimedRetirement = false,
   syncControlRoot = syncDirectory,
 } = {}) {
   const authority = DEADLINE_RECOVERY_PROOFS.get(proof);
@@ -1941,6 +1957,8 @@ export function completeStagingDeadlineRecovery(proof, {
       directory: authority.directory,
       quiescentMaintenanceAuthority,
       reclaimRetainedEvidence,
+      requireReclaimedPublication,
+      requireReclaimedRetirement,
       recovery: authority.recovery,
       root: authority.controlRoot,
       semanticSnapshot: snapshot,
@@ -2015,6 +2033,7 @@ function rejectExistingDeadlineRecoveryBaton(controlKey, root, directory) {
 function recoverRetainedDeadlineRetirement(root, directory, {
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedRetirement = false,
   synchronizeDirectory = syncDirectory,
 } = {}) {
   const matches = findExactTerminalSlots(root, {
@@ -2047,6 +2066,7 @@ function recoverRetainedDeadlineRetirement(root, directory, {
     }, {
       quiescentMaintenanceAuthority,
       reclaimRetainedEvidence,
+      requireReclaimedRetirement,
       synchronizeDirectory,
     });
     assertPathAbsent(fs, directory, 'staging deadline retired control directory');
@@ -2404,6 +2424,8 @@ export function recoverStagingDeadlineMailbox({
   publicationResidue,
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedPublication = false,
+  requireReclaimedRetirement = false,
   retire = true,
   sessionRecoveryProof,
   sessionControlRoot = path.join(os.tmpdir(), 'easyboost-posix-session-controls'),
@@ -2440,6 +2462,7 @@ export function recoverStagingDeadlineMailbox({
       const retainedResult = recoverRetainedDeadlineRetirement(root, directory, {
         quiescentMaintenanceAuthority,
         reclaimRetainedEvidence,
+        requireReclaimedRetirement,
         synchronizeDirectory: syncControlRoot,
       });
       if (retainedResult !== null) return retainedResult;
@@ -2461,6 +2484,7 @@ export function recoverStagingDeadlineMailbox({
     recoverExactDeadlinePublicationResidues(root, directory, {
       quiescentMaintenanceAuthority,
       reclaimRetainedEvidence,
+      requireReclaimedPublication,
     });
   } catch (error) {
     try {
@@ -2480,6 +2504,7 @@ export function recoverStagingDeadlineMailbox({
     cleanupStagingDeadlinePublicationResidue(publicationResidue, {
       quiescentMaintenanceAuthority,
       reclaimRetainedEvidence,
+      requireReclaimedPublication,
     });
   }
   const semanticSnapshot = captureDeadlineRecoveryNamespace(directory);
@@ -2500,6 +2525,8 @@ export function recoverStagingDeadlineMailbox({
         directory,
         quiescentMaintenanceAuthority,
         reclaimRetainedEvidence,
+        requireReclaimedPublication,
+        requireReclaimedRetirement,
         recovery,
         root,
         semanticSnapshot,

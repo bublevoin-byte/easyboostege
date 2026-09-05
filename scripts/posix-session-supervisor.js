@@ -933,6 +933,7 @@ export function cleanupPosixSessionPublicationResidue(authority, {
   filesystem = fs,
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedPublication = false,
   runNoReplaceMove = spawnSync,
   synchronizeDirectory = syncDirectory,
 } = {}) {
@@ -1231,7 +1232,7 @@ export function cleanupPosixSessionPublicationResidue(authority, {
     // The fixed-slot reservation makes restart discovery and quota accounting
     // independent of the original in-memory recovery authority.
     synchronizeDirectory(root);
-    reclaimPosixRetainedEvidence(quarantine, root, {
+    const reclaimed = reclaimPosixRetainedEvidence(quarantine, root, {
       beforeRetainedSourceMove,
       filesystem,
       quiescentMaintenanceAuthority,
@@ -1239,6 +1240,9 @@ export function cleanupPosixSessionPublicationResidue(authority, {
       runNoReplaceMove,
       synchronizeDirectory,
     });
+    if (requireReclaimedPublication && !reclaimed) {
+      throw new Error('POSIX session publication evidence remains retained');
+    }
     return true;
   } catch (error) {
     throw failure(error);
@@ -2610,6 +2614,7 @@ function moveOwnedPosixControlDirectory({
 export function cleanupPosixSessionRetirementTombstone(authority, {
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
+  requireReclaimedRetirement = false,
   noReplacePlatform = process.platform,
   runNoReplaceMove = spawnSync,
   synchronizeDirectory = syncDirectory,
@@ -2746,10 +2751,15 @@ export function cleanupPosixSessionRetirementTombstone(authority, {
     }
   }
   synchronizeDirectory(root);
-  reclaimPosixRetainedEvidence(tombstone, root, {
+  const reclaimed = reclaimPosixRetainedEvidence(tombstone, root, {
     quiescentMaintenanceAuthority, reclaimRetainedEvidence,
     runNoReplaceMove, synchronizeDirectory,
   });
+  if (requireReclaimedRetirement && !reclaimed) {
+    throw attachPosixRetirementTombstone(
+      new Error('POSIX session retirement evidence remains retained'), authority,
+    );
+  }
   return true;
 }
 
@@ -4076,6 +4086,7 @@ export function completePosixSessionRecovery(proof, {
   quiescentMaintenanceAuthority,
   reclaimRetainedEvidence,
   recoveryScope = null,
+  requireReclaimedRetirement = false,
   syncControlRoot = syncDirectory,
 } = {}) {
   const authority = RECOVERY_PROOFS.get(proof);
@@ -4120,9 +4131,12 @@ export function completePosixSessionRecovery(proof, {
       throw attachPosixRetirementTombstone(error, tombstone.authority);
     }
     try {
-      reclaimPosixRetainedEvidence(tombstone.container, authority.controlRoot, {
+      const reclaimed = reclaimPosixRetainedEvidence(tombstone.container, authority.controlRoot, {
         quiescentMaintenanceAuthority, reclaimRetainedEvidence,
       });
+      if (requireReclaimedRetirement && !reclaimed) {
+        throw new Error('POSIX session recovery retirement evidence remains retained');
+      }
     } catch (error) {
       throw attachPosixRetirementTombstone(error, tombstone.authority);
     }
