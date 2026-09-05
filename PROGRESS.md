@@ -273,7 +273,8 @@ Premium; внутренний Base может сохраниться тольк�
 | 13 | Причина отказа и завершённость операции при host-lock timeout | done; CI124 original 100ms cases passed unchanged |
 | 14 | Измерить медленный установленный helper перед откатом | measured; real inherited-chain profile passed twice, CI cause unproved |
 | 15 | Наблюдать проблемный Linux-сценарий отдельно от полного CI | done; native isolated run reproduces the same rollback timeout, cause unproved |
-| 16 | Сравнить короткую проверку служебных команд локально и на GitHub | implemented; corrected reviews0/0, local17/17 diagnostics passed; native timing pending |
+| 16 | Сравнить короткую проверку служебных команд локально и на GitHub | done; native component5/5 and observer12/12 passed, original rollback timeout reproduced; no deploy clearance |
+| 17 | Укоротить воспроизведение задержки отката | done; prepared fixture verified, local environment refused before original bug; focused Linux6/6, reviews0/0; native attempt still needed |
 
 Локальный итог ремонта: 3218 tests, 3119 passed, 99 штатных skips, 0 failed; lint/check и
 secret/history scans зелёные. Отдельно на Linux: recovery/standalone 224/224, cutover 3/3,

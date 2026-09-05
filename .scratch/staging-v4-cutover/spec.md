@@ -372,3 +372,48 @@ Independent reviews and fresh common checks precede publication; root owns full 
 
 No production repair, changed deadline/assertion, dependency installation, new remote service,
 canonical workflow change, live host action, mutable recovery data or machine-wide tracing.
+
+## Rollback-only feedback-loop minimisation — native diagnostic2
+
+### Problem Statement
+
+Two isolated native runs reproduce the original rollback/tree120-second timeout, but each first
+spends305–325seconds completing a successful fixture deployment. The native component matrix
+is green and around1.5times slower than local; it cannot establish the cause of the full timeout.
+We need a smaller real rollback invocation before choosing or implementing a production change.
+
+### Solution and User Stories
+
+1. As the owner, I want diagnosis to reach the failing rollback directly, without repeating the
+   already successful deployment setup whenever that setup is not load-bearing.
+2. As the maintainer, I want the prepared synthetic state checked against the original scenario's
+   post-deploy contract, so a shortcut cannot manufacture an unrelated missing-state failure.
+3. As the owner, I want existing security guards, tests, server state and deployment permissions
+   unchanged; an unsuccessful minimisation must be recorded honestly rather than called a fix.
+
+### Implementation Decisions
+
+- Build one fixed local diagnostic attempt using existing hermetic release/installer/fake-Docker
+  fixture seams and the actual installed rollback launcher, without changing production modules.
+- Prepare only synthetic state equivalent to the successful first deployment: active candidate
+  tree/marker, both canonical retained archives and sidecars, image/container/release fixture state,
+  protected metadata and generation binding. Prove the equivalence requirements explicitly.
+- Retain the original tree-barrier expectation and120000ms bound. Record timing and verdict
+  separately from later process settlement. Do not increase deadlines, accept PID0, fake authority,
+  disable hashing, patch scripts or seed any live application directory.
+- All writes and cleanup belong to a new private disposable fixture. Preserve exact child failure
+  and evidence on uncertain settlement. Accept no arbitrary command or production path input.
+- Native publication remains a separate root decision after the attempt and independent reviews.
+  The diagnostic workflow, sampler and canonical CI stay unchanged for this local attempt.
+
+### Testing Decisions
+
+Run fixed fixture/equivalence contracts and the finite local cached-Linux attempt, without repeating
+the known full Docker Desktop exited-flock PID0 failure. Distinguish a real matching timeout from
+environment refusal, setup error, green barrier, and incomplete cleanup. If the setup cannot be
+removed safely, deliver the concrete evidence and retain the existing native reproduction.
+
+### Out of Scope
+
+No production optimisation or architectural rewrite, weakened test, new workflow push, live host
+work, dependency download, generic profiler, whole-machine process control or readiness claim.

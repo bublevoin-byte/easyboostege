@@ -199,3 +199,34 @@ This repair changes only the chain worker, its existing focused test, README and
 the original six-file ownership. The main baseline and workflow hashes stay unchanged. The current
 freeze table above supersedes the first chain/test/README hashes. No commit, push, native run, full
 suite rerun or originalCI125 interruption was performed; root retains re-review/publication authority.
+
+## Root publication and native result — 2026-09-05
+
+Published in abd0e89d6f28ccd9d07639a8e5aea2def5b0defb after corrected independent reviews0/0,
+fresh root Windows37tests/33pass/4Linuxskip and cached Linux17/17pass, lint/check/secret checks
+and history386commits PASS. Existing product/test/canonical CI inputs remained byte-identical.
+
+Native run33953216370/job101271719934 used Node22.23.2 on Ubuntu24.04.4, runner image
+20260831.293.1. Component contracts5/5passed13845.011493ms (matrix13661.230504ms), then the
+direct20-row matrix passed with fixture_removed1. Observer contracts12/12passed1047.885835ms.
+
+| Fixed operation | Local cached Linux ms | Native GitHub ms |
+|---|---:|---:|
+| Fixture installation | 460.74 | 533.65 |
+| One real supervised true | 403.61 | 584.27 |
+| Four sequential true calls | 1301.62 | 1949.53 |
+| One additional inherited Node | 672.48 | 1034.21 |
+| Two additional inherited Nodes | 963.68 | 1493.59 |
+| Common helper-bundle verification | 1618.84 | 2548.88 |
+| Common Compose validation | 1326.32 | 2054.94 |
+
+Descriptor invocation native173.35–254.08ms versus local130.39–136.32ms; chain125.99–127.78ms
+versus68.48–69.54ms. The early25s workflow step includes the contract matrix AND the direct matrix,
+not one25s command. Nested measurements overlap and are not additive. This is one native paired
+measurement on that runner class, not a hardware-normalised CPU diagnosis.
+
+The unchanged full scenario subsequently FAILED448039.482152ms: rollback tree absent at120023ms,
+config-json-complete/up-count missing/stdout+stderr empty. Deploy build106021ms, successful exit
+325392ms. Entire diagnostic job failed8m3s; the original failure status was preserved. This confirms
+component measurement works, not that the deployment issue is fixed. Root retained the full exact
+failure in ci-repair-checkpoint.md and started ticket17 feedback-loop minimisation. No live deployment.
